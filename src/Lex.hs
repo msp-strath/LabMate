@@ -11,13 +11,14 @@ import qualified Data.Text as T
 import qualified Data.Map as M
 
 import Bwd
+import Hide
 
 data Kin
   = Nom
   | Key
   | Blk
   | Sym
-  | Grp Grouping [Tok]
+  | Grp Grouping (Hide [Tok])
   | Spc
   | Dig
   | Ret
@@ -30,10 +31,18 @@ data Tok = Tok
   , raw :: String
   } deriving Show
 
-data Grouping = Literal | Comment | Block | Bracket Bracket | Error
+data Grouping = Literal
+              | Comment
+              | Block
+              | Bracket Bracket
+              | Line LineTerminator
+              | Error
   deriving (Show, Eq)
 
 data Bracket = Round | Square | Curly
+  deriving (Show, Eq)
+
+data LineTerminator = RET | Semicolon 
   deriving (Show, Eq)
 
 type Pos = (Int, Int) -- line, column with 0 origin
@@ -44,7 +53,7 @@ instance Eq Tok where
 type Doc = (T.Text, Pos)
 
 lexer :: T.Text -> [Tok]
-lexer = lex3 . lex2 . lex1 . lex0
+lexer = lex4 . lex3 . lex2 . lex1 . lex0
 
 -- basic lexing 
 lex0 :: T.Text -> [Tok]
@@ -70,27 +79,34 @@ lex0 t = unfoldr tok (t, (0, 0)) where
         | otherwise -> return (Tok Urk p [c], d)
 
 
--- grouping character literals (surrounded by `'`), end of line comments (`%`)
--- and multiline comments (`%{` and `%}`)
+-- grouping character literals (surrounded by `'`), end of line comments (`%`),
+-- ellipsis comments (...) and multiline comments (`%{` and `%}`)
 lex1 :: [Tok] -> [Tok]
 lex1 = normal where
   normal [] = []
   normal (t:ts)
     | t == squote = charlit (B0 :< t) ts
     | t == percent = lcomment (B0 :< t) ts
+    | t == ellipsis = ecomment (B0 :< t) ts
     | t == percentopenbrace = mlcomment (B0 :< (B0 :< t)) ts
     | otherwise = t : normal ts
 
-  charlit acc [] = [grp Error acc]
+  charlit acc [] = grpCons Error acc []
   charlit acc (t:ts)
-    | t == squote = grp Literal (acc :< t) : normal ts
-    | kin t == Ret = grp Error acc : normal (t:ts)
+    | t == squote = grpCons Literal (acc :< t) $ normal ts
+    | kin t == Ret = grpCons Error acc $ normal (t:ts)
     | otherwise = charlit (acc :< t) ts
 
-  lcomment acc [] = [grp Comment acc]
+  lcomment acc [] = grpCons Comment acc []
   lcomment acc (t:ts)
-    | kin t == Ret = grp Comment acc : normal (t:ts)
+    | kin t == Ret = grpCons Comment acc $ normal (t:ts)
     | otherwise = lcomment (acc :< t) ts
+
+  -- ellipsis comments include the line break in the comment
+  ecomment acc [] = grpCons Comment acc []
+  ecomment acc (t:ts)
+    | kin t == Ret = grpCons Comment (acc :< t) $ normal ts
+    | otherwise = ecomment (acc :< t) ts
 
   mlcomment B0 _ = error "stack should never be empty"
   mlcomment (az :< a) [] = let c0 = grp Error a in
@@ -107,6 +123,7 @@ lex1 = normal where
 
   squote = Tok Sym (0,0) "'"
   percent = Tok Sym (0,0) "%"
+  ellipsis = Tok Sym (0,0) "..."
   percentopenbrace = Tok Sym (0,0) "%{"
   percentclosbrace = Tok Sym (0,0) "%}"
 
@@ -114,12 +131,12 @@ lex1 = normal where
 lex2 :: [Tok] -> [Tok]
 lex2 = helper B0 where
   helper B0 [] = []
-  helper (az :< a) [] = helper az [grp Block a]
+  helper (az :< a) [] = helper az $ grpCons Block a []
   helper az (t : ts)
     | kin t == Blk  = helper (az :< (B0 :< t)) ts
     | t == end = case az of
-        az :< a -> helper az $ grp Block (a :< t) : ts
-        B0 -> helper B0 $ grp Error (B0 :< t) : ts
+        az :< a -> helper az $ grpCons Block (a :< t) ts
+        B0 -> helper B0 $ grpCons Error (B0 :< t)  ts
   helper B0 (t : ts) = t : helper B0 ts
   helper (az :< a) (t : ts) = helper (az :< (a :< t)) ts
 
@@ -129,19 +146,45 @@ lex2 = helper B0 where
 lex3 :: [Tok] -> [Tok]
 lex3 = helper B0 where
   helper B0 [] = []
-  helper (az :< (_, a)) [] = helper az [grp Error a]
+  helper (az :< (_, a)) [] = helper az $ grpCons Error a []
   helper az (t : ts)
     | Just b <- opener t = helper (az :< (b, B0 :< t)) ts
   helper (az :< (b, a)) (t : ts)
-    | t == closer b = helper az $ grp (Bracket b) (a :< t) : ts
+    | t == closer b = helper az $ grpCons (Bracket b) (a :< t) ts
     | otherwise = helper (az :< (b, a :< t)) ts
-  helper B0 (Tok (Grp Block ss) p s : ts) = Tok (Grp Block $ lex3 ss) p s : helper B0 ts
+  helper B0 (Tok (Grp Block ss) p s : ts) =
+    Tok (Grp Block $ Hide $ lex3 $ unhide ss) p s : helper B0 ts
   helper B0 (t : ts)  = t : helper B0 ts
+
+-- finds and groups lines
+lex4 :: [Tok] -> [Tok]
+lex4 = helper B0 where
+  helper acc [] = grpCons (Line RET) acc []
+  helper acc (Tok (Grp k ss) p s : ts)
+    | k `elem` [Block, Bracket Square] =
+      helper (acc :< Tok (Grp Block $ Hide $ lex4 $ unhide ss) p s) ts
+  helper acc (t : ts)
+    | kin t == Ret = ending (acc :< t) RET B0 ts
+    | t == semicolon = ending (acc :< t) Semicolon B0 ts
+    | otherwise = helper (acc :< t) ts
+    
+  ending :: Bwd Tok -> LineTerminator -> Bwd Tok -> [Tok] -> [Tok]
+  ending acc e wh (t : ts)
+    | kin t == Ret = ending (acc <> wh :< t) e B0 ts
+    | t == semicolon = ending (acc <> wh :< t) Semicolon B0 ts
+    | kin t `elem` [Spc, Grp Comment (Hide [])] = ending acc e (wh :< t) ts
+  ending acc e wh ts = grpCons (Line e) acc $ lex4 (wh <>> ts) 
+
+  semicolon = Tok Sym (0,0) ";"       
 
 grp :: Grouping -> Bwd Tok -> Tok
 grp g tz = case tz <>> [] of
-  ts@(t:_) -> Tok (Grp g ts) (pos t) (ts >>= raw)
+  ts@(t:_) -> Tok (Grp g $ Hide ts) (pos t) (ts >>= raw)
   [] -> error "should not make empty group"
+
+grpCons :: Grouping -> Bwd Tok -> [Tok] -> [Tok]
+grpCons g B0 ts = ts
+grpCons g tz ts = grp g tz : ts
 
 unix :: T.Text -> T.Text
 unix t = case T.uncons t of
