@@ -26,10 +26,10 @@ data Kin
   deriving (Show, Eq)
 
 data Tok = Tok
-  { kin :: Kin
-  , pos :: Pos
-  , raw :: String
-  } deriving Show
+  { raw :: String
+  , kin :: Kin
+  , pos :: Hide Pos
+  } deriving (Show, Eq)
 
 data Grouping = Literal
               | Comment
@@ -47,8 +47,11 @@ data LineTerminator = RET | Semicolon
 
 type Pos = (Int, Int) -- line, column with 0 origin
 
-instance Eq Tok where
-  s == t = kin s == kin t && raw s == raw t
+dump :: Hide Pos
+dump = Hide (0,0)
+
+sym :: String -> Tok
+sym s = Tok s Sym dump
 
 type Doc = (T.Text, Pos)
 
@@ -60,7 +63,7 @@ lex0 :: T.Text -> [Tok]
 lex0 t = unfoldr tok (t, (0, 0)) where
   tok :: Doc -> Maybe (Tok, Doc)
   tok d@(_, p) = case munch d symbols of
-    Just (s, d) -> return (Tok Sym p s, d)
+    Just (s, d) -> return (Tok s Sym (Hide p), d)
     Nothing -> peek d >>= \case
       (c, d)
         | isAlpha c ->
@@ -70,13 +73,13 @@ lex0 t = unfoldr tok (t, (0, 0)) where
                 Just False -> Key
                 Just True  -> Blk
                 _          -> Nom
-          in  return (Tok k p x, d')
-        | isNL c -> return (Tok Ret p [c], d)
+          in  return (Tok x k (Hide p), d')
+        | isNL c -> return (Tok [c] Ret (Hide p), d)
         | isSpace c -> let (s, d') = spand (\ c -> isSpace c && not (isNL c)) d in
-            return (Tok Spc p (c : s), d')
+            return (Tok (c : s)  Spc (Hide p), d')
         | isDigit c -> let (s, d') = spand isDigit d in
-            return (Tok Dig p (c : s), d')
-        | otherwise -> return (Tok Urk p [c], d)
+            return (Tok (c : s) Dig (Hide p), d')
+        | otherwise -> return (Tok [c] Urk (Hide p), d)
 
 
 -- grouping character literals (surrounded by `'`), end of line comments (`%`),
@@ -121,11 +124,11 @@ lex1 = normal where
           az :< a -> mlcomment (az :< (a :< c0)) ts
     | otherwise = mlcomment (az :< (a :< t)) ts
 
-  squote = Tok Sym (0,0) "'"
-  percent = Tok Sym (0,0) "%"
-  ellipsis = Tok Sym (0,0) "..."
-  percentopenbrace = Tok Sym (0,0) "%{"
-  percentclosbrace = Tok Sym (0,0) "%}"
+  squote = sym "'" 
+  percent = sym "%"
+  ellipsis = sym "..." 
+  percentopenbrace = sym "%{"
+  percentclosbrace = sym "%}"
 
 -- finds blocks delimited by a Blk keyword and `end`
 lex2 :: [Tok] -> [Tok]
@@ -140,7 +143,7 @@ lex2 = helper B0 where
   helper B0 (t : ts) = t : helper B0 ts
   helper (az :< a) (t : ts) = helper (az :< (a :< t)) ts
 
-  end = Tok Key (0,0) "end"
+  end = Tok "end" Key dump
 
 -- finds brackets inside blocks but not vice versa
 lex3 :: [Tok] -> [Tok]
@@ -152,17 +155,17 @@ lex3 = helper B0 where
   helper (az :< (b, a)) (t : ts)
     | t == closer b = helper az $ grpCons (Bracket b) (a :< t) ts
     | otherwise = helper (az :< (b, a :< t)) ts
-  helper B0 (Tok (Grp Block ss) p s : ts) =
-    Tok (Grp Block $ Hide $ lex3 $ unhide ss) p s : helper B0 ts
+  helper B0 (Tok s (Grp Block ss) p : ts) =
+    Tok s (Grp Block $ Hide $ lex3 $ unhide ss) p : helper B0 ts
   helper B0 (t : ts)  = t : helper B0 ts
 
 -- finds and groups lines
 lex4 :: [Tok] -> [Tok]
 lex4 = helper B0 where
   helper acc [] = grpCons (Line RET) acc []
-  helper acc (Tok (Grp k ss) p s : ts)
+  helper acc (Tok s (Grp k ss) p : ts)
     | k `elem` [Block, Bracket Square] =
-      helper (acc :< Tok (Grp Block $ Hide $ lex4 $ unhide ss) p s) ts
+      helper (acc :< Tok s (Grp Block $ Hide $ lex4 $ unhide ss) p) ts
   helper acc (t : ts)
     | kin t == Ret = ending (acc :< t) RET B0 ts
     | t == semicolon = ending (acc :< t) Semicolon B0 ts
@@ -175,11 +178,11 @@ lex4 = helper B0 where
     | kin t `elem` [Spc, Grp Comment (Hide [])] = ending acc e (wh :< t) ts
   ending acc e wh ts = grpCons (Line e) acc $ lex4 (wh <>> ts) 
 
-  semicolon = Tok Sym (0,0) ";"       
+  semicolon = sym ";"       
 
 grp :: Grouping -> Bwd Tok -> Tok
 grp g tz = case tz <>> [] of
-  ts@(t:_) -> Tok (Grp g $ Hide ts) (pos t) (ts >>= raw)
+  ts@(t:_) -> Tok (ts >>= raw) (Grp g $ Hide ts) (pos t)
   [] -> error "should not make empty group"
 
 grpCons :: Grouping -> Bwd Tok -> [Tok] -> [Tok]
@@ -252,10 +255,10 @@ symbols = foldr insT empT
 
 
 opener :: Tok -> Maybe Bracket
-opener = flip lookup $ map (Tok Sym (0,0) *** id) [("(", Round), ("[", Square), ("{", Curly)]
+opener = flip lookup $ map (sym *** id) [("(", Round), ("[", Square), ("{", Curly)]
 
 closer :: Bracket -> Tok
-closer b = Tok Sym (0,0) $ case b of
+closer b = sym $ case b of
    Round  -> ")"
    Square -> "]"
    Curly  -> "}"
