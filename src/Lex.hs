@@ -45,6 +45,10 @@ data Bracket = Round | Square | Curly
 data LineTerminator = RET | Semicolon 
   deriving (Show, Eq)
 
+data CommentType =
+  InputComment | OutputComment | NormalComment
+  deriving (Show, Eq)
+
 type Pos = (Int, Int) -- line, column with 0 origin
 
 dump :: Hide Pos
@@ -236,6 +240,14 @@ keywords :: M.Map String Bool -- whether the keyword begins a block ending with 
 keywords = M.fromList (map (, True) ["if", "function", "for", "while", "switch"])
          <> M.fromList (map (, False) ["else", "elseif", "case", "otherwise", "end"])
 
+{-
+%>  directive
+%<  response
+%<{
+    generated code
+%<}
+-}
+
 symbols :: Table
 symbols = foldr insT empT
   [ "+", "-", ".*", "*", "./", "/", ".\\", "\\", ".^", "^", ".'", "'"
@@ -246,7 +258,7 @@ symbols = foldr insT empT
   , "..."
   , "%", "%{", "%}"
   , ":"
-  ,"!", "?"
+  , "!", "?"
   , "\"", "''", "\"\""
   , "="
   , ".?"
