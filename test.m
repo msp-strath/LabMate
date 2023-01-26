@@ -9,3 +9,13 @@ for i = (1:3)
        % while we are at it
        4 5]
 end
+
+%> x : mm
+%> type x
+%< x : mm
+
+%> z : cm
+%> z = x + 5cm;
+%<{
+z = x/10 + 5;
+%<}

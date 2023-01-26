@@ -33,6 +33,9 @@ data Tok = Tok
 
 data Grouping = Literal
               | Comment
+              | Directive
+              | Response
+              | Generated
               | Block
               | Bracket Bracket
               | Line LineTerminator
@@ -43,10 +46,6 @@ data Bracket = Round | Square | Curly
   deriving (Show, Eq)
 
 data LineTerminator = RET | Semicolon 
-  deriving (Show, Eq)
-
-data CommentType =
-  InputComment | OutputComment | NormalComment
   deriving (Show, Eq)
 
 type Pos = (Int, Int) -- line, column with 0 origin
@@ -62,7 +61,7 @@ type Doc = (T.Text, Pos)
 lexer :: T.Text -> [Tok]
 lexer = lex4 . lex3 . lex2 . lex1 . lex0
 
--- basic lexing 
+-- basic lexing
 lex0 :: T.Text -> [Tok]
 lex0 t = unfoldr tok (t, (0, 0)) where
   tok :: Doc -> Maybe (Tok, Doc)
@@ -89,50 +88,79 @@ lex0 t = unfoldr tok (t, (0, 0)) where
 -- grouping character literals (surrounded by `'`), end of line comments (`%`),
 -- ellipsis comments (...) and multiline comments (`%{` and `%}`)
 lex1 :: [Tok] -> [Tok]
-lex1 = normal where
-  normal [] = []
-  normal (t:ts)
-    | t == squote = charlit (B0 :< t) ts
-    | t == percent = lcomment (B0 :< t) ts
-    | t == ellipsis = ecomment (B0 :< t) ts
-    | t == percentopenbrace = mlcomment (B0 :< (B0 :< t)) ts
-    | otherwise = t : normal ts
+lex1 = normal False where
+  normal :: Bool -- have we seen any non-space characters on the current line?
+         -> [Tok] -> [Tok]
+  normal _ [] = []
+  normal nsp (t:ts)
+    | t == sym "%{" && not nsp && blankToEOL ts
+      = mlcomment True (B0 :< (B0 :< t)) ts
+    | t == sym "'" = charlit (B0 :< t) ts
+    | t `elem` [sym "%", sym "%{", sym "%}"]
+      = lcomment (typeOfComment ts) (B0 :< t) ts
+    | t == sym "..." = ecomment (B0 :< t) ts
+    | t == sym "%<{" && not nsp
+      = generatedCode False (B0 :< t) ts
+    | otherwise    = t : normal (updateNSP nsp t)  ts
 
   charlit acc [] = grpCons Error acc []
   charlit acc (t:ts)
-    | t == squote = grpCons Literal (acc :< t) $ normal ts
-    | kin t == Ret = grpCons Error acc $ normal (t:ts)
+    | t == sym "'" = grpCons Literal (acc :< t) $ normal True ts
+    | kin t == Ret = grpCons Error acc $ normal True (t:ts)
     | otherwise = charlit (acc :< t) ts
 
-  lcomment acc [] = grpCons Comment acc []
-  lcomment acc (t:ts)
-    | kin t == Ret = grpCons Comment acc $ normal (t:ts)
-    | otherwise = lcomment (acc :< t) ts
+  lcomment grp acc [] = grpCons grp acc []
+  lcomment grp acc (t:ts)
+    | kin t == Ret = grpCons grp acc $ normal True (t:ts)
+    | otherwise = lcomment grp (acc :< t) ts
 
   -- ellipsis comments include the line break in the comment
   ecomment acc [] = grpCons Comment acc []
   ecomment acc (t:ts)
-    | kin t == Ret = grpCons Comment (acc :< t) $ normal ts
+    | kin t == Ret = grpCons Comment (acc :< t) $ normal False ts
     | otherwise = ecomment (acc :< t) ts
 
-  mlcomment B0 _ = error "stack should never be empty"
-  mlcomment (az :< a) [] = let c0 = grp Error a in
+  mlcomment _ B0 _ = error "stack should never be empty"
+  mlcomment nsp (az :< a) [] = let c0 = grp Error a in
     case az of
       B0 -> [c0]
-      az :< a -> mlcomment (az :< (a :< c0)) []
-  mlcomment acc@(az :< a) (t:ts)
-    | t == percentopenbrace = mlcomment (acc :< (B0 :< t)) ts
-    | t == percentclosbrace = let c0 = grp Comment (a :< t) in
+      az :< a -> mlcomment nsp (az :< (a :< c0)) []
+  mlcomment nsp acc@(az :< a) (t:ts)
+    | t == sym "%{" && not nsp && blankToEOL ts
+      = mlcomment True (acc :< (B0 :< t)) ts
+    | t == sym "%}" && not nsp && blankToEOL ts
+      = let c0 = grp Comment (a :< t) in
         case az of
-          B0 -> c0 : normal ts
-          az :< a -> mlcomment (az :< (a :< c0)) ts
-    | otherwise = mlcomment (az :< (a :< t)) ts
+          B0 -> c0 : normal False ts
+          az :< a -> mlcomment True (az :< (a :< c0)) ts
+    | otherwise    = mlcomment (updateNSP nsp t) (az :< (a :< t)) ts
 
-  squote = sym "'" 
-  percent = sym "%"
-  ellipsis = sym "..." 
-  percentopenbrace = sym "%{"
-  percentclosbrace = sym "%}"
+  generatedCode :: Bool -- have we seen the closing delimiter yet?
+                -> Bwd Tok -- accumulator
+                -> [Tok] -> [Tok]
+  generatedCode _ acc [] = grpCons Generated acc []
+  generatedCode b acc (t:ts)
+    | t == sym "%<}" && not b = generatedCode True (acc :< t) ts
+    | kin t == Ret && b =  grpCons Generated (acc :< t) (normal True ts)
+    | otherwise = generatedCode b (acc :< t) ts
+
+  blankToEOL :: [Tok] -> Bool
+  blankToEOL [] = True
+  blankToEOL (t:ts)
+    | kin t == Ret = True
+    | kin t == Spc = blankToEOL ts
+    | otherwise = False
+
+  updateNSP :: Bool -> Tok -> Bool
+  updateNSP nsp t
+    | kin t == Spc = nsp
+    | kin t == Ret = False
+    | otherwise    = True
+
+  typeOfComment :: [Tok] -> Grouping
+  typeOfComment (t:ts) | t == sym ">" = Directive
+  typeOfComment (t:ts) | t == sym "<" = Response
+  typeOfComment _ = Comment
 
 -- finds blocks delimited by a Blk keyword and `end`
 lex2 :: [Tok] -> [Tok]
@@ -257,6 +285,7 @@ symbols = foldr insT empT
   , "."
   , "..."
   , "%", "%{", "%}"
+  , "%<{", "%<}" -- generated code delimiters
   , ":"
   , "!", "?"
   , "\"", "''", "\"\""
