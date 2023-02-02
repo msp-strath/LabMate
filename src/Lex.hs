@@ -45,7 +45,7 @@ data Grouping = Literal
 data Bracket = Round | Square | Curly
   deriving (Show, Eq)
 
-data LineTerminator = RET | Semicolon 
+data LineTerminator = RET | Semicolon
   deriving (Show, Eq)
 
 type Pos = (Int, Int) -- line, column with 0 origin
@@ -177,7 +177,7 @@ lex2 = helper B0 where
 
   end = Tok "end" Key dump
 
--- finds brackets inside blocks but not vice versa
+-- finds brackets inside blocks and directives, but not vice versa
 lex3 :: [Tok] -> [Tok]
 lex3 = helper B0 where
   helper B0 [] = []
@@ -187,8 +187,8 @@ lex3 = helper B0 where
   helper (az :< (b, a)) (t : ts)
     | t == closer b = helper az $ grpCons (Bracket b) (a :< t) ts
     | otherwise = helper (az :< (b, a :< t)) ts
-  helper B0 (Tok s (Grp Block ss) p : ts) =
-    Tok s (Grp Block $ Hide $ lex3 $ unhide ss) p : helper B0 ts
+  helper B0 (Tok s (Grp g ss) p : ts) | g `elem` [Block, Directive] =
+    Tok s (Grp g $ Hide $ lex3 $ unhide ss) p : helper B0 ts
   helper B0 (t : ts)  = t : helper B0 ts
 
 -- finds and groups lines
@@ -202,15 +202,15 @@ lex4 = helper B0 where
     | kin t == Ret = ending (acc :< t) RET B0 ts
     | t == semicolon = ending (acc :< t) Semicolon B0 ts
     | otherwise = helper (acc :< t) ts
-    
+
   ending :: Bwd Tok -> LineTerminator -> Bwd Tok -> [Tok] -> [Tok]
   ending acc e wh (t : ts)
     | kin t == Ret = ending (acc <> wh :< t) e B0 ts
     | t == semicolon = ending (acc <> wh :< t) Semicolon B0 ts
     | kin t `elem` [Spc, Grp Comment (Hide [])] = ending acc e (wh :< t) ts
-  ending acc e wh ts = grpCons (Line e) acc $ lex4 (wh <>> ts) 
+  ending acc e wh ts = grpCons (Line e) acc $ lex4 (wh <>> ts)
 
-  semicolon = sym ";"       
+  semicolon = sym ";"
 
 grp :: Grouping -> Bwd Tok -> Tok
 grp g tz = case tz <>> [] of
