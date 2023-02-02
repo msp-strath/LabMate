@@ -38,6 +38,7 @@ library
                      , Bwd
                      , Hide
                      , Lisp
+                     , Parse
   build-depends:       base <5
                      , containers
                      , text
@@ -60,6 +61,7 @@ executable labrat
                     , Bwd
                     , Hide
                     , Lisp
+                    , Parse
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base
