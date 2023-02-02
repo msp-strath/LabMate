@@ -37,6 +37,7 @@ library
   exposed-modules:     Lex
                      , Bwd
                      , Hide
+                     , Lisp
   build-depends:       base <5
                      , containers
                      , text
@@ -58,9 +59,10 @@ executable labrat
     other-modules:    Lex
                     , Bwd
                     , Hide
+                    , Lisp
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    build-depends:    base 
+    build-depends:    base
                     , LabRat
                     , text
                     , containers

@@ -197,7 +197,7 @@ lex4 = helper B0 where
   helper acc [] = grpCons (Line RET) acc []
   helper acc (Tok s (Grp k ss) p : ts)
     | k `elem` [Block, Bracket Square] =
-      helper (acc :< Tok s (Grp Block $ Hide $ lex4 $ unhide ss) p) ts
+      helper (acc :< Tok s (Grp k $ Hide $ lex4 $ unhide ss) p) ts
   helper acc (t : ts)
     | kin t == Ret = ending (acc :< t) RET B0 ts
     | t == semicolon = ending (acc :< t) Semicolon B0 ts

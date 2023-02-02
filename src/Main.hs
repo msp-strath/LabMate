@@ -4,9 +4,11 @@ import System.Environment
 import qualified Data.Text.IO as T
 
 import Lex
+import Lisp
 
 main :: IO ()
 main = do
   [file] <- getArgs
   d <- T.readFile file
-  putStrLn $ show (lexer $ unix d)
+  let l = tokenStreamToLisp (lexer $ unix d)
+  putStrLn $ show l
