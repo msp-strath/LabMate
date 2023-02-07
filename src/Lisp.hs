@@ -4,25 +4,28 @@ module Lisp where
 import Hide
 import Lex
 
-data Lisp = Cons Lisp Lisp | Nil | Atom Tok
+import BRect
+
+data Lisp = List [Lisp] | Atom Tok
   deriving (Eq)
 
-showCdr :: Lisp -> String
-showCdr Nil = ""
-showCdr (Atom t) = "| " ++ raw t
-showCdr (Cons s t) = " " ++ show s ++ showCdr t
+showCdr :: [Lisp] -> String
+showCdr [] = ""
+showCdr (t:ts) = " " ++ show t ++ showCdr ts
 
 instance Show Lisp where
-  show (Cons s t) = "[" ++ show s ++ showCdr t ++ "]"
-  show Nil = "[]"
+  show (List ts) = "[" ++ showCdr ts ++ "]"
   show (Atom t) = raw t
 
 tokenStreamToLisp :: [Tok] -> Lisp
-tokenStreamToLisp [] = Nil
-tokenStreamToLisp (t:ts)
-  | discard t = tokenStreamToLisp ts
-  | Just ss <- unpack t = Cons (tokenStreamToLisp ss) (tokenStreamToLisp ts)
-  | otherwise = Cons (Atom t) (tokenStreamToLisp ts)
+tokenStreamToLisp = List . tokenStreamToListLisp
+
+tokenStreamToListLisp :: [Tok] -> [Lisp]
+tokenStreamToListLisp [] = []
+tokenStreamToListLisp (t:ts)
+  | discard t = tokenStreamToListLisp ts
+  | Just ss <- unpack t = tokenStreamToLisp ss : tokenStreamToListLisp ts
+  | otherwise = Atom t : tokenStreamToListLisp ts
 
   where
     discard :: Tok -> Bool
@@ -41,3 +44,10 @@ tokenStreamToLisp (t:ts)
                  _ -> Just ts
     unpack _ = Nothing
 
+brectLisp :: Lisp -> BRect
+brectLisp (Atom t) = word (raw t)
+brectLisp (List []) = word ""
+brectLisp (List (t:ts)) = par $ foldl (\ b s -> b `tackOn` brectLisp s) (brectLisp t) ts
+
+pretty :: Int -> Lisp -> String
+pretty k = brect k . brectLisp

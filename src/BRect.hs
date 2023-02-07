@@ -34,11 +34,12 @@ data HVT
   | (BR, HVT) :==: (BR, HVT)
   | P (BR, HVT)
 
-(-!) :: Int -> Int -> Int
-x -! y = max 0 (x - y)
-
 instance Show HVT where
   show = unlines . render
+
+map' :: ((BR, x) -> (BR, y)) -> Narrow x -> Narrow y
+map' f [] = []
+map' f (x:xs) = insertNarrow (f x) (map' f xs)
 
 render :: HVT -> [String]
 render (W x) = [x]
@@ -76,8 +77,8 @@ paren x@(xd, _) =
   )
 
 horiz :: Narrow HVT -> Narrow HVT -> Narrow HVT
-horiz [x] ys = map (x <||>) ys
-horiz xs [y] = map (<||> y) xs
+horiz [x] ys = map' (x <||>) ys
+horiz xs [y] = map' (<||> y) xs
 horiz (x@(xd, _) : xs) (y@(yd, _) : ys) = insertNarrow (x <||> y) $
   case compare (hei xd) (hei yd) of
     LT -> horiz xs (y : ys)
@@ -86,8 +87,8 @@ horiz (x@(xd, _) : xs) (y@(yd, _) : ys) = insertNarrow (x <||> y) $
 horiz _ _ = []
 
 verti :: Narrow HVT -> Narrow HVT -> Narrow HVT
-verti [x] ys = map (x <==>) ys
-verti xs [y] = map (<==> y) xs
+verti [x] ys = map' (x <==>) ys
+verti xs [y] = map' (<==> y) xs
 verti (x@(xd, _) : xs) (y@(yd, _) : ys) = insertNarrow (x <==> y) $
   case compare (wid xd) (wid yd) of
     LT -> verti (x : xs) ys
@@ -99,14 +100,14 @@ data BRect
   = BRect {righty :: Narrow HVT, downy :: Narrow HVT}
   deriving Show
 
-instance Semigroup BRect where
-  x <> y = BRect
-    { righty = horiz (righty x) ys
-    , downy = mergeNarrow
-        (verti (righty x) ys)
-        (verti (downy x) ys)
-    }
-    where ys = mergeNarrow (righty y) (downy y)
+tackOn :: BRect -> BRect -> BRect
+x `tackOn` y = BRect
+  { righty = horiz (righty x) ys
+  , downy = mergeNarrow
+      (verti (righty x) ys)
+      (verti (downy x) ys)
+  }
+  where ys = mergeNarrow (righty y) (downy y)
 
 par :: BRect -> BRect
 par x = BRect
@@ -120,7 +121,7 @@ word x = BRect
   , downy = []
   }
 
-brect :: Int -> BRect -> IO ()
+brect :: Int -> BRect -> String
 brect w x = go (mergeNarrow (righty x) (downy x)) where
-  go [(_,x)] = putStrLn (show x)
-  go (x@(d, t) : xs) = if wid d > w then go xs else putStr (show t)
+  go [(_,x)] = show x
+  go (x@(d, t) : xs) = if wid d > w then go xs else show t

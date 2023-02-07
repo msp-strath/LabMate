@@ -39,6 +39,7 @@ library
                      , Hide
                      , Lisp
                      , Parse
+                     , BRect
   build-depends:       base <5
                      , containers
                      , text
@@ -62,6 +63,7 @@ executable labrat
                     , Hide
                     , Lisp
                     , Parse
+                    , BRect
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base

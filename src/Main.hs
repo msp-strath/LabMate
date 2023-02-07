@@ -11,4 +11,4 @@ main = do
   [file] <- getArgs
   d <- T.readFile file
   let l = tokenStreamToLisp (lexer $ unix d)
-  putStrLn $ show l
+  putStrLn $ pretty 79 l
