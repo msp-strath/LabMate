@@ -1,6 +1,8 @@
 module Main where
 
 import System.Environment
+import System.Console.Terminal.Size (size, width)
+
 import qualified Data.Text.IO as T
 
 import Lex
@@ -11,4 +13,6 @@ main = do
   [file] <- getArgs
   d <- T.readFile file
   let l = tokenStreamToLisp (lexer $ unix d)
-  putStrLn $ pretty 79 l
+  termSize <- size
+  let w = maybe 80 width termSize
+  putStrLn $ pretty w l
