@@ -4,6 +4,8 @@ module Parse where
 import Control.Monad
 import Control.Applicative
 
+import Data.Text as T
+
 import Bwd
 import Hide
 import Lex
@@ -54,12 +56,27 @@ peoi = Parser $ \ ts -> case ts of
   [] -> [(B0, (), [])]
   _  -> []
 
+ppeek :: Parser [Tok]
+ppeek = Parser $ \ ts -> [(B0, ts, ts)]
+
 pgrp :: (Grouping -> Bool) -> Parser a -> Parser a
 pgrp f p = Parser $ \ ts -> case ts of
   t:ts | Grp g (Hide ss) <- kin t, f g -> do
            (_, a, []) <- parser p ss
            pure (B0 :< t, a, ts)
   _ -> []
+
+pline :: Parser a -> Parser a
+pline p = pgrp isLine (p <* many (ptok junk))
+  where
+    isLine (Line _) = True
+    isLine _ = False
+    junk t = case kin t of
+      Spc -> Just ()
+      Ret -> Just ()
+      Grp Comment _ -> Just ()
+      Sym | raw t == ";" -> Just ()
+      _ -> Nothing
 
 pspc :: Parser ()
 pspc = ptok (\ t -> guard (kin t == Spc))
@@ -73,7 +90,28 @@ pospc = pspc <|> pure ()
 -- The string s must be in the lexer symbol table
 -- Leading and trailing space is consumed => do not use on its own!
 punc :: String -> Parser ()
-punc s = pospc <* ptok (\ t -> guard (t == sym s)) <* pospc
+punc s = pospc <* psym s <* pospc
+
+psep1 :: Parser () -> Parser a -> Parser [a]
+psep1 sep p = (:) <$> p <*> many (id <$ sep <*> p)
+
+psep0 :: Parser () -> Parser a -> Parser [a]
+psep0 sep p = psep1 sep p <|> pure []
+
+psym :: String -> Parser ()
+psym s = ptok (\ t -> guard (t == sym s))
 
 pnom :: Parser String
 pnom = ptok $ \ t -> if kin t == Nom then Just (raw t) else Nothing
+
+pcond :: Parser a -> (a -> Parser b) -> Parser b -> Parser b
+pcond pc ps pf = Parser $ \ ts -> case parser pc ts of
+  [] -> parser pf ts
+  xs -> do
+    (tz, a, ts) <- xs
+    (tz', b, ts) <- parser (ps a) ts
+    pure (tz <> tz', b, ts)
+
+testparser :: String -> Parser a -> [a]
+testparser s p = fmap (\ (a,b,c) -> b) $ parser p (lexer (T.pack s))
+

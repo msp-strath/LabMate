@@ -183,9 +183,9 @@ lex3 = helper B0 where
   helper B0 [] = []
   helper (az :< (_, a)) [] = helper az $ grpCons Error a []
   helper az (t : ts)
-    | Just b <- opener t = helper (az :< (b, B0 :< t)) ts
+    | Just b <- opener t = helper (az :< (b, B0)) ts
   helper (az :< (b, a)) (t : ts)
-    | t == closer b = helper az $ grpCons (Bracket b) (a :< t) ts
+    | t == closer b = helper az $ grpCons (Bracket b) a ts
     | otherwise = helper (az :< (b, a :< t)) ts
   helper B0 (Tok s (Grp g ss) p : ts) | g `elem` [Block, Directive] =
     Tok s (Grp g $ Hide $ lex3 $ unhide ss) p : helper B0 ts
