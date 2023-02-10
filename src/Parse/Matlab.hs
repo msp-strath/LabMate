@@ -70,7 +70,12 @@ pexpr :: ContextInfo -> Parser Expr
 pexpr ci = go >>= more ci where
   go = id <$> pgrp (== Bracket Round) (id <$ pospc <*> pexpr topCI <* pospc)
    <|> UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel})
-   <|> Var <$> pnom
+   <|> (pnom >>= \ n ->
+         pcond
+           (App n <$ (if matrixMode ci then pure () else pospc)
+             <*> pgrp (== Bracket Round) (psep0 (punc ",") (pexpr topCI)))
+           pure
+           (pure (Var n)))
    <|> IntLiteral <$> pint
    <|> Matrix <$> pgrp (== Bracket Square) (many prow)
 {-  <|> StringLiteral <$> pstringlit
