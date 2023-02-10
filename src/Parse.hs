@@ -98,8 +98,11 @@ psep1 sep p = (:) <$> p <*> many (id <$ sep <*> p)
 psep0 :: Parser () -> Parser a -> Parser [a]
 psep0 sep p = psep1 sep p <|> pure []
 
+pkin :: Kin -> String -> Parser ()
+pkin k s = ptok $ \ t -> guard $ Tok {kin = k, raw = s, pos = Hide (0,0)} == t
+
 psym :: String -> Parser ()
-psym s = ptok (\ t -> guard (t == sym s))
+psym = pkin Sym
 
 pnom :: Parser String
 pnom = ptok $ \ t -> if kin t == Nom then Just (raw t) else Nothing

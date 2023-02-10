@@ -2,6 +2,7 @@ module Syntax where
 
 data Command
   = Assign LHS Expr
+  | If [(Expr, [Command])] (Maybe [Command])
   deriving (Show)
 
 data Expr

@@ -15,7 +15,18 @@ import Parse
 import Lisp
 
 pcommand :: Parser Command
-pcommand = Assign <$> plhs <* punc "=" <*> pexpr topCI
+pcommand
+  = (id <$ pospc <*>) $
+      Assign <$> plhs <* punc "=" <*> pexpr topCI
+  <|> id <$> pgrp (== Block) (If <$> pif True <*> pelse <* pline (pkin Key "end"))
+  where
+    pif b = (:)
+      <$> ((,) <$> pline (id <$ (if b then pkin Blk "if" else pkin Key "elseif")
+                           <* pospc <*> pexpr topCI)
+               <*> many (pline pcommand))
+      <*> (pif False <|> pure [])
+    pelse = pure Nothing
+        <|> Just <$ pline (pkin Key "else") <*> many (pline pcommand)
 
 plhs :: Parser LHS
 plhs = (LVar <$> pnom) >>= more where

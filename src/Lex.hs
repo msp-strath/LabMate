@@ -22,6 +22,7 @@ data Kin
   | Spc
   | Dig
   | Ret
+  | Nop
   | Urk
   deriving (Show, Eq)
 
@@ -183,9 +184,9 @@ lex3 = helper B0 where
   helper B0 [] = []
   helper (az :< (_, a)) [] = helper az $ grpCons Error a []
   helper az (t : ts)
-    | Just b <- opener t = helper (az :< (b, B0)) ts
+    | Just b <- opener t = helper (az :< (b, B0 :< t {kin = Nop})) ts
   helper (az :< (b, a)) (t : ts)
-    | t == closer b = helper az $ grpCons (Bracket b) a ts
+    | t == closer b = helper az $ grpCons (Bracket b) (a :< t {kin = Nop}) ts
     | otherwise = helper (az :< (b, a :< t)) ts
   helper B0 (Tok s (Grp g ss) p : ts) | g `elem` [Block, Directive] =
     Tok s (Grp g $ Hide $ lex3 $ unhide ss) p : helper B0 ts
@@ -214,7 +215,8 @@ lex4 = helper B0 where
 
 grp :: Grouping -> Bwd Tok -> Tok
 grp g tz = case tz <>> [] of
-  ts@(t:_) -> Tok (ts >>= raw) (Grp g $ Hide ts) (pos t)
+  ts@(t:_) -> Tok (ts >>= raw)
+    (Grp g $ Hide (filter ((Nop /=) . kin) ts)) (pos t)
   [] -> error "should not make empty group"
 
 grpCons :: Grouping -> Bwd Tok -> [Tok] -> [Tok]
