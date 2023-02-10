@@ -19,7 +19,7 @@ pcommand
   = (id <$ pospc <*>) $
       Assign <$> plhs <* punc "=" <*> pexpr topCI
   <|> id <$> pgrp (== Block)
-      (    If <$> pif True <*> pelse <* pend
+      (    If <$> pif True{-looking for if-} <*> pelse <* pend
        <|> For <$> pline ((,) <$ pkin Blk "for" <* pospc
                              <*> pnom <* punc "="
                              <*> pexpr topCI)
@@ -36,7 +36,7 @@ pcommand
       <$> ((,) <$> pline (id <$ (if b then pkin Blk "if" else pkin Key "elseif")
                            <* pospc <*> pexpr topCI)
                <*> many (pline pcommand))
-      <*> (pif False <|> pure [])
+      <*> (pif False{-looking for elseif, from now on-} <|> pure [])
     pelse = pure Nothing
         <|> Just <$ pline (pkin Key "else") <*> many (pline pcommand)
     pend = pline (() <$ pospc <* pkin Key "end")
@@ -65,6 +65,7 @@ matrixCI = topCI { matrixMode = True }
 
 ororLevel, andandLevel, orLevel, andLevel, compLevel, colonLevel,
   plusLevel, timesLevel, unaryLevel, supLevel :: Int
+-- the higher the level, the tighter the operator
 supLevel = 110
 unaryLevel = 90
 timesLevel = 80
@@ -98,6 +99,7 @@ pexpr :: ContextInfo -> Parser Expr
 pexpr ci = go >>= more ci where
   go = id <$> pgrp (== Bracket Round) (id <$ pospc <*> pexpr topCI <* pospc)
    <|> UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel})
+       -- should UnaryOp check precedence level?
    <|> (pnom >>= \ n ->
          pcond
            (App n <$ (if matrixMode ci then pure () else pospc) <*> pargs)
@@ -149,7 +151,7 @@ pbinaryop = Sup False <$> (Xpose <$ psym "'" <|> Power <$ psym "^")
         <|> Mul True <$> (Times <$ psym ".*" <|> RDiv <$ psym "./" <|> LDiv <$ psym ".\\")
         <|> Plus <$ psym "+" <|> Minus <$ psym "-"
         <|> Colon <$ psym ":"
-        <|> Comp True <$> (LT <$ psym "<" <|> EQ <$ psym "==" <|> GT <$ psym ">")
+        <|> Comp True  <$> (LT <$ psym "<"  <|> EQ <$ psym "==" <|> GT <$ psym ">")
         <|> Comp False <$> (LT <$ psym ">=" <|> EQ <$ psym "~=" <|> GT <$ psym "<=")
         <|> And <$> (False <$ psym "&&" <|> True <$ psym "&")
         <|> Or <$> (False <$ psym "||" <|> True <$ psym "|")

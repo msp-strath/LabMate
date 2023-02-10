@@ -35,11 +35,17 @@ data UnOperator
 
 
 data BinOperator
-  = Sup Bool{-dotted-} Super
+  = Sup Bool{-dotted?-} Super
   | Mul Bool{-dotted?-} MulDiv
   | Plus | Minus
   | Colon
-  | Comp Bool Ordering-- e.g. <= is Comp False GT
+  | Comp Bool{-truly?-} Ordering
+    -- <  is Comp True  LT
+    -- <= is Comp False GT
+    -- == is Comp True  EQ
+    -- ~= is Comp False EQ
+    -- >  is Comp True  GT
+    -- >= is Comp False LT
   | And Bool{-strict?-} -- && is And False; & is And True
   | Or Bool{-trict?-}   -- likewise
   deriving (Show)

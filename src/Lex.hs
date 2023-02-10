@@ -14,16 +14,16 @@ import Bwd
 import Hide
 
 data Kin
-  = Nom
-  | Key
-  | Blk
-  | Sym
-  | Grp Grouping (Hide [Tok])
-  | Spc
-  | Dig
-  | Ret
-  | Nop
-  | Urk
+  = Nom -- identifiers
+  | Blk -- keywords opening a block
+  | Key -- keywords that don't open blocks
+  | Sym -- symbols/operators
+  | Grp Grouping (Hide [Tok])  -- anything composite
+  | Spc -- whitespace not newline
+  | Dig -- sequence of digits
+  | Ret -- return character
+  | Nop -- token to be filtered from a Grp, keeping its raw text
+  | Urk -- unrecognized
   deriving (Show, Eq)
 
 data Tok = Tok
