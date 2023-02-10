@@ -18,7 +18,11 @@ pcommand :: Parser Command
 pcommand = Assign <$> plhs <* punc "=" <*> pexpr topCI
 
 plhs :: Parser LHS
-plhs = LVar <$> pnom
+plhs = (LVar <$> pnom) >>= more where
+  more l = pcond
+    (Index l <$ pospc <*> pargs <|> Field l <$ punc "." <*> pnom)
+    more
+    (pure l)
 
 data ContextInfo = CI { precedence :: Int
                       , matrixMode :: Bool -- spacing rules for unary
@@ -72,12 +76,12 @@ pexpr ci = go >>= more ci where
    <|> UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel})
    <|> (pnom >>= \ n ->
          pcond
-           (App n <$ (if matrixMode ci then pure () else pospc)
-             <*> pgrp (== Bracket Round) (psep0 (punc ",") (pexpr topCI)))
+           (App n <$ (if matrixMode ci then pure () else pospc) <*> pargs)
            pure
            (pure (Var n)))
    <|> IntLiteral <$> pint
    <|> Matrix <$> pgrp (== Bracket Square) (many prow)
+   <|> ColonAlone <$ psym ":"
 {-  <|> StringLiteral <$> pstringlit
   <|> DoubleLiteral <$> pdouble
   <|> App <$> undefined <*> undefined
@@ -102,6 +106,9 @@ pexpr ci = go >>= more ci where
         case ts of
           (t1:t2:ts) | t1 `elem` [sym "+", sym "-"] && not (kin t2 == Spc) -> pure e
           _ -> tight e
+
+pargs :: Parser [Expr]
+pargs = pgrp (== Bracket Round) (psep0 (punc ",") (pexpr topCI))
 
 prow :: Parser [Expr]
 prow = pline (pospc *> psep0 (pspc <|> punc ",") (pexpr matrixCI))

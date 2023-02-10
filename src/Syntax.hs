@@ -13,10 +13,13 @@ data Expr
   | BinaryOp BinOperator Expr Expr
   | App String [Expr]
   | Matrix [[Expr]]
+  | ColonAlone
   deriving (Show)
 
 data LHS
   = LVar String
+  | Index LHS [Expr]
+  | Field LHS String
   deriving (Show)
 
 data UnOperator
