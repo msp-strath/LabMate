@@ -268,7 +268,8 @@ munch d (Table b m) = (do
 
 keywords :: M.Map String Bool -- whether the keyword begins a block ending with `end`
 keywords = M.fromList (map (, True) ["if", "function", "for", "while", "switch"])
-         <> M.fromList (map (, False) ["else", "elseif", "case", "otherwise", "end"])
+         <> M.fromList (map (, False) ["else", "elseif", "case", "otherwise", "end",
+	                               "break", "return", "continue"])
 
 {-
 %>  directive

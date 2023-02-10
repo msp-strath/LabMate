@@ -18,7 +18,19 @@ pcommand :: Parser Command
 pcommand
   = (id <$ pospc <*>) $
       Assign <$> plhs <* punc "=" <*> pexpr topCI
-  <|> id <$> pgrp (== Block) (If <$> pif True <*> pelse <* pline (pkin Key "end"))
+  <|> id <$> pgrp (== Block)
+      (    If <$> pif True <*> pelse <* pend
+       <|> For <$> pline ((,) <$ pkin Blk "for" <* pospc
+                             <*> pnom <* punc "="
+                             <*> pexpr topCI)
+               <*> many (pline pcommand)
+               <*  pend
+       <|> While <$> pline (id <$ pkin Blk "while" <* pospc <*> pexpr topCI)
+                 <*> many (pline pcommand)
+                 <*  pend
+      )
+  <|> Break <$ pkin Key "break"
+  <|> Continue <$ pkin Key "continue"
   where
     pif b = (:)
       <$> ((,) <$> pline (id <$ (if b then pkin Blk "if" else pkin Key "elseif")
@@ -27,6 +39,7 @@ pcommand
       <*> (pif False <|> pure [])
     pelse = pure Nothing
         <|> Just <$ pline (pkin Key "else") <*> many (pline pcommand)
+    pend = pline (() <$ pospc <* pkin Key "end")
 
 plhs :: Parser LHS
 plhs = (LVar <$> pnom) >>= more where

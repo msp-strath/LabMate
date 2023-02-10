@@ -3,6 +3,10 @@ module Syntax where
 data Command
   = Assign LHS Expr
   | If [(Expr, [Command])] (Maybe [Command])
+  | For (String, Expr) [Command]
+  | While Expr [Command]
+  | Break
+  | Continue
   deriving (Show)
 
 data Expr
