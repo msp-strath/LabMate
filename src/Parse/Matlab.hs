@@ -15,6 +15,9 @@ import Parse
 
 import Lisp
 
+pfile :: Parser [Command]
+pfile = many (pline pcommand) <* peoi
+
 pcommand :: Parser Command
 pcommand
   = (id <$ pospc <*>) $ pcond
@@ -39,8 +42,12 @@ pcommand
       )
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
+  <|> Direct <$> pgrp (== Directive) pdir
+  <|> Respond <$> pgrp (== Response) pres
+  <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
+  <|> pure Skip
   ) pure
-  (ConfusedBy <$> many (ptok Just))
+  empty -- (ConfusedBy <$> ((:) <$> ptok (\ t -> t <$ guard (kin t /= Key)) <*> many (ptok Just)))
   where
     pif b = (:)
       <$> ((,) <$> pline (id <$ (if b then pkin Blk "if" else pkin Key "elseif")
@@ -50,6 +57,12 @@ pcommand
     pelse = pure Nothing
         <|> Just <$ pline (pkin Key "else") <*> many (pline pcommand)
     pend = pline (() <$ pospc <* pkin Key "end")
+
+pdir :: Parser Dir
+pdir = D <$ psym "%" <* psym ">" <*> many (ptok Just)
+
+pres :: Parser Res
+pres = id <$ psym "%" <* psym "<" <*> many (ptok Just)
 
 plhs :: Parser LHS
 plhs = ((LVar <$> pnom) >>= more)

@@ -39,6 +39,8 @@ library
                      , Hide
                      , Lisp
                      , Parse
+                     , Syntax
+                     , Parse.Matlab
                      , BRect
   build-depends:       base <5
                      , containers
@@ -55,7 +57,13 @@ executable labrat
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
-    -- other-modules:
+    other-modules:    BRect
+                    , Bwd
+                    , Hide
+                    , Lex
+                    , Lisp
+                    , Parse
+
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base

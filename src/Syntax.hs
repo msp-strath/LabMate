@@ -10,8 +10,17 @@ data Command
   | Break
   | Continue
   | Function (LHS, String, [String]) [Command]
+  | Skip
   | ConfusedBy [Tok]
+  | Direct Dir
+  | Respond Res
+  | GeneratedCode [Command]
   deriving (Show)
+
+data Dir = D [Tok]
+  deriving Show
+
+type Res = [Tok]
 
 data Expr
   = Var String

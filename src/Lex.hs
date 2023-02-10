@@ -101,7 +101,7 @@ lex1 = normal False where
       = lcomment (typeOfComment ts) (B0 :< t) ts
     | t == sym "..." = ecomment (B0 :< t) ts
     | t == sym "%<{" && not nsp
-      = generatedCode False (B0 :< t) ts
+      = generatedCode False (B0 :< t {kin = Nop}) ts
     | otherwise    = t : normal (updateNSP nsp t)  ts
 
   charlit acc [] = grpCons Error acc []
@@ -141,7 +141,7 @@ lex1 = normal False where
                 -> [Tok] -> [Tok]
   generatedCode _ acc [] = grpCons Generated acc []
   generatedCode b acc (t:ts)
-    | t == sym "%<}" && not b = generatedCode True (acc :< t) ts
+    | t == sym "%<}" && not b = generatedCode True (acc :< t {kin = Nop}) ts
     | kin t == Ret && b =  grpCons Generated (acc :< t) (normal True ts)
     | otherwise = generatedCode b (acc :< t) ts
 
@@ -173,8 +173,11 @@ lex2 = helper B0 where
     | t == end = case az of
         az :< a -> helper az $ grpCons Block (a :< t) ts
         B0 -> helper B0 $ grpCons Error (B0 :< t)  ts
-  helper B0 (t : ts) = t : helper B0 ts
-  helper (az :< a) (t : ts) = helper (az :< (a :< t)) ts
+  helper B0 (t : ts) = gen t : helper B0 ts
+  helper (az :< a) (t : ts) = helper (az :< (a :< gen t)) ts
+
+  gen (t@Tok { kin = Grp Generated (Hide ss) }) = t { kin = Grp Generated (Hide $ lex2 ss) }
+  gen t = t
 
   end = Tok "end" Key dump
 
@@ -188,7 +191,7 @@ lex3 = helper B0 where
   helper (az :< (b, a)) (t : ts)
     | t == closer b = helper az $ grpCons (Bracket b) (a :< t {kin = Nop}) ts
     | otherwise = helper (az :< (b, a :< t)) ts
-  helper B0 (Tok s (Grp g ss) p : ts) | g `elem` [Block, Directive] =
+  helper B0 (Tok s (Grp g ss) p : ts) | g `elem` [Block, Directive, Generated] =
     Tok s (Grp g $ Hide $ lex3 $ unhide ss) p : helper B0 ts
   helper B0 (t : ts)  = t : helper B0 ts
 
@@ -197,7 +200,7 @@ lex4 :: [Tok] -> [Tok]
 lex4 = helper B0 where
   helper acc [] = grpCons (Line RET) acc []
   helper acc (Tok s (Grp k ss) p : ts)
-    | k `elem` [Block, Bracket Square] =
+    | k `elem` [Block, Bracket Square, Generated] =
       helper (acc :< Tok s (Grp k $ Hide $ lex4 $ unhide ss) p) ts
   helper acc (t : ts)
     | kin t == Ret = ending (acc :< t) RET B0 ts
@@ -269,7 +272,7 @@ munch d (Table b m) = (do
 keywords :: M.Map String Bool -- whether the keyword begins a block ending with `end`
 keywords = M.fromList (map (, True) ["if", "function", "for", "while", "switch"])
          <> M.fromList (map (, False) ["else", "elseif", "case", "otherwise", "end",
-	                               "break", "return", "continue"])
+                                       "break", "return", "continue"])
 
 {-
 %>  directive

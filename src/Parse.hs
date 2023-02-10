@@ -78,8 +78,12 @@ pline p = pgrp isLine (p <* many (ptok junk))
       Sym | raw t == ";" -> Just ()
       _ -> Nothing
 
+isComment :: Tok -> Bool
+isComment (Tok { kin = Grp Comment _ }) = True
+isComment t = False
+
 pspc :: Parser ()
-pspc = ptok (\ t -> guard (kin t == Spc))
+pspc = () <$ some (ptok (\ t -> guard (kin t == Spc || isComment t)))
 
 -- We are relying on the lexer combining all consecutive space tokens
 
