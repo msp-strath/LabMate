@@ -27,10 +27,14 @@ data UnOperator
 
 
 data BinOperator
-  = Plus
-  | Minus
-  | Times
-  | And
-  | Or
-  -- ...
+  = Mul Bool{-dotted?-} MulDiv
+  | Plus | Minus
+  | Colon
+  | Comp Bool Ordering-- e.g. <= is Comp False GT
+  | And Bool{-strict?-} -- && is And False; & is And True
+  | Or Bool{-trict?-}   -- likewise
+  deriving (Show)
+
+data MulDiv
+  = Times | RDiv | LDiv
   deriving (Show)

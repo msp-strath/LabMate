@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Parse.Matlab where
 
 import Control.Monad
@@ -33,10 +35,17 @@ topCI = CI
 matrixCI :: ContextInfo
 matrixCI = topCI { matrixMode = True }
 
-plusLevel, timesLevel, andLevel :: Int
-plusLevel = 60
-timesLevel = 70
-andLevel = 90
+ororLevel, andandLevel, orLevel, andLevel, compLevel, colonLevel,
+  plusLevel, timesLevel, unaryLevel :: Int
+unaryLevel = 90
+timesLevel = 80
+plusLevel = 70
+colonLevel = 60
+compLevel = 50
+andLevel = 40
+orLevel = 30
+andandLevel = 20
+ororLevel = 10
 
 contextBinop :: ContextInfo -- with context info ci,
              -> BinOperator -- we encounter operator op
@@ -44,11 +53,15 @@ contextBinop :: ContextInfo -- with context info ci,
                   ( ContextInfo -- The context for the operand
                   , ContextInfo -- The context for the rest of the expression after the operand
                   )
-contextBinop ci Plus  | precedence ci < plusLevel  = Just (ci {precedence = plusLevel }, ci)
-contextBinop ci Minus | precedence ci < plusLevel  = Just (ci {precedence = plusLevel }, ci)
-contextBinop ci Times | precedence ci < timesLevel = Just (ci {precedence = timesLevel }, ci)
-contextBinop ci And | precedence ci < andLevel = Just (ci {precedence = andLevel }, ci)
-contextBinop ci Or | precedence ci < andLevel = Just (ci {precedence = andLevel }, ci)
+contextBinop ci (Mul _ _)   | precedence ci < timesLevel  = Just (ci {precedence = timesLevel }, ci)
+contextBinop ci Plus        | precedence ci < plusLevel   = Just (ci {precedence = plusLevel }, ci)
+contextBinop ci Minus       | precedence ci < plusLevel   = Just (ci {precedence = plusLevel }, ci)
+contextBinop ci Colon       | precedence ci < colonLevel  = Just (ci {precedence = colonLevel }, ci)
+contextBinop ci (Comp _ _)  | precedence ci < compLevel   = Just (ci {precedence = compLevel }, ci)
+contextBinop ci (And True)  | precedence ci < andLevel    = Just (ci {precedence = andLevel }, ci)
+contextBinop ci (Or True)   | precedence ci < orLevel     = Just (ci {precedence = orLevel }, ci)
+contextBinop ci (And False) | precedence ci < andandLevel = Just (ci {precedence = andandLevel }, ci)
+contextBinop ci (Or False)  | precedence ci < ororLevel   = Just (ci {precedence = ororLevel }, ci)
 contextBinop ci op = Nothing
 
 pexpr :: ContextInfo -> Parser Expr
@@ -92,11 +105,14 @@ punaryop = UPlus <$ psym "+"
        <|> UTilde <$ psym "~"
 
 pbinaryop :: Parser BinOperator
-pbinaryop = Plus <$ psym "+"
-        <|> Minus <$ psym "-"
-        <|> Times <$ psym "*"
-        <|> And <$ psym "&&"
-        <|> Or <$ psym "||"
+pbinaryop = Mul False <$> (Times <$ psym "*" <|> RDiv <$ psym "/" <|> LDiv <$ psym "\\")
+        <|> Mul True <$> (Times <$ psym ".*" <|> RDiv <$ psym "./" <|> LDiv <$ psym ".\\")
+        <|> Plus <$ psym "+" <|> Minus <$ psym "-"
+        <|> Colon <$ psym ":"
+        <|> Comp True <$> (LT <$ psym "<" <|> EQ <$ psym "==" <|> GT <$ psym ">")
+        <|> Comp False <$> (LT <$ psym ">=" <|> EQ <$ psym "~=" <|> GT <$ psym "<=")
+        <|> And <$> (False <$ psym "&&" <|> True <$ psym "&")
+        <|> Or <$> (False <$ psym "||" <|> True <$ psym "|")
         -- ...
 
 pint :: Parser Int
