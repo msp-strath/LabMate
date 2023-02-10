@@ -4,6 +4,7 @@ module Parse.Matlab where
 
 import Control.Monad
 import Control.Applicative
+import Data.Char
 
 import Bwd
 import Hide
@@ -16,8 +17,8 @@ import Lisp
 
 pcommand :: Parser Command
 pcommand
-  = (id <$ pospc <*>) $
-      Assign <$> (plhs <* punc "=" <|> pure (LMatrix [])) <*> pexpr topCI
+  = (id <$ pospc <*>) $ pcond
+  (    Assign <$> (plhs <* punc "=" <|> pure (LMatrix [])) <*> pexpr topCI
   <|> id <$> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
        <|> For <$> pline ((,) <$ pkin Blk "for" <* pospc
@@ -38,6 +39,8 @@ pcommand
       )
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
+  ) pure
+  (ConfusedBy <$> many (ptok Just))
   where
     pif b = (:)
       <$> ((,) <$> pline (id <$ (if b then pkin Blk "if" else pkin Key "elseif")
@@ -115,13 +118,10 @@ pexpr ci = go >>= more ci where
            (App n <$ (if matrixMode ci then pure () else pospc) <*> pargs)
            pure
            (pure (Var n)))
-   <|> IntLiteral <$> pint
+   <|> (prawif Dig >>= pnumber)
    <|> Matrix <$> pgrp (== Bracket Square) (many prow)
    <|> ColonAlone <$ psym ":"
-{-  <|> StringLiteral <$> pstringlit
-  <|> DoubleLiteral <$> pdouble
-  <|> App <$> undefined <*> undefined
--}
+   <|> StringLiteral <$> ptok stringy
   more ci e = ppeek >>= \case
     t1:t2:t3:ts | kin t1 == Spc
                && matrixMode ci
@@ -142,6 +142,8 @@ pexpr ci = go >>= more ci where
         case ts of
           (t1:t2:ts) | t1 `elem` [sym "+", sym "-"] && not (kin t2 == Spc) -> pure e
           _ -> tight e
+  stringy (Tok {kin = Grp Literal _, raw = '\'': cs@(_ : _)}) = Just (init cs)
+  stringy _ = Nothing
 
 pargs :: Parser [Expr]
 pargs = pgrp (== Bracket Round) (psep0 (punc ",") (pexpr topCI))
@@ -166,6 +168,28 @@ pbinaryop = Sup False <$> (Xpose <$ psym "'" <|> Power <$ psym "^")
         <|> And <$> (False <$ psym "&&" <|> True <$ psym "&")
         <|> Or <$> (False <$ psym "||" <|> True <$ psym "|")
         -- ...
+
+pnumber :: String -> Parser Expr
+pnumber ds = mkNum <$> optional (id <$ psym "." <*> (prawif Dig <|> pure "0"))
+                   <*> optional ((,) <$ (pkin Nom "e" <|> pkin Nom "E")
+                                    <*> ('-' <$ psym "-" <|> ('+' <$ psym "+"))
+                                    <*> prawif Dig
+                                 <|> (ptok $ \case
+                                   Tok {kin = Nom, raw = e:es@(_ : _)}
+                                     | elem e "eE" && all isDigit es
+                                        -> Just ('+', es)
+                                   _ -> Nothing)
+                                 )
+  where
+  mkNum :: Maybe String -> Maybe (Char, String) -> Expr
+  mkNum Nothing Nothing = IntLiteral (read ds)
+  mkNum Nothing (Just ('+', es)) =
+    IntLiteral (read (ds ++ replicate (read es) '0'))
+  mkNum m e = DoubleLiteral (read (ds ++ mant m ++ expo e)) where
+    mant Nothing = ""
+    mant (Just ms) = '.' : ms
+    expo Nothing = ""
+    expo (Just (s, es)) = 'e' : s : es
 
 pint :: Parser Int
 pint = ptok (\ t -> read (raw t) <$ guard (kin t == Dig))

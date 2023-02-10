@@ -104,6 +104,9 @@ pkin k s = ptok $ \ t -> guard $ Tok {kin = k, raw = s, pos = Hide (0,0)} == t
 psym :: String -> Parser ()
 psym = pkin Sym
 
+prawif :: Kin -> Parser String
+prawif k = ptok $ \ t -> raw t <$ guard (kin t == k)
+
 pnom :: Parser String
 pnom = ptok $ \ t -> if kin t == Nom then Just (raw t) else Nothing
 

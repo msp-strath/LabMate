@@ -1,5 +1,7 @@
 module Syntax where
 
+import Lex
+
 data Command
   = Assign LHS Expr
   | If [(Expr, [Command])] (Maybe [Command])
@@ -8,6 +10,7 @@ data Command
   | Break
   | Continue
   | Function (LHS, String, [String]) [Command]
+  | ConfusedBy [Tok]
   deriving (Show)
 
 data Expr
