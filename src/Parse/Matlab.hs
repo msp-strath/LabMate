@@ -36,7 +36,8 @@ matrixCI :: ContextInfo
 matrixCI = topCI { matrixMode = True }
 
 ororLevel, andandLevel, orLevel, andLevel, compLevel, colonLevel,
-  plusLevel, timesLevel, unaryLevel :: Int
+  plusLevel, timesLevel, unaryLevel, supLevel :: Int
+supLevel = 110
 unaryLevel = 90
 timesLevel = 80
 plusLevel = 70
@@ -53,6 +54,7 @@ contextBinop :: ContextInfo -- with context info ci,
                   ( ContextInfo -- The context for the operand
                   , ContextInfo -- The context for the rest of the expression after the operand
                   )
+contextBinop ci (Sup _ _)   | precedence ci < supLevel    = Just (ci {precedence = supLevel }, ci)
 contextBinop ci (Mul _ _)   | precedence ci < timesLevel  = Just (ci {precedence = timesLevel }, ci)
 contextBinop ci Plus        | precedence ci < plusLevel   = Just (ci {precedence = plusLevel }, ci)
 contextBinop ci Minus       | precedence ci < plusLevel   = Just (ci {precedence = plusLevel }, ci)
@@ -67,7 +69,7 @@ contextBinop ci op = Nothing
 pexpr :: ContextInfo -> Parser Expr
 pexpr ci = go >>= more ci where
   go = id <$> pgrp (== Bracket Round) (id <$ pospc <*> pexpr topCI <* pospc)
-   <|> UnaryOp <$> punaryop <* pospc <*> pexpr ci
+   <|> UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel})
    <|> Var <$> pnom
    <|> IntLiteral <$> pint
    <|> Matrix <$> pgrp (== Bracket Square) (many prow)
@@ -105,7 +107,9 @@ punaryop = UPlus <$ psym "+"
        <|> UTilde <$ psym "~"
 
 pbinaryop :: Parser BinOperator
-pbinaryop = Mul False <$> (Times <$ psym "*" <|> RDiv <$ psym "/" <|> LDiv <$ psym "\\")
+pbinaryop = Sup False <$> (Xpose <$ psym "'" <|> Power <$ psym "^")
+        <|> Sup True <$> (Xpose <$ psym ".'" <|> Power <$ psym ".^")
+        <|> Mul False <$> (Times <$ psym "*" <|> RDiv <$ psym "/" <|> LDiv <$ psym "\\")
         <|> Mul True <$> (Times <$ psym ".*" <|> RDiv <$ psym "./" <|> LDiv <$ psym ".\\")
         <|> Plus <$ psym "+" <|> Minus <$ psym "-"
         <|> Colon <$ psym ":"

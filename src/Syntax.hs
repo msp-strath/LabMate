@@ -27,7 +27,8 @@ data UnOperator
 
 
 data BinOperator
-  = Mul Bool{-dotted?-} MulDiv
+  = Sup Bool{-dotted-} Super
+  | Mul Bool{-dotted?-} MulDiv
   | Plus | Minus
   | Colon
   | Comp Bool Ordering-- e.g. <= is Comp False GT
@@ -38,3 +39,8 @@ data BinOperator
 data MulDiv
   = Times | RDiv | LDiv
   deriving (Show)
+
+data Super
+  = Xpose | Power
+  deriving (Show)
+  
