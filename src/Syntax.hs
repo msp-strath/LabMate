@@ -7,6 +7,7 @@ data Command
   | While Expr [Command]
   | Break
   | Continue
+  | Function (LHS, String, [String]) [Command]
   deriving (Show)
 
 data Expr
@@ -25,6 +26,7 @@ data LHS
   = LVar String
   | Index LHS [Expr]
   | Field LHS String
+  | LMatrix [LHS]
   deriving (Show)
 
 data UnOperator

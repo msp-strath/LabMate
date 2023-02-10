@@ -17,7 +17,7 @@ import Lisp
 pcommand :: Parser Command
 pcommand
   = (id <$ pospc <*>) $
-      Assign <$> plhs <* punc "=" <*> pexpr topCI
+      Assign <$> (plhs <* punc "=" <|> pure (LMatrix [])) <*> pexpr topCI
   <|> id <$> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
        <|> For <$> pline ((,) <$ pkin Blk "for" <* pospc
@@ -28,6 +28,13 @@ pcommand
        <|> While <$> pline (id <$ pkin Blk "while" <* pospc <*> pexpr topCI)
                  <*> many (pline pcommand)
                  <*  pend
+       <|> Function
+           <$> pline ((,,) <$ pkin Blk "function" <* pospc
+                 <*> (plhs <* punc "=" <|> pure (LMatrix []))
+                 <*> pnom <* pospc
+                 <*> (pgrp (== Bracket Round) (psep0 (punc ",") pnom) <|> pure []))
+           <*> many (pline pcommand)
+           <*  (pend <|> pure ())
       )
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
@@ -42,7 +49,10 @@ pcommand
     pend = pline (() <$ pospc <* pkin Key "end")
 
 plhs :: Parser LHS
-plhs = (LVar <$> pnom) >>= more where
+plhs = ((LVar <$> pnom) >>= more)
+   <|> LMatrix
+       <$> pgrp (== Bracket Square) (pline (psep0 (pspc <|> punc ",") plhs))
+  where
   more l = pcond
     (Index l <$ pospc <*> pargs <|> Field l <$ punc "." <*> pnom)
     more
