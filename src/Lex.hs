@@ -200,8 +200,10 @@ lex4 :: [Tok] -> [Tok]
 lex4 = helper B0 where
   helper acc [] = grpCons (Line RET) acc []
   helper acc (Tok s (Grp k ss) p : ts)
-    | k `elem` [Block, Bracket Square, Generated] =
+    | k `elem` blocky =
       helper (acc :< Tok s (Grp k $ Hide $ lex4 $ unhide ss) p) ts
+    | k `elem` passedthrough =
+      helper (acc :< Tok s (Grp k $ Hide $ map sublex4 $ unhide ss) p) ts
   helper acc (t : ts)
     | kin t == Ret = ending (acc :< t) RET B0 ts
     | t == semicolon = ending (acc :< t) Semicolon B0 ts
@@ -215,6 +217,17 @@ lex4 = helper B0 where
   ending acc e wh ts = grpCons (Line e) acc $ lex4 (wh <>> ts)
 
   semicolon = sym ";"
+
+  blocky = [Block, Bracket Square, Generated]
+  passedthrough = [Bracket Round, Bracket Curly, Directive]
+
+  sublex4 :: Tok -> Tok
+  sublex4 (Tok s (Grp k ss) p)
+    | k `elem` blocky = Tok s (Grp k $ Hide $ lex4 $ unhide ss) p
+  sublex4 (Tok s (Grp k ss) p)
+    | k `elem` passedthrough = Tok s (Grp k $ Hide $ map sublex4 $ unhide ss) p
+  sublex4 t = t
+  
 
 grp :: Grouping -> Bwd Tok -> Tok
 grp g tz = case tz <>> [] of

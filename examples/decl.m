@@ -1,4 +1,4 @@
-hello();
+% this is not a directive
 %> A <- [2 x 3] double
 A = [1 2 3; 4 5 6];
 

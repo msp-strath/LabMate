@@ -4,7 +4,7 @@ module Parse where
 import Control.Monad
 import Control.Applicative
 
-import Data.Text as T
+import qualified Data.Text as T
 
 import Bwd
 import Hide
@@ -67,15 +67,18 @@ pgrp f p = Parser $ \ ts -> case ts of
   _ -> []
 
 pline :: Parser a -> Parser a
-pline p = pgrp isLine (p <* many (ptok junk))
+pline p = id <$ many (ptok junkLine) <*> pgrp isLine (p <* many (ptok (guard . junk)))
   where
     isLine (Line _) = True
     isLine _ = False
     junk t = case kin t of
-      Spc -> Just ()
-      Ret -> Just ()
-      Grp Comment _ -> Just ()
-      Sym | raw t == ";" -> Just ()
+      Spc -> True
+      Ret -> True
+      Grp Comment _ -> True
+      Sym | raw t == ";" -> True
+      _ -> False
+    junkLine t = case kin t of
+      Grp (Line _) (Hide ts) | all junk ts -> Just ()
       _ -> Nothing
 
 isComment :: Tok -> Bool

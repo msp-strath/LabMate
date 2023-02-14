@@ -10,7 +10,6 @@ data Command
   | Break
   | Continue
   | Function (LHS, String, [String]) [Command]
-  | Skip
   | ConfusedBy [Tok]
   | Direct Dir
   | Respond Res

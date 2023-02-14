@@ -45,7 +45,6 @@ pcommand
   <|> Direct <$> pgrp (== Directive) (id <$ psym "%" <* psym ">" <*> pdir)
   <|> Respond <$> pgrp (== Response) pres
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
-  <|> pure Skip
   ) pure
   empty -- (ConfusedBy <$> ((:) <$> ptok (\ t -> t <$ guard (kin t /= Key)) <*> many (ptok Just)))
   where
@@ -64,7 +63,7 @@ pdir :: Parser Dir
 pdir = Declare <$ pospc <*> plarrow ptensortype
 
 ptensortype :: Parser TensorType
-ptensortype = Tensor <$> (id <$> pgrp (== Bracket Square) psquex <* pospc
+ptensortype = Tensor <$> (id <$> pgrp (== Bracket Square) (pline psquex) <* pospc
                          <|> pure (one , one))
                      <*> pentrytype
   where
