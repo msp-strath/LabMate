@@ -21,7 +21,7 @@ pfile = many (pline pcommand) <* peoi
 pcommand :: Parser Command
 pcommand
   = (id <$ pospc <*>) $ pcond
-  (    Assign <$> (plhs <* punc "=" <|> pure (LMatrix [])) <*> pexpr topCI
+  (    Assign <$> (plhs <* punc "=" <|> pure (LHS $ Mat [])) <*> pexpr topCI
   <|> id <$> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
        <|> For <$> pline ((,) <$ pkin Blk "for" <* pospc
@@ -34,7 +34,7 @@ pcommand
                  <*  pend
        <|> Function
            <$> pline ((,,) <$ pkin Blk "function" <* pospc
-                 <*> (plhs <* punc "=" <|> pure (LMatrix []))
+                 <*> (plhs <* punc "=" <|> pure (LHS $ Mat []))
                  <*> pnom <* pospc
                  <*> (pgrp (== Bracket Round) (psep0 (punc ",") pnom) <|> pure []))
            <*> many (pline pcommand)
@@ -64,15 +64,18 @@ pdir = D <$ psym "%" <* psym ">" <*> many (ptok Just)
 pres :: Parser Res
 pres = id <$ psym "%" <* psym "<" <*> many (ptok Just)
 
-plhs :: Parser LHS
-plhs = ((LVar <$> pnom) >>= more)
-   <|> LMatrix
-       <$> pgrp (== Bracket Square) (pline (psep0 (pspc <|> punc ",") plhs))
+plhs' :: Parser matrix -> ContextInfo -> Parser (LHS' matrix)
+plhs' pm ci = ((Var <$> pnom) >>= more)
+   <|> Mat <$> pgrp (== Bracket Square) pm
   where
   more l = pcond
-    (Index l <$ pospc <*> pargs <|> Field l <$ punc "." <*> pnom)
+    (App l <$ pcxspc ci <*> pargs Round <|> Brp l <$ pcxspc ci <*> pargs Curly
+     <|> Dot l <$ punc "." <*> pnom)
     more
     (pure l)
+
+plhs :: Parser LHS
+plhs = LHS <$> plhs' (pline (psep0 (pspc <|> punc ",") plhs)) topCI
 
 data ContextInfo = CI { precedence :: Int
                       , matrixMode :: Bool -- spacing rules for unary
@@ -121,18 +124,17 @@ contextBinop ci (And False) | precedence ci < andandLevel = Just (ci {precedence
 contextBinop ci (Or False)  | precedence ci < ororLevel   = Just (ci {precedence = ororLevel }, ci)
 contextBinop ci op = Nothing
 
+pcxspc :: ContextInfo -> Parser ()
+pcxspc ci = if matrixMode ci then pure () else pospc
+
 pexpr :: ContextInfo -> Parser Expr
 pexpr ci = go >>= more ci where
   go = id <$> pgrp (== Bracket Round) (id <$ pospc <*> pexpr topCI <* pospc)
    <|> UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel})
        -- should UnaryOp check precedence level?
-   <|> (pnom >>= \ n ->
-         pcond
-           (App n <$ (if matrixMode ci then pure () else pospc) <*> pargs)
-           pure
-           (pure (Var n)))
+   <|> EL <$> plhs' (many prow) ci
+   <|> Cell <$> pgrp (== Bracket Curly) (many prow)
    <|> (prawif Dig >>= pnumber)
-   <|> Matrix <$> pgrp (== Bracket Square) (many prow)
    <|> ColonAlone <$ psym ":"
    <|> StringLiteral <$> ptok stringy
   more ci e = ppeek >>= \case
@@ -158,8 +160,8 @@ pexpr ci = go >>= more ci where
   stringy (Tok {kin = Grp Literal _, raw = '\'': cs@(_ : _)}) = Just (init cs)
   stringy _ = Nothing
 
-pargs :: Parser [Expr]
-pargs = pgrp (== Bracket Round) (psep0 (punc ",") (pexpr topCI))
+pargs :: Bracket -> Parser [Expr]
+pargs b = pgrp (== Bracket b) (psep0 (punc ",") (pexpr topCI))
 
 prow :: Parser [Expr]
 prow = pline (pospc *> psep0 (pspc <|> punc ",") (pexpr matrixCI))

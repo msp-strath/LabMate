@@ -23,23 +23,25 @@ data Dir = D [Tok]
 type Res = [Tok]
 
 data Expr
-  = Var String
+  = EL (LHS' [[Expr]])
+  | Cell [[Expr]]
   | IntLiteral Int
   | StringLiteral String
   | DoubleLiteral Double
   | UnaryOp UnOperator Expr
   | BinaryOp BinOperator Expr Expr
-  | App String [Expr]
-  | Matrix [[Expr]]
   | ColonAlone
   deriving (Show)
 
-data LHS
-  = LVar String
-  | Index LHS [Expr]
-  | Field LHS String
-  | LMatrix [LHS]
+data LHS' matrix
+  = Var String
+  | App (LHS' matrix) [Expr]
+  | Brp (LHS' matrix) [Expr]
+  | Dot (LHS' matrix) String
+  | Mat matrix
   deriving (Show)
+
+newtype LHS = LHS {lhs :: LHS' [LHS]} deriving (Show)
 
 data UnOperator
   = UPlus
