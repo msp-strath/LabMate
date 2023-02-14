@@ -17,8 +17,18 @@ data Command
   | GeneratedCode [Command]
   deriving (Show)
 
-data Dir = D [Tok]
+data Dir =
+  Declare (String, TensorType)
   deriving Show
+
+data TensorType
+  = Tensor ((String, Expr), (String, Expr)) EntryType
+  deriving Show
+
+data EntryType
+  = Ty Expr
+  | Cmhn (String, Expr) Expr
+  deriving (Show)
 
 type Res = [Tok]
 

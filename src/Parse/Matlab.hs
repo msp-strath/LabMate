@@ -42,7 +42,7 @@ pcommand
       )
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
-  <|> Direct <$> pgrp (== Directive) pdir
+  <|> Direct <$> pgrp (== Directive) (id <$ psym "%" <* psym ">" <*> pdir)
   <|> Respond <$> pgrp (== Response) pres
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
   <|> pure Skip
@@ -58,8 +58,30 @@ pcommand
         <|> Just <$ pline (pkin Key "else") <*> many (pline pcommand)
     pend = pline (() <$ pospc <* pkin Key "end")
 
+
+
 pdir :: Parser Dir
-pdir = D <$ psym "%" <* psym ">" <*> many (ptok Just)
+pdir = Declare <$ pospc <*> plarrow ptensortype
+
+ptensortype :: Parser TensorType
+ptensortype = Tensor <$> (id <$> pgrp (== Bracket Square) psquex <* pospc
+                         <|> pure (one , one))
+                     <*> pentrytype
+  where
+  one = ("", IntLiteral 1)
+  psquex = (,) <$> (id <$> plarrow (pexpr topCI) <* pospc <* pkin Nom "x" <* pospc
+                    <|> pure one)
+               <*> plarrow (pexpr topCI)
+               
+plarrow :: Parser a -> Parser (String, a)
+plarrow p = pcond ((,) <$> pnom <* pospc <* psym "<" <* psym "-" <* pospc ) (<$> p)
+            (("",) <$> p)
+        <|> pgrp (== Bracket Round) (plarrow p)
+
+pentrytype :: Parser EntryType
+pentrytype =
+      Cmhn <$> plarrow (pexpr topCI) <* punc "," <*> pexpr topCI
+  <|> Ty <$> pexpr topCI
 
 pres :: Parser Res
 pres = id <$ psym "%" <* psym "<" <*> many (ptok Just)

@@ -15,9 +15,12 @@ main = do
   [file] <- getArgs
   d <- T.readFile file
   let l = lexer $ unix d
-  -- termSize <- size
-  -- let w = maybe 80 width termSize
+  termSize <- size
+  let w = maybe 80 width termSize
   -- putStrLn $ pretty w l
   case parser pfile l of
     [(_,cs,_)] -> mapM_ print cs
-    _ -> putStrLn "Syntax error"
+    xs -> do
+      putStrLn "Syntax error"
+      putStr (show (length xs)) ; putStrLn " parses"
+      putStrLn $ pretty w (tokenStreamToLisp l)
