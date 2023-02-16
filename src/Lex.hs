@@ -321,3 +321,18 @@ closer b = sym $ case b of
    Round  -> ")"
    Square -> "]"
    Curly  -> "}"
+
+seeToks :: [Tok] -> IO ()
+seeToks ts = go 0 ts where
+  go i [] = return ()
+  go i ts = case span (\ t -> case kin t of {Grp _ _ -> False; _ -> True}) ts of
+    (ss, us) -> do
+      putStr (replicate i ' ')
+      mapM_ (\ t -> putStr (show (kin t) ++ " " ++ raw t ++ " ")) ss
+      putStrLn ""
+      case us of 
+        Tok {kin = Grp g (Hide ts)} : us -> do
+          putStr (replicate i ' '); print g
+          go (i + 2) ts
+          go i us
+        _ -> return ()

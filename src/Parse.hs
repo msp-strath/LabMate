@@ -101,7 +101,8 @@ pgrp f p = Parser $ \ ts -> (max (reached ts) *** id) $ case ts of
 
 
 pline :: Parser a -> Parser a
-pline p = id <$ many (ptok junkLine) <*> pgrp isLine (p <* many (ptok (guard . junk)))
+pline p = id <$ many (ptok junkLine)
+            <*> pgrp isLine (id <$ pospc <*> p <* many (ptok (guard . junk)))
   where
     isLine (Line _) = True
     isLine _ = False

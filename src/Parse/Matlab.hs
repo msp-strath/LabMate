@@ -20,7 +20,7 @@ pfile = many (pline pcommand) <* peoi
 
 pcommand :: Parser Command
 pcommand
-  = (id <$ pospc <*>) $ pcond
+  = pcond
   (    Assign <$> (plhs <* punc "=" <|> pure (LHS $ Mat [])) <*> pexpr topCI
   <|> id <$> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
@@ -55,7 +55,7 @@ pcommand
       <*> (pif False{-looking for elseif, from now on-} <|> pure [])
     pelse = pure Nothing
         <|> Just <$ pline (pkin Key "else") <*> many (pline pcommand)
-    pend = pline (() <$ pospc <* pkin Key "end")
+    pend = pline (pkin Key "end")
 
 
 
@@ -188,7 +188,7 @@ pargs b = pgrp (== Bracket b) $ wrap b $ psep0 (punc ",") (pexpr topCI)
     wrap _     = pline
 
 prow :: Parser [Expr]
-prow = pline (pospc *> psep0 (pspc <|> punc ",") (pexpr matrixCI))
+prow = pline (psep0 (pspc <|> punc ",") (pexpr matrixCI))
 
 punaryop :: Parser UnOperator
 punaryop = UPlus <$ psym "+"
