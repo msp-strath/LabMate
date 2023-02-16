@@ -71,7 +71,7 @@ ptensortype = Tensor <$> (id <$> pgrp (== Bracket Square) (pline psquex) <* posp
   psquex = (,) <$> (id <$> plarrow (pexpr topCI) <* pospc <* pkin Nom "x" <* pospc
                     <|> pure one)
                <*> plarrow (pexpr topCI)
-               
+
 plarrow :: Parser a -> Parser (String, a)
 plarrow p = pcond ((,) <$> pnom <* pospc <* psym "<" <* psym "-" <* pospc ) (<$> p)
             (("",) <$> p)
@@ -182,7 +182,10 @@ pexpr ci = go >>= more ci where
   stringy _ = Nothing
 
 pargs :: Bracket -> Parser [Expr]
-pargs b = pgrp (== Bracket b) (psep0 (punc ",") (pexpr topCI))
+pargs b = pgrp (== Bracket b) $ wrap b $ psep0 (punc ",") (pexpr topCI)
+  where
+    wrap Round = id
+    wrap _     = pline
 
 prow :: Parser [Expr]
 prow = pline (pospc *> psep0 (pspc <|> punc ",") (pexpr matrixCI))

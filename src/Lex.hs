@@ -218,8 +218,8 @@ lex4 = helper B0 where
 
   semicolon = sym ";"
 
-  blocky = [Block, Bracket Square, Generated]
-  passedthrough = [Bracket Round, Bracket Curly, Directive]
+  blocky = [Block, Bracket Square, Bracket Curly, Generated]
+  passedthrough = [Bracket Round, Directive]
 
   sublex4 :: Tok -> Tok
   sublex4 (Tok s (Grp k ss) p)
@@ -227,7 +227,6 @@ lex4 = helper B0 where
   sublex4 (Tok s (Grp k ss) p)
     | k `elem` passedthrough = Tok s (Grp k $ Hide $ map sublex4 $ unhide ss) p
   sublex4 t = t
-  
 
 grp :: Grouping -> Bwd Tok -> Tok
 grp g tz = case tz <>> [] of
