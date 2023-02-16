@@ -19,8 +19,8 @@ main = do
   let w = maybe 80 width termSize
   -- putStrLn $ pretty w l
   case parser pfile l of
-    [(_,cs,_)] -> mapM_ print cs
-    xs -> do
-      putStrLn "Syntax error"
+    (_, [(_,cs,_)]) -> mapM_ print cs
+    (r, xs) -> do
+      putStr "Syntax error: "; print r
       putStr (show (length xs)) ; putStrLn " parses"
       putStrLn $ pretty w (tokenStreamToLisp l)
