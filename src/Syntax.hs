@@ -56,11 +56,13 @@ data UnOperator
   = UPlus
   | UMinus
   | UTilde -- logical negation
+  | UTranspose
+  | UDotTranspose
   deriving (Show)
 
 
 data BinOperator
-  = Sup Bool{-dotted?-} Super
+  = Pow Bool{-dotted?-}
   | Mul Bool{-dotted?-} MulDiv
   | Plus | Minus
   | Colon
@@ -78,8 +80,3 @@ data BinOperator
 data MulDiv
   = Times | RDiv | LDiv
   deriving (Show)
-
-data Super
-  = Xpose | Power
-  deriving (Show)
-  

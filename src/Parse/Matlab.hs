@@ -114,9 +114,9 @@ matrixCI :: ContextInfo
 matrixCI = topCI { matrixMode = True }
 
 ororLevel, andandLevel, orLevel, andLevel, compLevel, colonLevel,
-  plusLevel, timesLevel, unaryLevel, supLevel :: Int
+  plusLevel, timesLevel, unaryLevel, powLevel :: Int
 -- the higher the level, the tighter the operator
-supLevel = 110
+powLevel = 110
 unaryLevel = 90
 timesLevel = 80
 plusLevel = 70
@@ -133,7 +133,7 @@ contextBinop :: ContextInfo -- with context info ci,
                   ( ContextInfo -- The context for the operand
                   , ContextInfo -- The context for the rest of the expression after the operand
                   )
-contextBinop ci (Sup _ _)   | precedence ci < supLevel    = Just (ci {precedence = supLevel }, ci)
+contextBinop ci (Pow _)     | precedence ci < powLevel    = Just (ci {precedence = powLevel }, ci)
 contextBinop ci (Mul _ _)   | precedence ci < timesLevel  = Just (ci {precedence = timesLevel }, ci)
 contextBinop ci Plus        | precedence ci < plusLevel   = Just (ci {precedence = plusLevel }, ci)
 contextBinop ci Minus       | precedence ci < plusLevel   = Just (ci {precedence = plusLevel }, ci)
@@ -171,7 +171,7 @@ pexpr ci = go >>= more ci where
         Just (cio, cia) -> pure (b, cio, cia)
       tight e = pcond trybinop
                       (\ (b, cio, cia) -> (BinaryOp b e <$ pospc <*> pexpr cio) >>= more cia)
-                      (pure e)
+                      (pcond ptranspose (\ op -> more ci (UnaryOp op e)) (pure e))
       loose e | not (matrixMode ci) = tight e
       loose e = do
         ts <- ppeek
@@ -195,9 +195,13 @@ punaryop = UPlus <$ psym "+"
        <|> UMinus <$ psym "-"
        <|> UTilde <$ psym "~"
 
+ptranspose :: Parser UnOperator
+ptranspose = UTranspose <$ psym "'"
+         <|> UDotTranspose <$ psym ".'"
+
 pbinaryop :: Parser BinOperator
-pbinaryop = Sup False <$> (Xpose <$ psym "'" <|> Power <$ psym "^")
-        <|> Sup True <$> (Xpose <$ psym ".'" <|> Power <$ psym ".^")
+pbinaryop = Pow False <$ psym "^"
+        <|> Pow True <$ psym ".^"
         <|> Mul False <$> (Times <$ psym "*" <|> RDiv <$ psym "/" <|> LDiv <$ psym "\\")
         <|> Mul True <$> (Times <$ psym ".*" <|> RDiv <$ psym "./" <|> LDiv <$ psym ".\\")
         <|> Plus <$ psym "+" <|> Minus <$ psym "-"
@@ -229,12 +233,3 @@ pnumber ds = mkNum <$> optional (id <$ psym "." <*> (prawif Dig <|> pure "0"))
     mant (Just ms) = '.' : ms
     expo Nothing = ""
     expo (Just (s, es)) = 'e' : s : es
-
-pint :: Parser Int
-pint = ptok (\ t -> read (raw t) <$ guard (kin t == Dig))
-
-pdouble :: Parser Double
-pdouble = undefined
-
-pstringlit :: Parser String
-pstringlit = undefined

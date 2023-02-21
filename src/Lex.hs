@@ -89,39 +89,40 @@ lex0 t = unfoldr tok (t, (0, 0)) where
 -- grouping character literals (surrounded by `'`), end of line comments (`%`),
 -- ellipsis comments (...) and multiline comments (`%{` and `%}`)
 lex1 :: [Tok] -> [Tok]
-lex1 = normal False where
+lex1 = normal False False where
   normal :: Bool -- have we seen any non-space characters on the current line?
+         -> Bool -- can we transpose?
          -> [Tok] -> [Tok]
-  normal _ [] = []
-  normal nsp (t:ts)
+  normal _ _ [] = []
+  normal nsp xp (t:ts)
     | t == sym "%{" && not nsp && blankToEOL ts
       = mlcomment True (B0 :< (B0 :< t)) ts
-    | t == sym "'" = charlit (B0 :< t) ts
+    | t == sym "'" && not xp = charlit (B0 :< t) ts
     | t `elem` [sym "%", sym "%{", sym "%}"]
       = lcomment (typeOfComment ts) (B0 :< t) ts
     | t == sym "..." = ecomment (B0 :< t) ts
     | t == sym "%<{" && not nsp
       = generatedCode False (B0 :< t {kin = Nop}) ts
-    | otherwise    = t : normal (updateNSP nsp t)  ts
+    | otherwise    = t : normal (updateNSP nsp t) (setXP t) ts
 
   charlit acc [] = grpCons Error acc []
   charlit acc (t:ts)
     -- We have already made ".'" a token, even in string
     -- literals. It's okay to put it on the accumulator as is, because
     -- the parser for string literals uses the raw text anyway.
-    | t `elem` [sym ".'", sym "'"] = grpCons Literal (acc :< t) $ normal True ts
-    | kin t == Ret = grpCons Error acc $ normal True (t:ts)
+    | t `elem` [sym ".'", sym "'"] = grpCons Literal (acc :< t) $ normal True False ts
+    | kin t == Ret = grpCons Error acc $ normal True False (t:ts)
     | otherwise = charlit (acc :< t) ts
 
   lcomment grp acc [] = grpCons grp acc []
   lcomment grp acc (t:ts)
-    | kin t == Ret = grpCons grp acc $ normal True (t:ts)
+    | kin t == Ret = grpCons grp acc $ normal True False (t:ts)
     | otherwise = lcomment grp (acc :< t) ts
 
   -- ellipsis comments include the line break in the comment
   ecomment acc [] = grpCons Comment acc []
   ecomment acc (t:ts)
-    | kin t == Ret = grpCons Comment (acc :< t) $ normal False ts
+    | kin t == Ret = grpCons Comment (acc :< t) $ normal False False ts
     | otherwise = ecomment (acc :< t) ts
 
   mlcomment _ B0 _ = error "stack should never be empty"
@@ -135,7 +136,7 @@ lex1 = normal False where
     | t == sym "%}" && not nsp && blankToEOL ts
       = let c0 = grp Comment (a :< t) in
         case az of
-          B0 -> c0 : normal False ts
+          B0 -> c0 : normal False False ts
           az :< a -> mlcomment True (az :< (a :< c0)) ts
     | otherwise    = mlcomment (updateNSP nsp t) (az :< (a :< t)) ts
 
@@ -145,7 +146,7 @@ lex1 = normal False where
   generatedCode _ acc [] = grpCons Generated acc []
   generatedCode b acc (t:ts)
     | t == sym "%<}" && not b = generatedCode True (acc :< t {kin = Nop}) ts
-    | kin t == Ret && b =  grpCons Generated (acc :< t) (normal True ts)
+    | kin t == Ret && b =  grpCons Generated (acc :< t) (normal True False ts)
     | otherwise = generatedCode b (acc :< t) ts
 
   blankToEOL :: [Tok] -> Bool
@@ -160,6 +161,9 @@ lex1 = normal False where
     | kin t == Spc = nsp
     | kin t == Ret = False
     | otherwise    = True
+
+  setXP :: Tok -> Bool
+  setXP t = kin t == Nom || t `elem` map sym [")", "]", "}", "'", ".'"]
 
   typeOfComment :: [Tok] -> Grouping
   typeOfComment (t:ts) | t == sym ">" = Directive
