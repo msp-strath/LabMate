@@ -30,6 +30,8 @@ common haskell
                        TypeFamilies,
                        TypeSynonymInstances,
                        LambdaCase
+  ghc-options:         -Wno-noncanonical-monad-instances
+                       -Wno-noncanonical-monoid-instances
 
 library
   import:              haskell
@@ -45,7 +47,6 @@ library
                      , containers
                      , text
                      , mtl
-  ghc-options:         -Wno-noncanonical-monad-instances
   hs-source-dirs:      src
   default-language:    Haskell2010
 
@@ -63,6 +64,8 @@ executable labrat
                     , Lex
                     , Lisp
                     , Parse
+                    , Parse.Matlab
+                    , Syntax
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -72,5 +75,7 @@ executable labrat
                     , containers
                     , mtl
                     , terminal-size
+                    , directory
+                    , filepath
     hs-source-dirs:   src
     default-language: Haskell2010

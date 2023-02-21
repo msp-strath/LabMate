@@ -106,7 +106,10 @@ lex1 = normal False where
 
   charlit acc [] = grpCons Error acc []
   charlit acc (t:ts)
-    | t == sym "'" = grpCons Literal (acc :< t) $ normal True ts
+    -- We have already made ".'" a token, even in string
+    -- literals. It's okay to put it on the accumulator as is, because
+    -- the parser for string literals uses the raw text anyway.
+    | t `elem` [sym ".'", sym "'"] = grpCons Literal (acc :< t) $ normal True ts
     | kin t == Ret = grpCons Error acc $ normal True (t:ts)
     | otherwise = charlit (acc :< t) ts
 
