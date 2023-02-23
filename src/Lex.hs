@@ -337,7 +337,7 @@ seeToks ts = go 0 ts where
       putStr (replicate i ' ')
       mapM_ (\ t -> putStr (show (kin t) ++ " " ++ raw t ++ " ")) ss
       putStrLn ""
-      case us of 
+      case us of
         Tok {kin = Grp g (Hide ts)} : us -> do
           putStr (replicate i ' '); print g
           go (i + 2) ts

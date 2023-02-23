@@ -96,7 +96,9 @@ plhs' pm ci = ((Var <$> pnom) >>= more)
     (pure l)
 
 plhs :: Parser LHS
-plhs = LHS <$> plhs' (pline (psep0 (pspc <|> punc ",") plhs)) topCI
+plhs = LHS <$> plhs' (pline (psep0 (pspc <|> punc ",") p)) topCI
+  where
+    p = Left Tilde <$ psym "~"  <|> Right <$> plhs
 
 data ContextInfo = CI { precedence :: Int
                       , matrixMode :: Bool -- spacing rules for unary
@@ -182,7 +184,7 @@ pexpr ci = go >>= more ci where
   stringy _ = Nothing
 
 pargs :: Bracket -> Parser [Expr]
-pargs b = pgrp (== Bracket b) $ wrap b $ psep0 (punc ",") (pexpr topCI)
+pargs b = pgrp (== Bracket b) $ wrap b $ pspcaround $ psep0 (punc ",") (pexpr topCI)
   where
     wrap Round = id
     wrap _     = pline

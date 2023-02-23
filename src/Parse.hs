@@ -120,19 +120,25 @@ isComment :: Tok -> Bool
 isComment (Tok { kin = Grp Comment _ }) = True
 isComment t = False
 
+ponespc :: Parser ()
+ponespc = ptok (\ t -> guard (kin t == Spc || isComment t))
+
 pspc :: Parser ()
-pspc = () <$ some (ptok (\ t -> guard (kin t == Spc || isComment t)))
+pspc = () <$ ponespc <* pospc
 
 -- We are relying on the lexer combining all consecutive space tokens
 
 -- Optional space
 pospc :: Parser ()
-pospc = pspc <|> pure ()
+pospc = () <$ pgreedy ponespc
 
 -- The string s must be in the lexer symbol table
 -- Leading and trailing space is consumed => do not use on its own!
 punc :: String -> Parser ()
-punc s = pospc <* psym s <* pospc
+punc = pspcaround . psym
+
+pspcaround :: Parser a -> Parser a
+pspcaround p = id <$ pospc <*> p <* pospc
 
 psep1 :: Parser () -> Parser a -> Parser [a]
 psep1 sep p = (:) <$> p <*> many (id <$ sep <*> p)
@@ -159,6 +165,11 @@ pcond pc ps pf = Parser $ \ ts -> case parser pc ts of
     reachBind p $ \(tz, a, ts) ->
     (parser (ps a) ts,) $ \(tz', b, ts) ->
     (tz <> tz', b, ts)
+
+pgreedy :: Parser a -> Parser [a]
+pgreedy p = pcond p
+  (\a -> (a:) <$> pgreedy p)
+  (pure [])
 
 testparser :: String -> Parser a -> (Reach, [a])
 testparser s p = fmap (\ (a,b,c) -> b) <$> parser p (lexer (T.pack s))
