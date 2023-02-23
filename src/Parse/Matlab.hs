@@ -160,6 +160,10 @@ pexpr ci = go >>= more ci where
    <|> (prawif Dig >>= pnumber)
    <|> ColonAlone <$ psym ":"
    <|> StringLiteral <$> ptok stringy
+   <|> Handle <$ psym "@" <* pospc <*> pnom
+   <|> Lambda <$ psym "@" <* pospc
+              <*> pgrp (== Bracket Round) (pspcaround $ psep0 (punc ",") pnom)
+              <* pospc <*> pexpr ci
   more ci e = ppeek >>= \case
     t1:t2:t3:ts | kin t1 == Spc
                && matrixMode ci

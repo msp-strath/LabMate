@@ -40,6 +40,8 @@ data Expr
   | UnaryOp UnOperator Expr
   | BinaryOp BinOperator Expr Expr
   | ColonAlone
+  | Handle String
+  | Lambda [String] Expr
   deriving (Show)
 
 data LHS' matrix
@@ -50,7 +52,8 @@ data LHS' matrix
   | Mat matrix
   deriving (Show)
 
-newtype LHS = LHS {lhs :: LHS' [LHS]} deriving (Show)
+data Tilde = Tilde deriving Show
+newtype LHS = LHS {lhs :: LHS' [Either Tilde LHS]} deriving (Show)
 
 data UnOperator
   = UPlus
