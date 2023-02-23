@@ -45,11 +45,14 @@ pcommand
   <|> Direct <$> pgrp (== Directive) (id <$ psym "%" <* psym ">" <*> pdir)
   <|> Respond <$> pgrp (== Response) pres
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
-  <|> Assign (LHS $ Mat []) <$> (EL <$>
-        (App <$> (Var <$> pnom)
-             <*> some (id <$ pspc <*> (StringLiteral <$> pcmdarg))))
-  ) pure
-  empty -- (ConfusedBy <$> ((:) <$> ptok (\ t -> t <$ guard (kin t /= Key)) <*> many (ptok Just)))
+  )
+  (\ c -> case c of
+     Assign (LHS (Mat [])) (EL (Var f)) ->
+       Assign (LHS (Mat [])) <$> (EL <$>
+          (App (Var f) <$> many (id <$ pspc <*> (StringLiteral <$> pcmdarg))))
+     _ -> pure c
+  )
+  empty
   where
     pif b = (:)
       <$> ((,) <$> pline (id <$ (if b then pkin Blk "if" else pkin Key "elseif")
@@ -67,11 +70,12 @@ pcmdarg = pstring
       start t = case kin t of
         k | k `elem` [Nom, Blk, Key, Dig] -> Just (raw t)
         Grp (Bracket b) _ | b /= Round -> Just (raw t)
-        Sym | raw t /= "," -> Just (raw t)  -- only comma?
+        Sym | not (elem (raw t) [",", "="]) -> Just (raw t)  -- only comma?
         _ -> Nothing
       more t = start t <|> extra t
       extra t = case kin t of
         Grp (Bracket _) _ -> Just (raw t)
+        Sym | raw t == "=" -> Just (raw t)
         _ -> Nothing
 
 pdir :: Parser Dir
