@@ -301,24 +301,28 @@ keywords = M.fromList (map (, True) ["if", "function", "for", "while", "switch"]
 %<}
 -}
 
-symbols :: Table
-symbols = foldr insT empT
-  [ "+", "-", ".*", "*", "./", "/", ".\\", "\\", ".^", "^", ".'", "'"
+binOps :: [String]
+binOps =
+  [ "+", "-", ".*", "*", "./", "/", ".\\", "\\", ".^", "^"
   , "==", "~=", ">", ">=", "<", "<="
-  , "&", "|", "&&", "||", "~"
+  , "&", "|", "&&", "||", "~", ":"
+  ]
+
+
+symbols :: Table
+symbols = foldr insT empT $ binOps ++
+  [ ".'", "'"
   , "@"
   , "."
   , "..."
   , "%", "%{", "%}"
   , "%<{", "%<}" -- generated code delimiters
-  , ":"
   , "!", "?"
   , "\"", "''", "\"\""
   , "="
   , ".?"
   , "(", ")", "[", "]", "{", "}", ",", ";"
   ]
-
 
 opener :: Tok -> Maybe Bracket
 opener = flip lookup $ map (sym *** id) [("(", Round), ("[", Square), ("{", Curly)]
