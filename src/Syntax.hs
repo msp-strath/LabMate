@@ -9,7 +9,9 @@ data Command
   | While Expr [Command]
   | Break
   | Continue
+  | Return
   | Function (LHS, String, [String]) [Command]
+  | Switch Expr [(Expr, [Command])] (Maybe [Command])
   | ConfusedBy [Tok]
   | Direct Dir
   | Respond Res

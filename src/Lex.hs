@@ -110,7 +110,10 @@ lex1 = normal False False where
     -- We have already made ".'" a token, even in string
     -- literals. It's okay to put it on the accumulator as is, because
     -- the parser for string literals uses the raw text anyway.
-    | t `elem` [sym ".'", sym "'"] = grpCons Literal (acc :< t) $ normal True False ts
+    | t `elem` [sym ".'", sym "'"] =
+      case ts of
+        (t':ts) | t' == sym "'" -> charlit (acc :< t :< t') ts
+        _ -> grpCons Literal (acc :< t) $ normal True False ts
     | kin t == Ret = grpCons Error acc $ normal True False (t:ts)
     | otherwise = charlit (acc :< t) ts
 
@@ -177,14 +180,23 @@ lex2 = helper B0 where
   helper (az :< a) [] = helper az $ grpCons Block a []
   helper az (t : ts)
     | kin t == Blk  = helper (az :< (B0 :< t)) ts
-    | t == end = case az of
+    | t == end && endsABlock az ts = case az of
         az :< a -> helper az $ grpCons Block (a :< t) ts
-        B0 -> helper B0 $ grpCons Error (B0 :< t)  ts
   helper B0 (t : ts) = gen t : helper B0 ts
   helper (az :< a) (t : ts) = helper (az :< (a :< gen t)) ts
 
   gen (t@Tok { kin = Grp Generated (Hide ss) }) = t { kin = Grp Generated (Hide $ lex2 ss) }
+  gen t | t == end =  t { kin = Nom} -- An 'end' in an expression, not a block delimiter
   gen t = t
+
+  endsABlock B0 ts = False
+  endsABlock (_ :< a) ts = junkUntilNL ts && junkUntilNL (revz a)
+
+  junkUntilNL [] = True
+  junkUntilNL (t:ts)
+    | kin t == Ret || t == sym ";" = True
+    | kin t == Spc || isComment t = junkUntilNL ts
+    | otherwise = False
 
   end = Tok "end" Key dump
 
@@ -245,6 +257,11 @@ grpCons :: Grouping -> Bwd Tok -> [Tok] -> [Tok]
 grpCons g B0 ts = ts
 grpCons g tz ts = grp g tz : ts
 
+-- only use after lex1
+isComment :: Tok -> Bool
+isComment (Tok { kin = Grp Comment _ }) = True
+isComment _ = False
+
 unix :: T.Text -> T.Text
 unix t = case T.uncons t of
   Nothing -> t
@@ -252,7 +269,8 @@ unix t = case T.uncons t of
     '\r' -> case T.uncons t of
       Just ('\n', _) -> unix t
       _ -> T.cons '\n' (unix t)
-    _ -> T.cons c (unix t)
+    _ | T.null t && c /= '\n' -> T.pack [c, '\n']
+      | otherwise -> T.cons c (unix t)
 
 peek :: Doc -> Maybe (Char, Doc)
 peek (t, p) = T.uncons t >>= \ (x, t) -> return (x, (t, p `after` x))
@@ -318,7 +336,7 @@ symbols = foldr insT empT $ binOps ++
   , "%", "%{", "%}"
   , "%<{", "%<}" -- generated code delimiters
   , "!", "?"
-  , "\"", "''", "\"\""
+  , "\"", "\"\""
   , "="
   , ".?"
   , "(", ")", "[", "]", "{", "}", ",", ";"

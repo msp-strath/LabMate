@@ -116,10 +116,6 @@ pline p = id <$ many (ptok junkLine)
       Grp (Line _) (Hide ts) | all junk ts -> Just ()
       _ -> Nothing
 
-isComment :: Tok -> Bool
-isComment (Tok { kin = Grp Comment _ }) = True
-isComment t = False
-
 ponespc :: Parser ()
 ponespc = ptok (\ t -> guard (kin t == Spc || isComment t))
 

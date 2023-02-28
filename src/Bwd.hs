@@ -145,3 +145,7 @@ unzipWith f (az :< a) =
   let (bz, cz) = unzipWith f az in
   let (b, c) = f a in
   (bz :< b, cz :< c)
+
+revz :: Bwd a -> [a]
+revz B0 = []
+revz (az :< a) = a : revz az

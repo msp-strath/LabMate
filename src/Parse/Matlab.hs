@@ -21,7 +21,8 @@ pfile = many (pline pcommand) <* peoi
 pcommand :: Parser Command
 pcommand
   = pcond
-  (    Assign <$> (plhs <* punc "=" <|> pure (LHS $ Mat [])) <*> pexpr comCI
+  ( Assign <$> plhs <* punc "=" <*> pexpr topCI
+  <|> Assign (LHS (Mat [])) <$> pexpr comCI
   <|> id <$> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
        <|> For <$> pline ((,) <$ pkin Blk "for" <* pospc
@@ -39,9 +40,14 @@ pcommand
                  <*> (pgrp (== Bracket Round) (psep0 (punc ",") pnom) <|> pure []))
            <*> many (pline pcommand)
            <*  (pend <|> pure ())
+       <|> Switch <$> pline (id <$ pkin Blk "switch" <* pospc <*> pexpr topCI)
+                  <*> many pcase
+                  <*> optional potherwise
+                  <* pend
       )
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
+  <|> Return <$ pkin Key "return"
   <|> Direct <$> pgrp (== Directive) (id <$ psym "%" <* psym ">" <*> pdir)
   <|> Respond <$> pgrp (== Response) pres
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
@@ -62,6 +68,10 @@ pcommand
     pelse = pure Nothing
         <|> Just <$ pline (pkin Key "else") <*> many (pline pcommand)
     pend = pline (pkin Key "end")
+    pcase = (,) <$> pline (id <$ pkin Key "case" <* pospc <*> pexpr topCI)
+                <*> many (pline pcommand)
+    potherwise = id <$  pline (id <$ pkin Key "otherwise")
+                    <*> many (pline pcommand)
 
 pcmdarg :: Parser String
 pcmdarg = pstring
@@ -70,7 +80,7 @@ pcmdarg = pstring
       start t = case kin t of
         k | k `elem` [Nom, Blk, Key, Dig] -> Just (raw t)
         Grp (Bracket b) _ | b /= Round -> Just (raw t)
-        Sym | not (elem (raw t) [",", "="]) -> Just (raw t)  -- only comma?
+        Sym | not (elem (raw t) [",", ";", "="]) -> Just (raw t)  -- only those?
         _ -> Nothing
       more t = start t <|> extra t
       extra t = case kin t of
@@ -117,7 +127,7 @@ plhs' pm ci = ((Var <$> pnom) >>= more)
     <|> () <$ pspc <* psym "." <* pspc
 
 plhs :: Parser LHS
-plhs = LHS <$> plhs' (pline (psep0 (pspc <|> punc ",") p)) topCI
+plhs = LHS <$> plhs' (pline (psep0 (pspc <|> punc ",") p) <|> [] <$ peoi) topCI
   where
     p = Left Tilde <$ psym "~"  <|> Right <$> plhs
 
@@ -178,8 +188,12 @@ pcxspc ci = if matrixMode ci then pure () else pospc
 
 pstring :: Parser String
 pstring = ptok stringy where
-  stringy (Tok {kin = Grp Literal _, raw = '\'': cs@(_ : _)}) = Just (init cs)
+  stringy (Tok {kin = Grp Literal _, raw = '\'': cs@(_ : _)}) = Just (escape (init cs))
   stringy _ = Nothing
+
+  escape ('\'':'\'':cs) = '\'' : escape cs
+  escape (c:cs) = c : escape cs
+  escape [] = []
 
 pexpr :: ContextInfo -> Parser Expr
 pexpr ci = go >>= more ci where
