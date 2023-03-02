@@ -15,14 +15,20 @@ import Parse
 
 import Lisp
 
-pfile :: Parser [Command]
-pfile = many (pline pcommand) <* peoi
+pfile :: Parser (WithSource [Command])
+pfile = pws pfile'
+
+pfile' :: Parser [Command]
+pfile' = many (pline pcommand) <* peoi
 
 pcommand :: Parser Command
-pcommand
+pcommand = pws pcommand'
+
+pcommand' :: Parser Command'
+pcommand'
   = pcond
   ( Assign <$> plhs <* punc "=" <*> pexpr topCI
-  <|> Assign (LHS (Mat [])) <$> pexpr comCI
+  <|> Assign EmptyLHS <$> pexpr comCI
   <|> id <$> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
        <|> For <$> pline ((,) <$ pkin Blk "for" <* pospc
@@ -35,7 +41,7 @@ pcommand
                  <*  pend
        <|> Function
            <$> pline ((,,) <$ pkin Blk "function" <* pospc
-                 <*> (plhs <* punc "=" <|> pure (LHS $ Mat []))
+                 <*> (plhs <* punc "=" <|> pure EmptyLHS)
                  <*> pnom <* pospc
                  <*> (pgrp (== Bracket Round) (psep0 (punc ",") pnom) <|> pure []))
            <*> many (pline pcommand)
@@ -53,9 +59,9 @@ pcommand
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
   )
   (\ c -> case c of
-     Assign (LHS (Mat [])) (EL (Var f)) ->
-       Assign (LHS (Mat [])) <$> (EL <$>
-          (App (Var f) <$> many (id <$ pspc <*> (StringLiteral <$> pcmdarg))))
+     Assign EmptyLHS (EL (Var f) :<=: src) ->
+       Assign EmptyLHS <$> pws' src (EL <$>
+          (App (Var f :<=: src) <$> many (id <$ pspc <*> (fmap StringLiteral <$> pcmdarg))))
      _ -> pure c
   )
   empty
@@ -73,8 +79,11 @@ pcommand
     potherwise = id <$  pline (id <$ pkin Key "otherwise")
                     <*> many (pline pcommand)
 
-pcmdarg :: Parser String
-pcmdarg = pstring
+pcmdarg :: Parser (WithSource String)
+pcmdarg = pws pcmdarg'
+
+pcmdarg' :: Parser String
+pcmdarg' = pstring
       <|> concat <$> ((:) <$> ptok start <*> many (ptok more))
       where
       start t = case kin t of
@@ -89,15 +98,21 @@ pcmdarg = pstring
         _ -> Nothing
 
 pdir :: Parser Dir
-pdir = Declare <$> plarrow ptensortype
-   <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
+pdir = pws pdir'
+
+pdir' :: Parser Dir'
+pdir' = Declare <$> plarrow ptensortype
+    <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
 
 ptensortype :: Parser TensorType
-ptensortype = Tensor <$> (id <$> pgrp (== Bracket Square) (pline psquex) <* pospc
+ptensortype = pws ptensortype'
+
+ptensortype' :: Parser TensorType'
+ptensortype' = Tensor <$> (id <$> pgrp (== Bracket Square) (pline psquex) <* pospc
                          <|> pure (one , one))
                      <*> pentrytype
   where
-  one = ("", IntLiteral 1)
+  one = ("", IntLiteral 1  :<=: (-1,[]))
   psquex = (,) <$> (id <$> plarrow (pexpr topCI) <* pospc <* pkin Nom "x" <* pospc
                     <|> pure one)
                <*> plarrow (pexpr topCI)
@@ -108,7 +123,10 @@ plarrow p = pcond ((,) <$> pnom <* pospc <* psym "<" <* psym "-" <* pospc ) (<$>
         <|> pgrp (== Bracket Round) (plarrow p)
 
 pentrytype :: Parser EntryType
-pentrytype =
+pentrytype = pws pentrytype'
+
+pentrytype' :: Parser EntryType'
+pentrytype' =
       Cmhn <$> plarrow (pexpr topCI) <* punc "," <*> pexpr topCI
   <|> Ty <$> pexpr topCI
 
@@ -116,14 +134,17 @@ pres :: Parser Res
 pres = id <$ psym "%" <* psym "<" <*> many (ptok Just)
 
 plhs' :: Parser matrix -> ContextInfo -> Parser (LHS' matrix)
-plhs' pm ci = ((Var <$> pnom) >>= more)
+plhs' pm ci = pws (plhs'' pm ci)
+
+plhs'' :: Parser matrix -> ContextInfo -> Parser (LHS'' matrix)
+plhs'' pm ci = (pws (Var <$> pnom) >>= more)
    <|> Mat <$> pgrp (== Bracket Square) pm
   where
   more l = pcond
-    (App l <$ pcxspc ci <*> pargs Round <|> Brp l <$ pcxspc ci <*> pargs Curly
-     <|> Dot l <$ (if commandMode ci then yuk else punc ".") <*> pnom)
+    (pws' (source l) (App l <$ pcxspc ci <*> pargs Round <|> Brp l <$ pcxspc ci <*> pargs Curly
+     <|> Dot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
     more
-    (pure l)
+    (pure (what l))
   yuk = () <$ psym "." <* pospc
     <|> () <$ pspc <* psym "." <* pspc
 
@@ -197,11 +218,15 @@ pstring = ptok stringy where
   escape [] = []
 
 pexpr :: ContextInfo -> Parser Expr
-pexpr ci = go >>= more ci where
-  go = id <$> pgrp (== Bracket Round) (id <$ pospc <*> pexpr topCI <* pospc)
+pexpr ci = pws (pexpr' ci)
+
+pexpr' :: ContextInfo -> Parser Expr'
+pexpr' ci = pws go >>= more ci where
+  go :: Parser Expr'
+  go = id <$> pgrp (== Bracket Round) (id <$ pospc <*> pexpr' topCI <* pospc)
    <|> UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel})
        -- should UnaryOp check precedence level?
-   <|> EL <$> plhs' (many prow) ci
+   <|> EL <$> plhs'' (many prow) ci
    <|> Cell <$> pgrp (== Bracket Curly) (many prow)
    <|> (prawif Dig >>= pnumber)
    <|> ColonAlone <$ psym ":"
@@ -210,32 +235,37 @@ pexpr ci = go >>= more ci where
    <|> Lambda <$ psym "@" <* pospc
               <*> pgrp (== Bracket Round) (pspcaround $ psep0 (punc ",") pnom)
               <* pospc <*> pexpr (ci { commandMode = False })
+  more :: ContextInfo -> Expr -> Parser Expr'
   more ci e = ppeek >>= \case
     t1:t2:t3:ts | kin t1 == Spc
                && matrixMode ci
                && t2 `elem` [sym "+", sym "-"]
-               && not (kin t3 == Spc) -> pure e
+               && not (kin t3 == Spc) -> pure (what e)
     t1:t2:t3:ts | kin t1 == Spc
                && commandMode ci
-               && (case e of { (EL (Var _)) -> True ; _ -> False })
+               && (case what e of { (EL (Var _)) -> True ; _ -> False })
                && t2 `elem` (sym <$> binOps)
-               && not (kin t3 == Spc) -> pure e
+               && not (kin t3 == Spc) -> pure (what e)
     _ -> tight e
     -- pcond pspc (\ _ -> loose e) (tight e)
     where
+      trybinop :: Parser (BinOperator, ContextInfo, ContextInfo)
       trybinop = (id <$ pospc <*> pbinaryop) >>= \ b -> case contextBinop ci b of
         Nothing -> empty
         Just (cio, cia) -> pure (b, cio { commandMode = False }
                                   , cia { commandMode = False })
-      tight e = pcond trybinop
-                      (\ (b, cio, cia) -> (BinaryOp b e <$ pospc <*> pexpr cio) >>= more cia)
-                      (pcond ptranspose (\ op -> more ci (UnaryOp op e)) (pure e))
+      tight :: Expr -> Parser Expr'
+      tight e = pcond (pws' (source e) trybinop)
+                      (\ ((b, cio, cia) :<=: src) -> pws' src (BinaryOp b e <$ pospc <*> pexpr cio) >>= more cia)
+                      (pcond (pws' (source e) ptranspose) (\ (op :<=: src) -> more ci (UnaryOp op e :<=: src)) (pure (what e)))
+      {-
       loose e | not (matrixMode ci) = tight e
       loose e = do
         ts <- ppeek
         case ts of
           (t1:t2:ts) | t1 `elem` [sym "+", sym "-"] && not (kin t2 == Spc) -> pure e
           _ -> tight e
+      -}
 
 pargs :: Bracket -> Parser [Expr]
 pargs b = pgrp (== Bracket b) $ wrap b $ pspcaround $ psep0 (punc ",") (pexpr topCI)
@@ -268,7 +298,7 @@ pbinaryop = Pow False <$ psym "^"
         <|> Or <$> (False <$ psym "||" <|> True <$ psym "|")
         -- ...
 
-pnumber :: String -> Parser Expr
+pnumber :: String -> Parser Expr'
 pnumber ds = mkNum <$> optional (id <$ psym "." <*> (prawif Dig <|> pure "0"))
                    <*> optional ((,) <$ (pkin Nom "e" <|> pkin Nom "E")
                                     <*> ('-' <$ psym "-" <|> ('+' <$ psym "+"))
@@ -280,7 +310,7 @@ pnumber ds = mkNum <$> optional (id <$ psym "." <*> (prawif Dig <|> pure "0"))
                                    _ -> Nothing)
                                  )
   where
-  mkNum :: Maybe String -> Maybe (Char, String) -> Expr
+  mkNum :: Maybe String -> Maybe (Char, String) -> Expr'
   mkNum Nothing Nothing = IntLiteral (read ds)
   mkNum Nothing (Just ('+', es)) =
     IntLiteral (read (ds ++ replicate (read es) '0'))

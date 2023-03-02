@@ -42,11 +42,12 @@ reachBind (r, as) k = max r *** id $ foldMap go as
            in (r, map f bs)
 
 newtype Parser a = Parser
-  { parser :: [Tok] ->
+  { parser :: Nonce -> [Tok] ->
     (Reach
-    , [(Bwd Tok -- consumed tokens
-      , a       -- meaning
-      , [Tok]   -- remaining tokens
+    , [(Bwd Eaten -- consumed tokens
+      , a         -- meaning
+      , Nonce     -- updated nonce
+      , [Tok]     -- remaining tokens
       )]
     )
   }
@@ -56,9 +57,9 @@ newtype Parser a = Parser
 -- leading or trailing space.
 
 instance Monad Parser where
-  return a = Parser $ \ ts -> (Nowhere, [ (B0, a, ts) ])
-  Parser pa >>= k = Parser $ \ ts -> reachBind (pa ts) $ \(az, a, ts) ->
-                    (parser (k a) ts, \(bz, b, ts) -> (az <> bz, b, ts))
+  return a = Parser $ \ n ts -> (Nowhere, [ (B0, a, n, ts) ])
+  Parser pa >>= k = Parser $ \ n ts -> reachBind (pa n ts) $ \(az, a, n, ts) ->
+                    (parser (k a) n ts, \(bz, b, n, ts) -> (az <> bz, b, n, ts))
 
 
 instance Applicative Parser where
@@ -69,35 +70,38 @@ instance Alternative Parser where
   empty = mempty
   (<|>) = mappend
 
-data WithSource a = a :<=: [Tok]
+-- Parser p is assumed to produce output including the source src passed in
+pws' :: (Nonce, [Eaten]) -> Parser a -> Parser (WithSource a)
+pws' src@(m, _) p = Parser $ \ n ts -> reachBind (parser p n ts) $ \(az, a, n, ts) ->
+               ((Nowhere, [(B0 :< N n, a :<=: (n, N m : (az <>> [])), n+1, ts)]), id)
 
 pws :: Parser a -> Parser (WithSource a)
-pws p = Parser $ \ ts -> reachBind (parser p ts) $ \(az, a, ts) ->
-        ((Nowhere, [(az, a :<=: (az <>> []), ts)]), id)
+pws p = Parser $ \ n ts -> reachBind (parser p n ts) $ \(az, a, n, ts) ->
+         ((Nowhere, [(B0 :< N n, a :<=: (n, az <>> []), n+1, ts)]), id)
 
 -- TODO: at some point, we will need to record more provenance in the
 -- token sequence
 
 ptok :: (Tok -> Maybe a) -> Parser a
-ptok f = Parser $ \ts -> (reached ts,) $ case ts of
-  t:ts | Just a <- f t -> [(B0 :< t, a, ts)]
+ptok f = Parser $ \ n ts -> (reached ts,) $ case ts of
+  t:ts | Just a <- f t -> [(B0 :< T t, a, n, ts)]
   _ -> []
 
 peoi :: Parser ()
-peoi = Parser $ \ ts -> (reached ts,) $ case ts of
-  [] -> [(B0, (), [])]
+peoi = Parser $ \ n ts -> (reached ts,) $ case ts of
+  [] -> [(B0, (), n, [])]
   _ ->  []
 
 ppeek :: Parser [Tok]
-ppeek = Parser $ \ ts -> (Nowhere, [(B0, ts, ts)])
+ppeek = Parser $ \ n ts -> (Nowhere, [(B0, ts, n, ts)])
 
 
 -- The parser p must handle leading and trailing space/junk
 pgrp :: (Grouping -> Bool) -> Parser a -> Parser a
-pgrp f p = Parser $ \ ts -> (max (reached ts) *** id) $ case ts of
-  t:ts | Grp g (Hide ss) <- kin t, f g -> reachBind (parser p ss) $ \(_, a, as) ->
+pgrp f p = Parser $ \ n ts -> (max (reached ts) *** id) $ case ts of
+  t:ts | Grp g (Hide ss) <- kin t, f g -> reachBind (parser p n ss) $ \(az, a, n, as) ->
                               (,id) . (Nowhere,) $ case as of
-                                [] -> [(B0 :< t, a, ts)]
+                                [] -> [(B0 :< T t, a, n, ts)] -- TODO: replace `T t` by something involving az
                                 _  -> []
   _ -> (Nowhere, [])
 
@@ -157,12 +161,12 @@ pnom :: Parser String
 pnom = ptok $ \ t -> if kin t == Nom then Just (raw t) else Nothing
 
 pcond :: Parser a -> (a -> Parser b) -> Parser b -> Parser b
-pcond pc ps pf = Parser $ \ ts -> case parser pc ts of
-  (r,[]) -> max r *** id $ parser pf ts
+pcond pc ps pf = Parser $ \ n ts -> case parser pc n ts of
+  (r,[]) -> max r *** id $ parser pf n ts
   p ->
-    reachBind p $ \(tz, a, ts) ->
-    (parser (ps a) ts,) $ \(tz', b, ts) ->
-    (tz <> tz', b, ts)
+    reachBind p $ \(tz, a, n, ts) ->
+    (parser (ps a) n ts,) $ \(tz', b, n, ts) ->
+    (tz <> tz', b, n, ts)
 
 pgreedy :: Parser a -> Parser [a]
 pgreedy p = pcond p
@@ -170,4 +174,4 @@ pgreedy p = pcond p
   (pure [])
 
 testparser :: String -> Parser a -> (Reach, [a])
-testparser s p = fmap (\ (a,b,c) -> b) <$> parser p (lexer (T.pack s))
+testparser s p = fmap (\ (a,b,n,c) -> b) <$> parser p 0 (lexer (T.pack s))

@@ -369,3 +369,17 @@ seeToks ts = go 0 ts where
           go (i + 2) ts
           go i us
         _ -> return ()
+
+type Nonce = Int
+
+data Eaten = T Tok | N Nonce
+
+instance Show Eaten where
+  show (T t) = raw t
+  show (N n) = "$" ++ show n
+
+data WithSource a = (:<=:) { what :: a , source :: (Nonce, [Eaten]) }
+  deriving (Functor)
+
+instance Show a => Show (WithSource a) where
+  show (a :<=: (n, src)) = "$" ++ show n ++ " = `" ++ (src >>= show) ++ "`" ++ show a

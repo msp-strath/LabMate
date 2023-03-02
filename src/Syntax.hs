@@ -2,7 +2,9 @@ module Syntax where
 
 import Lex
 
-data Command
+type Command = WithSource Command'
+
+data Command'
   = Assign LHS Expr
   | If [(Expr, [Command])] (Maybe [Command])
   | For (String, Expr) [Command]
@@ -12,30 +14,37 @@ data Command
   | Return
   | Function (LHS, String, [String]) [Command]
   | Switch Expr [(Expr, [Command])] (Maybe [Command])
---  | ConfusedBy [Tok]
   | Direct Dir
   | Respond Res
   | GeneratedCode [Command]
   deriving (Show)
 
-data Dir
+type Dir = WithSource Dir'
+
+data Dir'
   = Declare (String, TensorType)
   | Rename String String
   deriving Show
 
-data TensorType
+type TensorType = WithSource TensorType'
+
+data TensorType'
   = Tensor ((String, Expr), (String, Expr)) EntryType
   deriving Show
 
-data EntryType
+type EntryType = WithSource EntryType'
+
+data EntryType'
   = Ty Expr
   | Cmhn (String, Expr) Expr
   deriving (Show)
 
 type Res = [Tok]
 
-data Expr
-  = EL (LHS' [[Expr]])
+type Expr = WithSource Expr'
+
+data Expr'
+  = EL (LHS'' [[Expr]])
   | Cell [[Expr]]
   | IntLiteral Int
   | StringLiteral String
@@ -47,7 +56,9 @@ data Expr
   | Lambda [String] Expr
   deriving (Show)
 
-data LHS' matrix
+type LHS' matrix = WithSource (LHS'' matrix)
+
+data LHS'' matrix
   = Var String
   | App (LHS' matrix) [Expr]
   | Brp (LHS' matrix) [Expr]
@@ -56,7 +67,10 @@ data LHS' matrix
   deriving (Show)
 
 data Tilde = Tilde deriving Show
+
 newtype LHS = LHS {lhs :: LHS' [Either Tilde LHS]} deriving (Show)
+
+pattern EmptyLHS = LHS (Mat [] :<=: (-1,[]))
 
 data UnOperator
   = UPlus
@@ -65,7 +79,6 @@ data UnOperator
   | UTranspose
   | UDotTranspose
   deriving (Show)
-
 
 data BinOperator
   = Pow Bool{-dotted?-}

@@ -29,7 +29,8 @@ common haskell
                        TupleSections,
                        TypeFamilies,
                        TypeSynonymInstances,
-                       LambdaCase
+                       LambdaCase,
+                       PatternSynonyms
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances
 

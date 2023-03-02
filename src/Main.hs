@@ -23,14 +23,14 @@ main = do
       doesDirectoryExist f >>= \case
         True -> actDir f
         False -> actFile f >>= \case
-          Right cs -> mapM_ print cs
+          Right cs -> print cs
           Left e -> printError e
     x -> putStrLn $ "Unrecognised arguments: " ++ (show x)
 
 printError :: (FilePath, Reach, Int) -> IO ()
 printError (f, r, n) = do putStr (f ++ ": parse error "); print r; putStr (show n) ; putStrLn " parses\n"
 
-actFile :: FilePath -> IO (Either (FilePath, Reach, Int) [Command])
+actFile :: FilePath -> IO (Either (FilePath, Reach, Int) (WithSource [Command]))
 actFile f = do
   doesFileExist f >>= \case
     False -> error $ "File does not exist: " ++ f
@@ -40,8 +40,9 @@ actFile f = do
       -- termSize <- size
       -- let w = maybe 80 width termSize
       -- putStrLn $ pretty w l
-      case parser pfile l of
-        (_, [(_,cs,_)]) -> pure (Right cs)
+      case parser pfile 0 l of
+        (_, [(_,cs,_,_)]) -> do
+          pure (Right cs)
         (r, xs) -> pure (Left (f, r, length xs))
           -- putStrLn $ pretty w (tokenStreamToLisp l)
 
