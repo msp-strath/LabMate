@@ -12,7 +12,7 @@ data Command
   | Return
   | Function (LHS, String, [String]) [Command]
   | Switch Expr [(Expr, [Command])] (Maybe [Command])
-  | ConfusedBy [Tok]
+--  | ConfusedBy [Tok]
   | Direct Dir
   | Respond Res
   | GeneratedCode [Command]

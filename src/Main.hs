@@ -9,6 +9,9 @@ import qualified Data.Text.IO as T
 
 import Lex
 import Lisp
+
+import Syntax
+
 import Parse
 import Parse.Matlab
 
@@ -20,14 +23,14 @@ main = do
       doesDirectoryExist f >>= \case
         True -> actDir f
         False -> actFile f >>= \case
-          Nothing -> return ()
-          Just e -> printError e
+          Right cs -> mapM_ print cs
+          Left e -> printError e
     x -> putStrLn $ "Unrecognised arguments: " ++ (show x)
 
 printError :: (FilePath, Reach, Int) -> IO ()
 printError (f, r, n) = do putStr (f ++ ": parse error "); print r; putStr (show n) ; putStrLn " parses\n"
 
-actFile :: FilePath -> IO (Maybe (FilePath, Reach, Int))
+actFile :: FilePath -> IO (Either (FilePath, Reach, Int) [Command])
 actFile f = do
   doesFileExist f >>= \case
     False -> error $ "File does not exist: " ++ f
@@ -38,17 +41,17 @@ actFile f = do
       -- let w = maybe 80 width termSize
       -- putStrLn $ pretty w l
       case parser pfile l of
-        (_, [(_,cs,_)]) -> pure Nothing
-        (r, xs) -> pure (Just (f, r, length xs))
+        (_, [(_,cs,_)]) -> pure (Right cs)
+        (r, xs) -> pure (Left (f, r, length xs))
           -- putStrLn $ pretty w (tokenStreamToLisp l)
 
 actDir :: FilePath -> IO ()
 actDir f = do
   files <- filter (isExtensionOf ".m") <$> listDirectory f
   done <- traverse actFile ((f </>) <$> files)
-  let nothings = length [ () | Nothing <- done ]
+  let nothings = length [ () | Right _ <- done ]
   let total = length done
   let msg = "Parsed " ++ show nothings ++ "/" ++ show total ++ " files.\n"
-  traverse printError [ x | Just x <- done ]
+  traverse printError [ x | Left x <- done ]
   putStr msg
 
