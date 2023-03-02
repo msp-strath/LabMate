@@ -48,7 +48,7 @@ pcommand
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
   <|> Return <$ pkin Key "return"
-  <|> Direct <$> pgrp (== Directive) (id <$ psym "%" <* psym ">" <*> pdir)
+  <|> Direct <$> pgrp (== Directive) (id <$ psym "%" <* psym ">" <* pospc <*> pdir <* pospc)
   <|> Respond <$> pgrp (== Response) pres
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
   )
@@ -89,7 +89,8 @@ pcmdarg = pstring
         _ -> Nothing
 
 pdir :: Parser Dir
-pdir = Declare <$ pospc <*> plarrow ptensortype
+pdir = Declare <$> plarrow ptensortype
+   <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
 
 ptensortype :: Parser TensorType
 ptensortype = Tensor <$> (id <$> pgrp (== Bracket Square) (pline psquex) <* pospc

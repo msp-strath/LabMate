@@ -117,10 +117,14 @@ lex1 = normal False False where
     | kin t == Ret = grpCons Error acc $ normal True False (t:ts)
     | otherwise = charlit (acc :< t) ts
 
-  lcomment grp acc [] = grpCons grp acc []
+  lcomment grp acc [] = fixup $ grpCons grp acc []
   lcomment grp acc (t:ts)
-    | kin t == Ret = grpCons grp acc $ normal True False (t:ts)
+    | kin t == Ret = fixup $ grpCons grp acc $ normal True False (t:ts)
     | otherwise = lcomment grp (acc :< t) ts
+
+  fixup (t@Tok { kin = Grp g (Hide (a0:a1:as)) }:ts) | g `elem` [Directive, Response]
+    = t { kin = Grp g (Hide (a0:a1:lex1 as))} : ts
+  fixup ts = ts
 
   -- ellipsis comments include the line break in the comment
   ecomment acc [] = grpCons Comment acc []

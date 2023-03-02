@@ -18,8 +18,9 @@ data Command
   | GeneratedCode [Command]
   deriving (Show)
 
-data Dir =
-  Declare (String, TensorType)
+data Dir
+  = Declare (String, TensorType)
+  | Rename String String
   deriving Show
 
 data TensorType

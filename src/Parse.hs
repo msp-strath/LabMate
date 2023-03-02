@@ -91,6 +91,8 @@ peoi = Parser $ \ ts -> (reached ts,) $ case ts of
 ppeek :: Parser [Tok]
 ppeek = Parser $ \ ts -> (Nowhere, [(B0, ts, ts)])
 
+
+-- The parser p must handle leading and trailing space/junk
 pgrp :: (Grouping -> Bool) -> Parser a -> Parser a
 pgrp f p = Parser $ \ ts -> (max (reached ts) *** id) $ case ts of
   t:ts | Grp g (Hide ss) <- kin t, f g -> reachBind (parser p ss) $ \(_, a, as) ->
