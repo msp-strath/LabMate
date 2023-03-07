@@ -44,7 +44,7 @@ reachBind (r, as) k = max r *** id $ foldMap go as
 newtype Parser a = Parser
   { parser :: Nonce -> [Tok] ->
     (Reach
-    , [(Bwd Eaten -- consumed tokens
+    , [(Bwd Tok -- consumed tokens
       , a         -- meaning
       , Nonce     -- updated nonce
       , [Tok]     -- remaining tokens
@@ -71,20 +71,20 @@ instance Alternative Parser where
   (<|>) = mappend
 
 -- Parser p is assumed to produce output including the source src passed in
-pws' :: (Nonce, [Eaten]) -> Parser a -> Parser (WithSource a)
+pws' :: (Nonce, [Tok]) -> Parser a -> Parser (WithSource a)
 pws' src@(m, _) p = Parser $ \ n ts -> reachBind (parser p n ts) $ \(az, a, n, ts) ->
-               ((Nowhere, [(B0 :< N n, a :<=: (n, N m : (az <>> [])), n+1, ts)]), id)
+               ((Nowhere, [(B0 :< non n, a :<=: (n, non m : (az <>> [])), n+1, ts)]), id)
 
 pws :: Parser a -> Parser (WithSource a)
 pws p = Parser $ \ n ts -> reachBind (parser p n ts) $ \(az, a, n, ts) ->
-         ((Nowhere, [(B0 :< N n, a :<=: (n, az <>> []), n+1, ts)]), id)
+         ((Nowhere, [(B0 :< non n, a :<=: (n, az <>> []), n+1, ts)]), id)
 
 -- TODO: at some point, we will need to record more provenance in the
 -- token sequence
 
 ptok :: (Tok -> Maybe a) -> Parser a
 ptok f = Parser $ \ n ts -> (reached ts,) $ case ts of
-  t:ts | Just a <- f t -> [(B0 :< T t, a, n, ts)]
+  t:ts | Just a <- f t -> [(B0 :< t, a, n, ts)]
   _ -> []
 
 peoi :: Parser ()
@@ -100,9 +100,10 @@ ppeek = Parser $ \ n ts -> (Nowhere, [(B0, ts, n, ts)])
 pgrp :: (Grouping -> Bool) -> Parser a -> Parser a
 pgrp f p = Parser $ \ n ts -> (max (reached ts) *** id) $ case ts of
   t:ts | Grp g (Hide ss) <- kin t, f g -> reachBind (parser p n ss) $ \(az, a, n, as) ->
-                              (,id) . (Nowhere,) $ case as of
-                                [] -> [(B0 :< T t, a, n, ts)] -- TODO: replace `T t` by something involving az
-                                _  -> []
+           let toks = az <>> [] in
+             (,id) . (Nowhere,) $ case as of
+               [] -> [(B0 :< t { raw = groupRaw g toks, kin = Grp g (Hide toks) }, a, n, ts)]
+               _  -> []
   _ -> (Nowhere, [])
 
 

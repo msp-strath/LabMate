@@ -24,7 +24,13 @@ data Kin
   | Ret -- return character
   | Nop -- token to be filtered from a Grp, keeping its raw text
   | Urk -- unrecognized
+  | Non Nonce -- nonces
   deriving (Show, Eq)
+
+type Nonce = Int
+
+non :: Int -> Tok
+non n = Tok ("$" ++ show n) (Non n) dump
 
 data Tok = Tok
   { raw :: String
@@ -45,6 +51,11 @@ data Grouping = Literal
 
 data Bracket = Round | Square | Curly
   deriving (Show, Eq)
+
+brackets :: Bracket -> (String, String)
+brackets Round = ("(", ")")
+brackets Square = ("[", "]")
+brackets Curly = ("{", "}")
 
 data LineTerminator = RET | Semicolon
   deriving (Show, Eq)
@@ -370,16 +381,24 @@ seeToks ts = go 0 ts where
           go i us
         _ -> return ()
 
-type Nonce = Int
+groupRaw :: Grouping -> [Tok] -> String
+groupRaw g ts = prefix g ++ (ts >>= raw) ++ suffix g
+  where
+    prefix g = case g of
+      Bracket b -> fst (brackets b)
+      Generated -> "%<{"
+      _ -> ""
+    suffix g = case g of
+      Bracket b -> snd (brackets b)
+      Generated -> "%<}"
+      _ -> ""
 
-data Eaten = T Tok | N Nonce
-
-instance Show Eaten where
-  show (T t) = raw t
-  show (N n) = "$" ++ show n
-
-data WithSource a = (:<=:) { what :: a , source :: (Nonce, [Eaten]) }
+data WithSource a = (:<=:) { what :: a , source :: (Nonce, [Tok]) }
   deriving (Functor)
 
 instance Show a => Show (WithSource a) where
-  show (a :<=: (n, src)) = "$" ++ show n ++ " = `" ++ (src >>= show) ++ "`" ++ show a
+  show (a :<=: (n, src)) = "$" ++ show n ++ " = `" ++ (src >>= showEaten) ++ "`" ++ show a
+    where
+      showEaten t
+        | Non n <- kin t = "$" ++ show n
+        | otherwise = raw t
