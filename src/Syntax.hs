@@ -44,7 +44,11 @@ type Res = [Tok]
 type Expr = WithSource Expr'
 
 data Expr'
-  = EL (LHS'' [[Expr]])
+  = Var String
+  | App Expr [Expr]
+  | Brp Expr [Expr] -- brace projection, eg `e { 5, 7 }`
+  | Dot Expr String -- projection from a struct
+  | Mat [[Expr]]
   | Cell [[Expr]]
   | IntLiteral Int
   | StringLiteral String
@@ -56,21 +60,19 @@ data Expr'
   | Lambda [String] Expr
   deriving (Show)
 
-type LHS' matrix = WithSource (LHS'' matrix)
-
-data LHS'' matrix
-  = Var String
-  | App (LHS' matrix) [Expr]
-  | Brp (LHS' matrix) [Expr]
-  | Dot (LHS' matrix) String
-  | Mat matrix
+data LHS'
+  = LVar String
+  | LApp LHS [Expr]
+  | LBrp LHS [Expr]
+  | LDot LHS String
+  | LMat [Either Tilde LHS]
   deriving (Show)
 
 data Tilde = Tilde deriving Show
 
-newtype LHS = LHS {lhs :: LHS' [Either Tilde LHS]} deriving (Show)
+type LHS = WithSource LHS'
 
-pattern EmptyLHS = LHS (Mat [] :<=: (-1,[]))
+pattern EmptyLHS = LMat [] :<=: (-1,[])
 
 data UnOperator
   = UPlus

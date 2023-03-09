@@ -59,9 +59,9 @@ pcommand'
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
   )
   (\ c -> case c of
-     Assign EmptyLHS (EL (Var f) :<=: src) ->
-       Assign EmptyLHS <$> pws' src (EL <$>
-          (App (Var f :<=: src) <$> many (id <$ pspc <*> (fmap StringLiteral <$> pcmdarg))))
+     Assign EmptyLHS (Var f :<=: src) ->
+       Assign EmptyLHS <$> pws' src
+          (App (Var f :<=: src) <$> many (id <$ pspc <*> (fmap StringLiteral <$> pcmdarg)))
      _ -> pure c
   )
   empty
@@ -133,22 +133,23 @@ pentrytype' =
 pres :: Parser Res
 pres = id <$ psym "%" <* psym "<" <*> many (ptok Just)
 
-plhs' :: Parser matrix -> ContextInfo -> Parser (LHS' matrix)
-plhs' pm ci = (pws (Var <$> pnom) >>= more)
-   <|> pws (Mat <$> pgrp (== Bracket Square) pm)
+plhs' :: ContextInfo -> Parser LHS
+plhs' ci = (pws (LVar <$> pnom) >>= more)
+   <|> (pws (LMat <$> pgrp (== Bracket Square) (pline (psep0 (pspc <|> punc ",") p) <|> [] <$ peoi)))
   where
+  more :: LHS -> Parser LHS
   more l = pcond
-    (pws' (source l) (App l <$ pcxspc ci <*> pargs Round <|> Brp l <$ pcxspc ci <*> pargs Curly
-     <|> Dot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
+    (pws' (source l) (LApp l <$ pcxspc ci <*> pargs Round <|> LBrp l <$ pcxspc ci <*> pargs Curly
+     <|> LDot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
     more
     (pure l)
   yuk = () <$ psym "." <* pospc
     <|> () <$ pspc <* psym "." <* pspc
+  p :: Parser (Either Tilde LHS)
+  p = Left Tilde <$ psym "~"  <|> Right <$> plhs
 
 plhs :: Parser LHS
-plhs = LHS <$> plhs' (pline (psep0 (pspc <|> punc ",") p) <|> [] <$ peoi) topCI
-  where
-    p = Left Tilde <$ psym "~"  <|> Right <$> plhs
+plhs = plhs' topCI
 
 data ContextInfo = CI { precedence  :: Int
                       , matrixMode  :: Bool -- spacing rules for unary
@@ -220,7 +221,7 @@ pexpr ci = go >>= more ci where
   go = id <$> pgrp (== Bracket Round) (id <$ pospc <*> pexpr topCI <* pospc)
    <|> pws (UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel}))
        -- should UnaryOp check precedence level?
-   <|> fmap EL <$> plhs' (many prow) ci
+   <|> lhsstuff ci
    <|> pws (Cell <$> pgrp (== Bracket Curly) (many prow))
    <|> pws (prawif Dig >>= pnumber)
    <|> pws (ColonAlone <$ psym ":")
@@ -229,6 +230,16 @@ pexpr ci = go >>= more ci where
    <|> pws (Lambda <$ psym "@" <* pospc
               <*> pgrp (== Bracket Round) (pspcaround $ psep0 (punc ",") pnom)
               <* pospc <*> pexpr (ci { commandMode = False }))
+  lhsstuff ci = (pws (Var <$> pnom) >>= lmore)
+            <|> pws (Mat <$> pgrp (== Bracket Square) (many prow))
+  lmore l = pcond
+              (pws' (source l) (App l <$ pcxspc ci <*> pargs Round <|> Brp l <$ pcxspc ci <*> pargs Curly
+                <|> Dot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
+              lmore
+              (pure l)
+  yuk = () <$ psym "." <* pospc
+    <|> () <$ pspc <* psym "." <* pspc
+
   more :: ContextInfo -> Expr -> Parser Expr
   more ci e = ppeek >>= \case
     t1:t2:t3:ts | kin t1 == Spc
@@ -237,7 +248,7 @@ pexpr ci = go >>= more ci where
                && not (kin t3 == Spc) -> pure e
     t1:t2:t3:ts | kin t1 == Spc
                && commandMode ci
-               && (case what e of { (EL (Var _)) -> True ; _ -> False })
+               && (case what e of { (Var _) -> True ; _ -> False })
                && t2 `elem` (sym <$> binOps)
                && not (kin t3 == Spc) -> pure e
     _ -> tight e
@@ -252,6 +263,7 @@ pexpr ci = go >>= more ci where
       tight e = pcond (pws' (source e) trybinop)
                       (\ ((b, cio, cia) :<=: src) -> pws' src (BinaryOp b e <$ pospc <*> pexpr cio) >>= more cia)
                       (pcond (pws' (source e) ptranspose) (\ (op :<=: src) -> more ci (UnaryOp op e :<=: src)) (pure e))
+
       {-
       loose e | not (matrixMode ci) = tight e
       loose e = do
