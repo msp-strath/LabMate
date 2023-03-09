@@ -4,6 +4,8 @@ import Lex
 
 type Command = WithSource Command'
 
+type File = WithSource [Command]
+
 data Command'
   = Assign LHS Expr
   | If [(Expr, [Command])] (Maybe [Command])

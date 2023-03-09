@@ -30,7 +30,8 @@ common haskell
                        TypeFamilies,
                        TypeSynonymInstances,
                        LambdaCase,
-                       PatternSynonyms
+                       PatternSynonyms,
+                       PatternGuards
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances
 
@@ -44,10 +45,12 @@ library
                      , Syntax
                      , Parse.Matlab
                      , BRect
+                     , Machine
   build-depends:       base <5
                      , containers
                      , text
                      , mtl
+                     , newtype
   hs-source-dirs:      src
   default-language:    Haskell2010
 
@@ -67,6 +70,7 @@ executable labrat
                     , Parse
                     , Parse.Matlab
                     , Syntax
+                    , Machine
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -78,5 +82,6 @@ executable labrat
                     , terminal-size
                     , directory
                     , filepath
+                    , newtype
     hs-source-dirs:   src
     default-language: Haskell2010

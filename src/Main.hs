@@ -14,6 +14,7 @@ import Syntax
 
 import Parse
 import Parse.Matlab
+import Machine
 
 main :: IO ()
 main = do
@@ -23,7 +24,7 @@ main = do
       doesDirectoryExist f >>= \case
         True -> actDir f
         False -> actFile f >>= \case
-          Right cs -> print cs
+          Right cs -> print (run (initMachine cs))
           Left e -> printError e
     x -> putStrLn $ "Unrecognised arguments: " ++ (show x)
 

@@ -393,7 +393,9 @@ groupRaw g ts = prefix g ++ (ts >>= raw) ++ suffix g
       Generated -> "%<}"
       _ -> ""
 
-data WithSource a = (:<=:) { what :: a , source :: (Nonce, [Tok]) }
+type Source = (Nonce, [Tok])
+
+data WithSource a = (:<=:) { what :: a , source :: Source }
   deriving (Functor)
 
 instance Show a => Show (WithSource a) where

@@ -15,7 +15,7 @@ import Parse
 
 import Lisp
 
-pfile :: Parser (WithSource [Command])
+pfile :: Parser File
 pfile = pws pfile'
 
 pfile' :: Parser [Command]
