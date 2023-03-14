@@ -7,6 +7,8 @@ import System.FilePath
 
 import qualified Data.Text.IO as T
 
+import Bwd
+
 import Lex
 import Lisp
 
