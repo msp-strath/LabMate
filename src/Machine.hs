@@ -25,15 +25,26 @@ name (r, n) s = r <>> [(s, n)]
 fresh :: String -> MachineState -> (Name, MachineState)
 fresh s ms = let (r, n) = namesupply ms in (name (r, n) s, ms { namesupply = (r, n+1) })
 
+freshNames :: [String] -> MachineState -> ([Name], MachineState)
+freshNames [] st = ([], st)
+freshNames (s:ss) st = case fresh s st of
+   (n, st) -> case freshNames ss st of
+     (ns, st) -> (n:ns, st)
+
 data Frame
   = Source Source
   | BlockRest [Command]
   | Declaration Name (Maybe String)
-  | Locale
+  | Locale LocaleType
   | Solved [Frame] Term
   | Expressions [Expr]
   | MatrixRows [[Expr]]
+  | RenameFrame String String
+  | FunctionLeft Name LHS
   deriving Show
+
+data LocaleType = ScriptLocale | FunctionLocale
+  deriving (Show, Eq)
 
 data Problem
   = File File
@@ -43,6 +54,7 @@ data Problem
   | Done Term
   | Expression Expr'
   | Row [Expr]
+  | RenameAction String String
   deriving Show
 
 data Term
@@ -57,6 +69,7 @@ data Lit
   | DoubleLit Double
   | StringLit String
   deriving Show
+
 nil :: Term
 nil = Atom ""
 
@@ -65,15 +78,19 @@ yikes t = P (Atom "yikes") t
 
 initMachine :: File -> MachineState
 initMachine f = MS
-  { position = B0 :< Locale :<+>: []
+  { position = B0 :< Locale ScriptLocale :<+>: []
   , problem = File f
   , namesupply = (B0 :< ("labrat", 0), 0)
   }
 
 findDeclaration :: String -> Bwd Frame -> Maybe Name
-findDeclaration s = ala' Last foldMap $ \case
-  Declaration n (Just s') | s == s' -> Just n
-  _ -> Nothing
+findDeclaration s fz = go fz False where
+  go B0 _ = Nothing
+  go (fz :< Locale ScriptLocale) True = Nothing
+  go (fz :< Locale FunctionLocale) _ = go fz True
+  go (fz :< Declaration n (Just s')) _
+    | s == s' = Just n
+  go (fz :< _) b = go fz b
 
 makeDeclaration :: String -> MachineState -> (Name, MachineState)
 makeDeclaration s ms = case fresh s ms of
@@ -81,7 +98,7 @@ makeDeclaration s ms = case fresh s ms of
     fz :<+>: fs -> (n, ms { position = findLocale fz (Declaration n (Just s)) :<+>: fs })
   where
     findLocale B0 fr = error "Locale disappeared!"
-    findLocale (fz :< Locale) fr = fz :< fr :< Locale
+    findLocale (fz :< l@(Locale _)) fr = fz :< fr :< l
     findLocale (fz :< f) fr = findLocale fz fr :< f
 
 ensureDeclaration :: String -> MachineState -> (Name, MachineState)
@@ -119,6 +136,14 @@ run ms@(MS { position = fz :<+>: [], problem = p })
   | Row rs <- p = case rs of
       [] -> move $ ms { problem = Done nil }
       ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
+
+  | Command (Direct (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new }
+  | RenameAction old new <- p = move $ ms { position = fz :< RenameFrame old new :<+>: [], problem = Done nil}
+
+  | Command (Function (lhs, fname, args) cs) <- p = case makeDeclaration fname ms of
+      (fname, ms) -> case freshNames args ms of
+        (names, ms) -> let decls = map (\(n, s) -> Declaration n (Just s)) (zip names args) in
+          move $ ms { position = fz <>< decls :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :<+>: [], problem = Done nil }
 run ms = move ms
 
 move :: MachineState -> MachineState
