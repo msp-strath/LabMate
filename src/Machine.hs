@@ -2,6 +2,7 @@ module Machine where
 
 import Control.Newtype
 import Data.Monoid
+import Data.List
 
 import Bwd
 
@@ -46,12 +47,12 @@ data Frame
 data LocaleType = ScriptLocale | FunctionLocale
   deriving (Show, Eq)
 
-data Seen = Seen | NotSeen | Inconsistent
-
 data DeclarationType
-  = UserDecl String
+  = UserDecl
+      String   -- current name
+      Bool     -- have we seen it in user code?
+      [String] -- renamed names (we hope of length at most 1)
   | LabratDecl
-  | RenameDecl {- src:: -} String {- srcSeen :: -} Seen {- tgt :: -} String
   deriving Show
 
 data Problem
@@ -92,46 +93,40 @@ initMachine f = MS
   }
 
 findDeclaration :: DeclarationType -> Bwd Frame -> Maybe (Name, Bwd Frame)
-findDeclaration t fz = go fz False where
+findDeclaration LabratDecl fz = Nothing
+findDeclaration (UserDecl old seen news) fz = go fz False where
   go B0 _ = Nothing
   go (fz :< Locale ScriptLocale) True = Nothing
   go (fz :< f@(Locale FunctionLocale)) _ = fmap (:< f) <$> go fz True
-  go (fz :< f@(Declaration n t')) b = case (t, t') of
-    (UserDecl s, UserDecl s') | s == s' -> Just (n, fz :< f)
-    (UserDecl s, RenameDecl src seen tgt) | s == src ->
-      Just (n, fz :< Declaration n (RenameDecl src Seen tgt))
-    (RenameDecl src _ tgt, UserDecl s') | src == s' ->
-      Just (n, fz :< Declaration n (RenameDecl src Seen tgt))
-    (RenameDecl src _ tgt, RenameDecl src' seen' tgt') | src == src' ->
-      if tgt == tgt'
-      then Just (n, fz :< f)
-      else Just (n, fz :< Declaration n (RenameDecl src' Inconsistent tgt'))
-  go (fz :< _) b = go fz b
+  go (fz :< f@(Declaration n (UserDecl old' seen' news'))) b | old == old' =
+    Just (n , fz :< Declaration n (UserDecl old' (seen || seen') (union news news')))
+  go (fz :< f) b = fmap (:< f) <$> go fz b
 
-makeDeclaration :: String -> MachineState -> (Name, MachineState)
-makeDeclaration s ms = case fresh s ms of
+makeDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
+makeDeclaration LabratDecl ms = error "making labratdecl declaration"
+makeDeclaration d@(UserDecl s seen news) ms = case fresh s ms of
   (n, ms) -> case position ms of
-    fz :<+>: fs -> (n, ms { position = findLocale fz (Declaration n (Just s)) :<+>: fs })
+    fz :<+>: fs -> (n, ms { position = findLocale fz (Declaration n d) :<+>: fs })
   where
     findLocale B0 fr = error "Locale disappeared!"
     findLocale (fz :< l@(Locale _)) fr = fz :< fr :< l
     findLocale (fz :< f) fr = findLocale fz fr :< f
 
-ensureDeclaration :: String -> MachineState -> (Name, MachineState)
+ensureDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
 ensureDeclaration s ms@(MS { position = fz :<+>: fs}) = case findDeclaration s fz of
   Nothing -> makeDeclaration s ms
-  Just n -> (n, ms)
+  Just (n, fz) -> (n, ms { position = fz :<+>: fs})
 
 run :: MachineState -> MachineState
 run ms@(MS { position = fz :<+>: [], problem = p })
   | File (cs :<=: src) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = BlockTop cs }
   | BlockTop ((c :<=: src):cs) <- p = run $ ms { position = fz :< BlockRest cs :< Source src :<+>: [] , problem = Command c }
   | Command (Assign (lhs :<=: src) e) <- p = run $ ms { position = fz :< Expressions [e] :< Source src :<+>: [] , problem = LHS lhs }
-  | LHS (LVar x) <- p = case ensureDeclaration x ms of
+  | LHS (LVar x) <- p = case ensureDeclaration (UserDecl x True []) ms of
       (n, ms) -> move $ ms { problem = Done (FreeVar n) }
-  | Expression (Var x) <- p = case findDeclaration x fz of
+  | Expression (Var x) <- p = case findDeclaration (UserDecl x True []) fz of
       Nothing -> move $ ms { problem = Done (yikes (P (Atom "OutOfScope") (Atom x))) }
-      Just n  -> move $ ms { problem = Done (FreeVar n) }
+      Just (n, fz)  -> move $ ms { position = fz :<+>: [], problem = Done (FreeVar n) }
   | Expression (App (f :<=: src) args) <- p = run $ ms { position = fz :< Expressions args :< Source src :<+>: [], problem = Expression f }
   | Expression (Brp (e :<=: src) args) <- p = run $ ms { position = fz :< Expressions args :< Source src :<+>: [], problem = Expression e }
   | Expression (Dot (e :<=: src) fld) <- p = run $ ms { position = fz :< Source src :<+>: [], problem = Expression e }
@@ -154,12 +149,12 @@ run ms@(MS { position = fz :<+>: [], problem = p })
       ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
 
   | Command (Direct (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new }
-  | RenameAction old new <- p = case ensureDeclaration old ms of
-      (n, ms) -> _ {-move $ ms { position = fz :< RenameFrame old new :<+>: [], problem = Done nil}-}
+  | RenameAction old new <- p = case ensureDeclaration (UserDecl old False [new]) ms of
+      (n, ms) -> move $ ms { problem = Done nil}
 
-  | Command (Function (lhs, fname, args) cs) <- p = case makeDeclaration fname ms of
+  | Command (Function (lhs, fname, args) cs) <- p = case makeDeclaration (UserDecl fname True []) ms of
       (fname, ms) -> case freshNames args ms of
-        (names, ms) -> let decls = map (\(n, s) -> Declaration n (Just s)) (zip names args) in
+        (names, ms) -> let decls = map (\(n, s) -> Declaration n (UserDecl s True [])) (zip names args) in
           move $ ms { position = fz <>< decls :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :<+>: [], problem = Done nil }
 
 run ms = move ms
@@ -179,3 +174,6 @@ move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t })
 
 move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t }) = move $ ms { position = fz :<+>: fr : fs }
 move ms = ms
+
+reassemble :: MachineState -> [Tok]
+reassemble ms = [] -- TODO
