@@ -34,7 +34,7 @@ freshNames (s:ss) st = case fresh s st of
 data Frame
   = Source Source
   | BlockRest [Command]
-  | Declaration Name (Maybe String)
+  | Declaration Name DeclarationType
   | Locale LocaleType
   | Solved [Frame] Term
   | Expressions [Expr]
@@ -45,6 +45,14 @@ data Frame
 
 data LocaleType = ScriptLocale | FunctionLocale
   deriving (Show, Eq)
+
+data Seen = Seen | NotSeen | Inconsistent
+
+data DeclarationType
+  = UserDecl String
+  | LabratDecl
+  | RenameDecl {- src:: -} String {- srcSeen :: -} Seen {- tgt :: -} String
+  deriving Show
 
 data Problem
   = File File
@@ -83,13 +91,21 @@ initMachine f = MS
   , namesupply = (B0 :< ("labrat", 0), 0)
   }
 
-findDeclaration :: String -> Bwd Frame -> Maybe Name
-findDeclaration s fz = go fz False where
+findDeclaration :: DeclarationType -> Bwd Frame -> Maybe (Name, Bwd Frame)
+findDeclaration t fz = go fz False where
   go B0 _ = Nothing
   go (fz :< Locale ScriptLocale) True = Nothing
-  go (fz :< Locale FunctionLocale) _ = go fz True
-  go (fz :< Declaration n (Just s')) _
-    | s == s' = Just n
+  go (fz :< f@(Locale FunctionLocale)) _ = fmap (:< f) <$> go fz True
+  go (fz :< f@(Declaration n t')) b = case (t, t') of
+    (UserDecl s, UserDecl s') | s == s' -> Just (n, fz :< f)
+    (UserDecl s, RenameDecl src seen tgt) | s == src ->
+      Just (n, fz :< Declaration n (RenameDecl src Seen tgt))
+    (RenameDecl src _ tgt, UserDecl s') | src == s' ->
+      Just (n, fz :< Declaration n (RenameDecl src Seen tgt))
+    (RenameDecl src _ tgt, RenameDecl src' seen' tgt') | src == src' ->
+      if tgt == tgt'
+      then Just (n, fz :< f)
+      else Just (n, fz :< Declaration n (RenameDecl src' Inconsistent tgt'))
   go (fz :< _) b = go fz b
 
 makeDeclaration :: String -> MachineState -> (Name, MachineState)
@@ -138,12 +154,14 @@ run ms@(MS { position = fz :<+>: [], problem = p })
       ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
 
   | Command (Direct (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new }
-  | RenameAction old new <- p = move $ ms { position = fz :< RenameFrame old new :<+>: [], problem = Done nil}
+  | RenameAction old new <- p = case ensureDeclaration old ms of
+      (n, ms) -> _ {-move $ ms { position = fz :< RenameFrame old new :<+>: [], problem = Done nil}-}
 
   | Command (Function (lhs, fname, args) cs) <- p = case makeDeclaration fname ms of
       (fname, ms) -> case freshNames args ms of
         (names, ms) -> let decls = map (\(n, s) -> Declaration n (Just s)) (zip names args) in
           move $ ms { position = fz <>< decls :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :<+>: [], problem = Done nil }
+
 run ms = move ms
 
 move :: MachineState -> MachineState
