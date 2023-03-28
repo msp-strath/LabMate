@@ -8,7 +8,8 @@ import Control.Monad
 import Control.Applicative
 import Control.Arrow ((***))
 import qualified Data.Text as T
-import qualified Data.Map as M
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 import Bwd
 import Hide
@@ -84,7 +85,7 @@ lex0 t = unfoldr tok (t, (0, 0)) where
         | isAlpha c ->
           let (s, d') = spand (\ c -> isAlphaNum c || c == '_') d
               x = c : s
-              k = case M.lookup x keywords of
+              k = case Map.lookup x keywords of
                 Just False -> Key
                 Just True  -> Blk
                 _          -> Nom
@@ -302,28 +303,28 @@ after :: Pos -> Char -> Pos
 after (l, c) x | isNL x = (l + 1, 0)
 after (l, c) _ = (l, c + 1)
 
-data Table = Table Bool (M.Map Char Table) deriving Show
+data Table = Table Bool (Map.Map Char Table) deriving Show
 
 empT :: Table
-empT = Table False M.empty
+empT = Table False Map.empty
 
 insT :: String -> Table -> Table
 insT [] (Table _ m) = Table True m
-insT (c : s) (Table b m) = Table b (M.alter go c m) where
+insT (c : s) (Table b m) = Table b (Map.alter go c m) where
   go Nothing  = Just (insT s empT)
   go (Just t) = Just (insT s t)
 
 munch :: Doc -> Table -> Maybe (String, Doc)
 munch d (Table b m) = (do
   (c, d') <- peek d
-  t <- M.lookup c m
+  t <- Map.lookup c m
   (s, d) <- munch d' t
   return (c : s, d)
   ) <|> ("", d) <$ guard b
 
-keywords :: M.Map String Bool -- whether the keyword begins a block ending with `end`
-keywords = M.fromList (map (, True) ["if", "function", "for", "while", "switch"])
-         <> M.fromList (map (, False) ["else", "elseif", "case", "otherwise", "end",
+keywords :: Map.Map String Bool -- whether the keyword begins a block ending with `end`
+keywords = Map.fromList (map (, True) ["if", "function", "for", "while", "switch"])
+         <> Map.fromList (map (, False) ["else", "elseif", "case", "otherwise", "end",
                                        "break", "return", "continue"])
 
 {-
@@ -381,8 +382,8 @@ seeToks ts = go 0 ts where
           go i us
         _ -> return ()
 
-groupRaw :: Grouping -> [Tok] -> String
-groupRaw g ts = prefix g ++ (ts >>= raw) ++ suffix g
+groupString :: Grouping -> String -> String
+groupString g s = prefix g ++ s ++ suffix g
   where
     prefix g = case g of
       Bracket b -> fst (brackets b)
@@ -393,14 +394,26 @@ groupRaw g ts = prefix g ++ (ts >>= raw) ++ suffix g
       Generated -> "%<}"
       _ -> ""
 
+groupRaw :: Grouping -> [Tok] -> String
+groupRaw g ts = groupString g (ts >>= raw)
+
+nonceExpand :: Map Nonce String -> Tok -> String
+nonceExpand table t | Non n <- kin t = case Map.lookup n table of
+  Just ts -> ts
+  Nothing -> error $ "should be impossible: " ++ show n
+nonceExpand table t | Grp g (Hide ts) <- kin t = groupString g (ts >>= nonceExpand table)
+nonceExpand _ t = raw t
+
 type Source = (Nonce, [Tok])
 
 data WithSource a = (:<=:) { what :: a , source :: Source }
-  deriving (Functor)
+  deriving (Functor, Show)
 
+{-
 instance Show a => Show (WithSource a) where
   show (a :<=: (n, src)) = "$" ++ show n ++ " = `" ++ (src >>= showEaten) ++ "`" ++ show a
     where
       showEaten t
         | Non n <- kin t = "$" ++ show n
         | otherwise = raw t
+-}

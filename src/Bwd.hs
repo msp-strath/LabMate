@@ -99,6 +99,10 @@ data Cursor x
   deriving (Eq, Foldable, Functor, Show, Traversable)
 infixl 3 :<+>:
 
+resetCursor :: Cursor x -> Cursor x
+resetCursor (xz :< x :<+>: xs) = resetCursor (xz :<+>: x : xs)
+resetCursor c = c
+
 -- | Each value of type `x` induces its own space of
 --   de Bruijn indices. This function tags each value
 --   with the corresponding index.

@@ -6,6 +6,8 @@ import Control.Applicative
 import Control.Arrow ((***))
 
 import qualified Data.Text as T
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 import Bwd
 import Hide
@@ -42,11 +44,11 @@ reachBind (r, as) k = max r *** id $ foldMap go as
            in (r, map f bs)
 
 newtype Parser a = Parser
-  { parser :: Nonce -> [Tok] ->
+  { parser :: (Map Nonce String, Nonce) -> [Tok] ->
     (Reach
     , [(Bwd Tok -- consumed tokens
       , a         -- meaning
-      , Nonce     -- updated nonce
+      , (Map Nonce String, Nonce) -- updated nonce table and fresh nonce
       , [Tok]     -- remaining tokens
       )]
     )
@@ -57,9 +59,9 @@ newtype Parser a = Parser
 -- leading or trailing space.
 
 instance Monad Parser where
-  return a = Parser $ \ n ts -> (Nowhere, [ (B0, a, n, ts) ])
-  Parser pa >>= k = Parser $ \ n ts -> reachBind (pa n ts) $ \(az, a, n, ts) ->
-                    (parser (k a) n ts, \(bz, b, n, ts) -> (az <> bz, b, n, ts))
+  return a = Parser $ \ tabn ts -> (Nowhere, [ (B0, a, tabn, ts) ])
+  Parser pa >>= k = Parser $ \ tabn ts -> reachBind (pa tabn ts) $ \(az, a, tabn, ts) ->
+                    (parser (k a) tabn ts, \(bz, b, tabn, ts) -> (az <> bz, b, tabn, ts))
 
 
 instance Applicative Parser where
@@ -70,14 +72,17 @@ instance Alternative Parser where
   empty = mempty
   (<|>) = mappend
 
+pws :: Parser a -> Parser (WithSource a)
+pws p = Parser $ \ tabn ts -> reachBind (parser p tabn ts) $ \(az, a, tabn@(table, n), ts) ->
+         let as = az <>> [] in
+         ((Nowhere, [(B0 :< non n, a :<=: (n, as), (Map.union table (Map.singleton n (as >>= nonceExpand table)), n+1), ts)]), id)
+
 -- Parser p is assumed to produce output including the source src passed in
 pws' :: (Nonce, [Tok]) -> Parser a -> Parser (WithSource a)
-pws' src@(m, _) p = Parser $ \ n ts -> reachBind (parser p n ts) $ \(az, a, n, ts) ->
-               ((Nowhere, [(B0 :< non n, a :<=: (n, non m : (az <>> [])), n+1, ts)]), id)
+pws' src@(m, _) p = Parser $ \ tabn ts -> reachBind (parser p tabn ts) $ \(az, a, tabn@(table, n), ts) ->
+               let as = non m : az <>> [] in
+               ((Nowhere, [(B0 :< non n, a :<=: (n, as), (Map.union table (Map.singleton n (as >>= nonceExpand table)), n+1), ts)]), id)
 
-pws :: Parser a -> Parser (WithSource a)
-pws p = Parser $ \ n ts -> reachBind (parser p n ts) $ \(az, a, n, ts) ->
-         ((Nowhere, [(B0 :< non n, a :<=: (n, az <>> []), n+1, ts)]), id)
 
 -- TODO: at some point, we will need to record more provenance in the
 -- token sequence
@@ -174,5 +179,5 @@ pgreedy p = pcond p
   (\a -> (a:) <$> pgreedy p)
   (pure [])
 
-testparser :: String -> Parser a -> (Reach, [a])
-testparser s p = fmap (\ (a,b,n,c) -> b) <$> parser p 0 (lexer (T.pack s))
+testparser :: String -> Parser a -> (Reach, [(a, Map Nonce String)])
+testparser s p = fmap (\ (a,b,n,c) -> (b, fst n)) <$> parser p (Map.empty, 0) (lexer (T.pack s))

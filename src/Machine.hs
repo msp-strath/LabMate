@@ -4,6 +4,8 @@ import Control.Monad
 import Control.Newtype
 import Data.Monoid
 import Data.List
+import Data.Map (Map)
+import qualified Data.Map as Map
 
 import Debug.Trace
 
@@ -192,10 +194,10 @@ fundecls ms fz (Function (_, fname, _) _ :<=: src:cs) = case fresh fname ms of
   (n, ms) -> fundecls ms (fz :< Declaration n (UserDecl fname False [] False)) cs
 fundecls ms fz (c:cs) = fundecls ms fz cs
 
-reassemble :: MachineState -> [Tok]
-reassemble ms = case renamePass ms of
-  Nothing -> [] -- TODO
-  Just ms -> extractTokens ms
+reassemble :: (Nonce, Map Nonce String) -> MachineState -> String
+reassemble (n, tab) ms = case Map.lookup n (nonceTable tab (resetCursor (position ms))) of
+  Just ts -> ts
+  Nothing -> []
   where
     renamePass :: MachineState -> Maybe MachineState
     renamePass = Just -- TODO
@@ -227,5 +229,8 @@ reassemble ms = case renamePass ms of
     newName (UserDecl old seen [new] capturable) = Just new
     newName _ = Nothing
 
-    extractTokens :: MachineState -> [Tok]
-    extractTokens ms = []
+nonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
+nonceTable table (fz :<+>: []) = table
+nonceTable table (fz :<+>: Solved fs' e : fs) = nonceTable (nonceTable table (fz :<+>: fs)) (fz :<+>: fs')
+nonceTable table (fz :<+>: Source (n, ts) : fs) = let m = nonceTable table (fz :<+>: fs) in Map.insert n (ts >>= nonceExpand m) m
+nonceTable table (fz :<+>: f : fs) = nonceTable table (fz :< f :<+>: fs)
