@@ -75,13 +75,13 @@ instance Alternative Parser where
 pws :: Parser a -> Parser (WithSource a)
 pws p = Parser $ \ tabn ts -> reachBind (parser p tabn ts) $ \(az, a, tabn@(table, n), ts) ->
          let as = az <>> [] in
-         ((Nowhere, [(B0 :< non n, a :<=: (n, as), (Map.union table (Map.singleton n (as >>= nonceExpand table)), n+1), ts)]), id)
+         ((Nowhere, [(B0 :< non n, a :<=: (n, as), (Map.insert n (as >>= nonceExpand table) table, n+1), ts)]), id)
 
 -- Parser p is assumed to produce output including the source src passed in
 pws' :: (Nonce, [Tok]) -> Parser a -> Parser (WithSource a)
 pws' src@(m, _) p = Parser $ \ tabn ts -> reachBind (parser p tabn ts) $ \(az, a, tabn@(table, n), ts) ->
                let as = non m : az <>> [] in
-               ((Nowhere, [(B0 :< non n, a :<=: (n, as), (Map.union table (Map.singleton n (as >>= nonceExpand table)), n+1), ts)]), id)
+               ((Nowhere, [(B0 :< non n, a :<=: (n, as), (Map.insert n (as >>= nonceExpand table) table, n+1), ts)]), id)
 
 
 -- TODO: at some point, we will need to record more provenance in the
