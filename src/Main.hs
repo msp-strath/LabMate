@@ -30,14 +30,7 @@ main = do
         True -> actDir f
         False -> actFile f >>= \case
           Right (tab, cs@(_ :<=: (n,src))) -> do
-            seeToks src
-            print n
-            putStrLn "---------"
             let out = (run (initMachine cs))
-            print out
-            putStrLn "---------"
-            print tab
-            putStrLn "---------"
             putStrLn $ reassemble (n,tab) out
           Left e -> printError e
     x -> putStrLn $ "Unrecognised arguments: " ++ (show x)

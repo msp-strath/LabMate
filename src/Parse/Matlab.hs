@@ -60,7 +60,7 @@ pcommand'
   )
   (\ c -> case c of
      Assign EmptyLHS (Var f :<=: src) ->
-       Assign EmptyLHS <$> pws' src
+       Assign EmptyLHS <$> pws' (fst src)
           (App (Var f :<=: src) <$> many (id <$ pspc <*> (fmap StringLiteral <$> pcmdarg)))
      _ -> pure c
   )
@@ -139,7 +139,7 @@ plhs' ci = (pws (LVar <$> pnom) >>= more)
   where
   more :: LHS -> Parser LHS
   more l = pcond
-    (pws' (source l) (LApp l <$ pcxspc ci <*> pargs Round <|> LBrp l <$ pcxspc ci <*> pargs Curly
+    (pws' (nonce l) (LApp l <$ pcxspc ci <*> pargs Round <|> LBrp l <$ pcxspc ci <*> pargs Curly
      <|> LDot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
     more
     (pure l)
@@ -233,7 +233,7 @@ pexpr ci = go >>= more ci where
   lhsstuff ci = (pws (Var <$> pnom) >>= lmore)
             <|> pws (Mat <$> pgrp (== Bracket Square) (many prow))
   lmore l = pcond
-              (pws' (source l) (App l <$ pcxspc ci <*> pargs Round <|> Brp l <$ pcxspc ci <*> pargs Curly
+              (pws' (nonce l) (App l <$ pcxspc ci <*> pargs Round <|> Brp l <$ pcxspc ci <*> pargs Curly
                 <|> Dot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
               lmore
               (pure l)
@@ -260,9 +260,9 @@ pexpr ci = go >>= more ci where
         Just (cio, cia) -> pure (b, cio { commandMode = False }
                                   , cia { commandMode = False })
       tight :: Expr -> Parser Expr
-      tight e = pcond (pws' (source e) trybinop)
-                      (\ ((b, cio, cia) :<=: src) -> pws' src (BinaryOp b e <$ pospc <*> pexpr cio) >>= more cia)
-                      (pcond (pws' (source e) ptranspose) (\ (op :<=: src) -> more ci (UnaryOp op e :<=: src)) (pure e))
+      tight e = pcond (pws' (nonce e) trybinop)
+                      (\ ((b, cio, cia) :<=: src) -> pws' (fst src) (BinaryOp b e <$ pospc <*> pexpr cio) >>= more cia)
+                      (pcond (pws' (nonce e) ptranspose) (\ (op :<=: src) -> more ci (UnaryOp op e :<=: src)) (pure e))
 
       {-
       loose e | not (matrixMode ci) = tight e

@@ -409,6 +409,9 @@ type Source = (Nonce, [Tok])
 data WithSource a = (:<=:) { what :: a , source :: Source }
   deriving (Functor, Show)
 
+nonce :: WithSource a -> Nonce
+nonce = fst . source
+
 {-
 instance Show a => Show (WithSource a) where
   show (a :<=: (n, src)) = "$" ++ show n ++ " = `" ++ (src >>= showEaten) ++ "`" ++ show a

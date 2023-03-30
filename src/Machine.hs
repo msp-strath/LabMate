@@ -7,8 +7,6 @@ import Data.List
 import Data.Map (Map)
 import qualified Data.Map as Map
 
-import Debug.Trace
-
 import Bwd
 
 import Lex
@@ -170,7 +168,8 @@ run ms@(MS { position = fz :<+>: [], problem = p })
             (ms, fz') -> move $ ms { position = (fz <> fz') <>< decls :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :<+>: []
                                    , problem = Done nil }
 
-run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
+-- run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
+run ms = move ms
 
 move :: MachineState -> MachineState
 move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t })
