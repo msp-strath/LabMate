@@ -233,3 +233,9 @@ nonceTable table (fz :<+>: []) = table
 nonceTable table (fz :<+>: Solved fs' e : fs) = nonceTable (nonceTable table (fz :<+>: fs)) (fz :<+>: fs')
 nonceTable table (fz :<+>: Source (n, ts) : fs) = let m = nonceTable table (fz :<+>: fs) in Map.insert n (ts >>= nonceExpand m) m
 nonceTable table (fz :<+>: f : fs) = nonceTable table (fz :< f :<+>: fs)
+
+-- Plan:
+-- 1. Try to do renaming, computing Either Gripe MachineState, turning directives into responses
+-- 2. If we succeed, reassemble
+-- 3. If we fail, do another pass, turning directives into responses explaining what the problem was
+-- 4. Avoid code duplication by doing the above in "one pass", Oxford style
