@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               LabRat
-version:            0.1.0.0
+version:            0.1.1.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -32,56 +32,35 @@ common haskell
                        LambdaCase,
                        PatternSynonyms,
                        PatternGuards
+  build-depends:       base <5,
+                       containers,
+                       text,
+                       mtl,
+                       newtype,
+                       terminal-size,
+                       directory,
+                       filepath,
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances
-
-library
-  import:              haskell
-  exposed-modules:     Lex
-                     , Bwd
-                     , Hide
-                     , Lisp
-                     , Parse
-                     , Syntax
-                     , Parse.Matlab
-                     , BRect
-                     , Machine
-  build-depends:       base <5
-                     , containers
-                     , text
-                     , mtl
-                     , newtype
-  hs-source-dirs:      src
-  default-language:    Haskell2010
-
--- A copyright notice.
--- copyright:
 
 executable labrat
     import:           haskell
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
-    other-modules:    BRect
-                    , Bwd
-                    , Hide
-                    , Lex
-                    , Lisp
-                    , Parse
-                    , Parse.Matlab
-                    , Syntax
-                    , Machine
+    other-modules:    BRect,
+                      Bwd,
+                      Hide,
+                      Lex,
+                      Lisp,
+                      Parse,
+                      Parse.Matlab,
+                      Syntax,
+                      Machine,
+                      Paths_LabRat
+    autogen-modules:  Paths_LabRat
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    build-depends:    base
-                    , LabRat
-                    , text
-                    , containers
-                    , mtl
-                    , terminal-size
-                    , directory
-                    , filepath
-                    , newtype
     hs-source-dirs:   src
     default-language: Haskell2010

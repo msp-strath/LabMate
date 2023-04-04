@@ -21,8 +21,12 @@ import Parse
 import Parse.Matlab
 import Machine
 
+import Data.Version
+import Paths_LabRat
+
 main :: IO ()
 main = do
+  putStrLn ("LabRat " ++ showVersion version)
   getArgs >>= \case
     [] -> actDir "."
     [f] -> do
