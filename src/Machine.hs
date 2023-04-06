@@ -40,12 +40,16 @@ data Frame
   | BlockRest [Command]
   | Declaration Name DeclarationType
   | Locale LocaleType
-  | Solved [Frame] Term
   | Expressions [Expr]
   | MatrixRows [[Expr]]
   | RenameFrame String String
   | FunctionLeft Name LHS
+  | Fork (Either Fork Fork) [Frame] Problem
   deriving Show
+
+data Fork = Solved | FunctionName Name
+  deriving (Show)
+
 
 data LocaleType = ScriptLocale | FunctionLocale
   deriving (Show, Eq)
@@ -83,6 +87,8 @@ data Lit
   | DoubleLit Double
   | StringLit String
   deriving Show
+
+type Gripe = String
 
 nil :: Term
 nil = Atom ""
@@ -171,19 +177,23 @@ run ms@(MS { position = fz :<+>: [], problem = p })
 -- run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
 run ms = move ms
 
+-- if move sees a Left fork, it should switch to Right and run
+-- if move sees a Right fork, switch to Left and keep moving
 move :: MachineState -> MachineState
 move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t })
+  | Fork (Right frk) fs' p' <- fr = move $ ms{ position = fz :<+>: Fork (Left frk) fs (Done t) : fs', problem = p'}
   | BlockRest cs <- fr = case cs of
-      [] -> move $ ms { position = fz :< Solved fs t :<+>: [], problem = Done nil }
-      ((c :<=: src):cs) -> run $ ms { position = fz :< Solved fs t :< BlockRest cs :< Source src :<+>: [], problem = Command c }
+      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
+      ((c :<=: src):cs) -> run $ ms { position = fz :< Fork (Right Solved) fs (Done t) :< BlockRest cs :< Source src :<+>: [], problem = Command c }
 --  | AssignLeft (e :<=: src) <- fr = run $ ms { position = fz :< Solved fs t :< Source src :<+>: [], problem = Expression e }
   | Expressions as <- fr = case as of
-      [] -> move $ ms { position = fz :< Solved fs t :<+>: [], problem = Done nil }
-      ((e :<=: src):as) -> run $ ms { position = fz :< Solved fs t :< Expressions as :< Source src :<+>: [], problem = Expression e }
+      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
+      ((e :<=: src):as) -> run $ ms { position = fz :< Fork (Right Solved) fs (Done t) :< Expressions as :< Source src :<+>: [], problem = Expression e }
   | MatrixRows rs <- fr = case rs of
-      [] -> move $ ms { position = fz :< Solved fs t :<+>: [], problem = Done nil }
-      (r:rs) -> run $ ms { position = fz :< Solved fs t :< MatrixRows rs :<+>: [], problem = Row r }
-
+      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
+      (r:rs) -> run $ ms { position = fz :< Fork (Right Solved) fs (Done t) :< MatrixRows rs :<+>: [], problem = Row r }
+  | FunctionLeft fname (lhs :<=: src) <- fr = run $
+    ms { position = fz :< Fork (Right $ FunctionName fname) fs (Done t) :< Source src :<+>: [], problem = LHS lhs }
 move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t }) = move $ ms { position = fz :<+>: fr : fs }
 move ms = ms
 
@@ -192,50 +202,3 @@ fundecls ms fz [] = (ms, fz)
 fundecls ms fz (Function (_, fname, _) _ :<=: src:cs) = case fresh fname ms of
   (n, ms) -> fundecls ms (fz :< Declaration n (UserDecl fname False [] False)) cs
 fundecls ms fz (c:cs) = fundecls ms fz cs
-
-reassemble :: (Nonce, Map Nonce String) -> MachineState -> String
-reassemble (n, tab) ms = case Map.lookup n (nonceTable tab (resetCursor (position ms))) of
-  Just ts -> ts
-  Nothing -> []
-  where
-    renamePass :: MachineState -> Maybe MachineState
-    renamePass = Just -- TODO
-
-    renamer :: Bwd Frame -> Name -> Bool -> Maybe String
-    renamer B0 n b = error "ScriptLocale disappeared in renamer!"
-    renamer (fz :< Locale FunctionLocale) n b = renamer fz n True
-    renamer (fz :< Locale ScriptLocale) n True = error "Declaration disappeared in renamer!"
-    renamer (fz :< Declaration n' d) n b =
-      if n == n' then case (d, newName d) of
-        (UserDecl _ _ _ capturable, Just s) ->
-          if capturable && captured fz b s then Nothing else pure s
-        _ -> Nothing
-      else do
-        s <- renamer fz n b
-        s' <- newName d
-        s <$ guard (s /= s')
-    renamer (fz :< f) n b = renamer fz n b
-
-    captured :: Bwd Frame -> Bool -> String -> Bool
-    captured B0 b s = False
-    captured (fz :< Locale FunctionLocale) b s = captured fz True s
-    captured (fz :< Locale ScriptLocale) True s = False
-    captured (fz :< Declaration _ d) b s | newName d == Just s = True
-    captured (fz :< f) b s = captured fz b s
-
-    newName :: DeclarationType -> Maybe String
-    newName (UserDecl old seen [] capturable) = Just old
-    newName (UserDecl old seen [new] capturable) = Just new
-    newName _ = Nothing
-
-nonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
-nonceTable table (fz :<+>: []) = table
-nonceTable table (fz :<+>: Solved fs' e : fs) = nonceTable (nonceTable table (fz :<+>: fs)) (fz :<+>: fs')
-nonceTable table (fz :<+>: Source (n, ts) : fs) = let m = nonceTable table (fz :<+>: fs) in Map.insert n (ts >>= nonceExpand m) m
-nonceTable table (fz :<+>: f : fs) = nonceTable table (fz :< f :<+>: fs)
-
--- Plan:
--- 1. Try to do renaming, computing Either Gripe MachineState, turning directives into responses
--- 2. If we succeed, reassemble
--- 3. If we fail, do another pass, turning directives into responses explaining what the problem was
--- 4. Avoid code duplication by doing the above in "one pass", Oxford style
