@@ -58,7 +58,9 @@ data DeclarationType
   = UserDecl
       String   -- current name
       Bool     -- have we seen it in user code?
-      [String] -- renamed names (we hope of length at most 1)
+      [(String, Source)] -- renamed names and source of the directives
+                         -- requesting the renames (we hope of length
+                         -- at most 1)
       Bool     -- is it capturable?
   | LabratDecl
   deriving Show
@@ -71,7 +73,7 @@ data Problem
   | Done Term
   | Expression Expr'
   | Row [Expr]
-  | RenameAction String String
+  | RenameAction String String Source
   | FunCalled Expr'
   deriving Show
 
@@ -88,7 +90,9 @@ data Lit
   | StringLit String
   deriving Show
 
-type Gripe = String
+data Gripe =
+  RenameFail Nonce String
+  deriving Show
 
 nil :: Term
 nil = Atom ""
@@ -110,7 +114,7 @@ findDeclaration (UserDecl old seen news _) fz = go fz False where
   go (fz :< Locale ScriptLocale) True = Nothing
   go (fz :< f@(Locale FunctionLocale)) _ = fmap (:< f) <$> go fz True
   go (fz :< f@(Declaration n (UserDecl old' seen' news' capturable'))) b | old == old' =
-    Just (n , fz :< Declaration n (UserDecl old' (seen || seen') (union news news') capturable'))
+    Just (n , fz :< Declaration n (UserDecl old' (seen' || seen) (news' ++ news) capturable'))
   go (fz :< f) b = fmap (:< f) <$> go fz b
 
 makeDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
@@ -162,8 +166,8 @@ run ms@(MS { position = fz :<+>: [], problem = p })
       [] -> move $ ms { problem = Done nil }
       ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
 
-  | Command (Direct (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new }
-  | RenameAction old new <- p = case ensureDeclaration (UserDecl old False [new] True) ms of
+  | Command (Direct (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new src}
+  | RenameAction old new src <- p = case ensureDeclaration (UserDecl old False [(new, src)] True) ms of
       (n, ms) -> move $ ms { problem = Done nil}
 
   | Command (Function (lhs, fname, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) fz of

@@ -404,7 +404,7 @@ nonceExpand table t | Non n <- kin t = case Map.lookup n table of
 nonceExpand table t | Grp g (Hide ts) <- kin t = groupString g (ts >>= nonceExpand table)
 nonceExpand _ t = raw t
 
-type Source = (Nonce, [Tok])
+type Source = (Nonce, Hide [Tok])
 
 data WithSource a = (:<=:) { what :: a , source :: Source }
   deriving (Functor, Show)

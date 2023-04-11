@@ -112,7 +112,7 @@ ptensortype' = Tensor <$> (id <$> pgrp (== Bracket Square) (pline psquex) <* pos
                          <|> pure (one , one))
                      <*> pentrytype
   where
-  one = ("", IntLiteral 1  :<=: (-1,[]))
+  one = ("", IntLiteral 1  :<=: (-1,Hide []))
   psquex = (,) <$> (id <$> plarrow (pexpr topCI) <* pospc <* pkin Nom "x" <* pospc
                     <|> pure one)
                <*> plarrow (pexpr topCI)

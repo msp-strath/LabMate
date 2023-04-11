@@ -11,41 +11,62 @@ import Hide
 
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
+import Data.List as L
+import Data.Set (Set)
+import qualified Data.Set as Set
+import Control.Monad.Writer
+import Data.Foldable (traverse_)
+
+data RenameGripe
+  = Captured  -- the new name is already in scope
+  | Capturing -- the new name prevents a subsequent declaration
+  | TooManyNames
+  deriving (Show, Eq, Ord)
+
+renameGripeResponse :: RenameGripe -> String
+renameGripeResponse g = "Renaming not possible: " ++ case g of
+  Captured -> "the new name was already taken."
+  Capturing -> "the new name will be needed later."
+  TooManyNames -> "too many new names for the same old name."
+
+type RenameProblems = Set (Source, RenameGripe)
 
 reassemble :: (Nonce, Map Nonce String) -> MachineState -> String
 reassemble (n, tab) ms =
-  case either (const ms) id $ renamePass ms of
-    ms -> case Map.lookup n (nonceTable tab (resetCursor (position ms))) of
-      Just ts -> ts
-      Nothing -> []
+  let (ms', probs) = runWriter (renamePass ms)
+      responses = foldr (\((n, _), grp) rs -> Map.insertWith (++) n [renameGripeResponse grp] rs) Map.empty probs in
+  fromMaybe [] $ Map.lookup n (nonceTable responses tab (resetCursor (position $ if Set.null probs then ms' else ms)))
 
 
-nonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
-nonceTable table (fz :<+>: []) = table
-nonceTable table (fz :<+>: Fork _ fs' e : fs) = nonceTable (nonceTable table (fz :<+>: fs)) (fz :<+>: fs')
-nonceTable table (fz :<+>: Source (n, ts) : fs) = let m = nonceTable table (fz :<+>: fs) in Map.insert n (ts >>= nonceExpand m) m
-nonceTable table (fz :<+>: f : fs) = nonceTable table (fz :< f :<+>: fs)
 
-renamePass :: MachineState -> Either Gripe MachineState
+nonceTable :: Map Nonce [String] -> Map Nonce String -> Cursor Frame -> Map Nonce String
+nonceTable responses table (fz :<+>: []) = table
+nonceTable responses table (fz :<+>: Fork _ fs' e : fs) = nonceTable responses (nonceTable responses table (fz :<+>: fs)) (fz :<+>: fs')
+nonceTable responses table (fz :<+>: Source (n, Hide ts) : fs) =
+  let m = nonceTable responses table (fz :<+>: fs) in
+  Map.insert n (L.intercalate "\n%< " $ (ts >>= nonceExpand m) : Map.findWithDefault [] n responses) m
+nonceTable responses table (fz :<+>: f : fs) = nonceTable responses table (fz :< f :<+>: fs)
+
+renamePass :: MachineState -> Writer RenameProblems MachineState
 renamePass ms = inbound ms
   where
-    inbound :: MachineState -> Either Gripe MachineState
+    inbound :: MachineState -> Writer RenameProblems MachineState
     inbound ms@(MS { position = fz :<+>: fs, problem = p }) =
       case (fz <>< fs, p) of
-        (fz :< Source (n, [t]), Done (FreeVar x)) | kin t == Nom ->
-          case renamer fz x False of
-            Nothing -> Left $ "Inconsistent renaming of " ++ raw t ++ "."
-            Just x' -> outbound ms{ position = fz :<+>: [Source (n, [t{ raw = x' }])] }
-        (fz :< Source (n, t:ts) :< Source (m, t':ts'), Done (Atom ""))
+        (fz :< Source (n, Hide [t]), Done (FreeVar x)) | kin t == Nom -> do
+          x' <- renamer fz x False
+          outbound ms{ position = fz :<+>: [Source (n, Hide [t{ raw = x' }])] }
+        (fz :< Source (n, Hide (t:ts)) :< Source (m, Hide (t':ts')), Done (Atom ""))
           | raw t' == "rename", Grp Directive (Hide dirts) <- kin t ->
             outbound ms{
               position = fz :<+>:
-                [Source (n, t{ kin = Grp Response (Hide $ respond dirts) } : ts)
-                ,Source (m, t'{raw = "renamed"} : ts')]}
+                [Source (n, Hide (t{ kin = Grp Response (Hide $ respond dirts) } : ts))
+                ,Source (m, Hide (t'{raw = "renamed"} : ts'))]}
         (fz, p) -> outbound ms{ position = fz :<+>: [] }
 
-    outbound :: MachineState -> Either Gripe MachineState
-    outbound ms@(MS { position = B0 :<+>: _}) = Right ms
+    outbound :: MachineState -> Writer RenameProblems MachineState
+    outbound ms@(MS { position = B0 :<+>: _}) = pure ms
     outbound ms@(MS { position = fz :< f :<+>: fs, problem = p}) = case f of
      Fork (Left frk) fs' p' -> inbound ms{ position = fz :< Fork (Right frk) fs p :<+>: fs' , problem = p' }
      Fork (Right frk) fs' p' -> outbound ms{ position = fz :<+>: Fork (Left frk) fs p : fs', problem = p' }
@@ -54,38 +75,58 @@ renamePass ms = inbound ms
     renamer :: Bwd Frame
             -> Name
             -> Bool  -- have we found FunctionLocale yet?
-            -> Maybe String
+            -> Writer RenameProblems String
     renamer B0 n b = error "ScriptLocale disappeared in renamer!"
     renamer (fz :< Locale FunctionLocale) n b = renamer fz n True
     renamer (fz :< Locale ScriptLocale) n True = error "Declaration disappeared in renamer!"
-    renamer (fz :< Declaration n' d) n b =
-      if n == n' then case (d, newName d) of
-        (UserDecl _ _ _ capturable, Just s) ->
-          if capturable && captured fz b s then Nothing else pure s
-        _ -> Nothing
+    renamer (fz :< Declaration n' d) n b = do
+      s <- newName d
+      if n == n' then case d of
+        UserDecl _ _ _ capturable -> do
+          when capturable $ do
+            cap <- captured fz b s
+            when cap $ tellGripes Captured d
+          pure s
+        _ -> error "Impossible: renaming LabRat var"
       else do
         s <- renamer fz n b
         s' <- newName d
-        s <$ guard (s /= s')
+        when (s == s') $ tellGripes Captured d
+        pure s
     renamer (fz :< f) n b = renamer fz n b
 
-    captured :: Bwd Frame -> Bool -> String -> Bool
-    captured B0 b s = False
+    captured :: Bwd Frame
+             -> Bool -- have we found a FunctionLocale yet?
+             -> String
+             -> Writer RenameProblems Bool
+    captured B0 b s = pure False
     captured (fz :< Locale FunctionLocale) b s = captured fz True s
-    captured (fz :< Locale ScriptLocale) True s = False
-    captured (fz :< Declaration _ d) b s | newName d == Just s = True
+    captured (fz :< Locale ScriptLocale) True s = pure False
+    captured (fz :< Declaration _ d) b s = do
+      s' <- newName d
+      if s == s'
+        then do
+          tellGripes Capturing d
+          pure True
+        else captured fz b s
     captured (fz :< f) b s = captured fz b s
 
-    newName :: DeclarationType -> Maybe String
-    newName (UserDecl old seen [] capturable) = Just old
-    newName (UserDecl old seen [new] capturable) = Just new
-    newName _ = Nothing
+    newName :: DeclarationType -> Writer RenameProblems String
+    newName (UserDecl old seen [] capturable) = pure old
+    newName (UserDecl old seen names capturable)
+      | [new] <- L.nub (map fst names) = pure new
+    newName d@(UserDecl old _ _ _) = old <$ tellGripes TooManyNames d
 
     respond :: [Tok] -> [Tok]
     respond (t:ts)
-      | raw t == ">" = t{raw = "<"} : ts
+      | raw t == ">" = t{ raw = "<" } : ts
       | otherwise = t: respond ts
     respond [] = []
+
+    tellGripes :: RenameGripe -> DeclarationType -> Writer RenameProblems ()
+    tellGripes grp = \case
+       UserDecl _ _ newNames _ -> traverse_ (\(_, src) -> tell $ Set.singleton (src, grp)) newNames
+       _ -> pure ()
 
 -- Plan:
 -- 1. Try to do renaming, computing Either Gripe MachineState, turning directives into responses

@@ -1,6 +1,7 @@
 module Syntax where
 
 import Lex
+import Hide
 
 type Command = WithSource Command'
 
@@ -74,7 +75,7 @@ data Tilde = Tilde deriving Show
 
 type LHS = WithSource LHS'
 
-pattern EmptyLHS = LMat [] :<=: (-1,[])
+pattern EmptyLHS = LMat [] :<=: (-1, Hide [])
 
 data UnOperator
   = UPlus
