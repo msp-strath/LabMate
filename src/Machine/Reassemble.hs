@@ -32,20 +32,20 @@ renameGripeResponse g = "Renaming not possible: " ++ case g of
 
 type RenameProblems = Set (ResponseLocation, RenameGripe)
 
-reassemble :: (Nonce, Map Nonce String) -> MachineState -> String
-reassemble (n, tab) ms =
+reassemble :: Nonce -> MachineState -> String
+reassemble n ms =
   let (ms', probs) = runWriter (renamePass ms)
+      tab = nonceTable ms
       tab' = foldr (\((n, c), grp) rs -> Map.insertWith (++) n (concat ["\n", replicate c ' ', "%< ", renameGripeResponse grp]) rs) tab probs
-  in fromMaybe [] $ Map.lookup n (nonceTable tab' (resetCursor (position $ if Set.null probs then ms' else ms)))
+  in fromMaybe [] $ Map.lookup n (updateNonceTable tab' (resetCursor (position $ if Set.null probs then ms' else ms)))
 
 
-nonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
-nonceTable table (fz :<+>: []) = table
-nonceTable table (fz :<+>: Fork _ fs' e : fs) = nonceTable (nonceTable table (fz :<+>: fs)) (fz :<+>: fs')
-nonceTable table (fz :<+>: Source (n, Hide ts) : fs) =
-  let m = nonceTable table (fz :<+>: fs) in Map.insert n (ts >>= nonceExpand m) m
-  {- Map.insert n (L.intercalate "\n%< " $ (ts >>= nonceExpand m) : Map.findWithDefault [] n responses) m -}
-nonceTable table (fz :<+>: f : fs) = nonceTable table (fz :< f :<+>: fs)
+updateNonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
+updateNonceTable table (fz :<+>: []) = table
+updateNonceTable table (fz :<+>: Fork _ fs' e : fs) = updateNonceTable (updateNonceTable table (fz :<+>: fs)) (fz :<+>: fs')
+updateNonceTable table (fz :<+>: Source (n, Hide ts) : fs) =
+  let m = updateNonceTable table (fz :<+>: fs) in Map.insert n (ts >>= nonceExpand m) m
+updateNonceTable table (fz :<+>: f : fs) = updateNonceTable table (fz :< f :<+>: fs)
 
 renamePass :: MachineState -> Writer RenameProblems MachineState
 renamePass ms = inbound ms

@@ -240,7 +240,7 @@ lex4 = helper B0 where
     | k `elem` passedthrough =
       helper (acc :< Tok s (Grp k $ Hide $ map sublex4 $ unhide ss) p) ts
   helper acc (t : ts)
-    | kin t == Ret = ending (acc :< t) RET B0 ts
+    | kin t == Ret = ending (acc `respsnocret` t) RET B0 ts
     | t == semicolon = ending (acc :< t) Semicolon B0 ts
     | otherwise = helper (acc :< t) ts
 
@@ -250,6 +250,12 @@ lex4 = helper B0 where
     | t == semicolon = ending (acc <> wh :< t) Semicolon B0 ts
     | kin t `elem` [Spc, Grp Comment (Hide [])] = ending acc e (wh :< t) ts
   ending acc e wh ts = grpCons (Line e) acc $ lex4 (wh <>> ts)
+
+  respsnocret :: Bwd Tok -> Tok -> Bwd Tok
+  respsnocret (tz :< r@(Tok{kin = Grp Response (Hide rs)})) t =
+    tz :< r{kin = Grp Response (Hide $ rs ++ [t])
+           ,raw = raw r ++ raw t}
+  respsnocret tz t = tz :< t
 
   semicolon = sym ";"
 

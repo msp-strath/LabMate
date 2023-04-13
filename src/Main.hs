@@ -25,6 +25,8 @@ import Machine.Reassemble
 import Data.Version
 import Paths_LabRat
 
+
+-- TODO : process stdin
 main :: IO ()
 main = do
   putStrLn ("%< LabRat " ++ showVersion version)
@@ -35,10 +37,10 @@ main = do
         True -> actDir f
         False -> actFile f >>= \case
           Right (tab, cs@(_ :<=: (n,src))) -> do
-            let out = (run (initMachine cs))
-            putStrLn $ reassemble (n,tab) out
+            let out = run (initMachine cs tab)
+            putStrLn $ reassemble n out
           Left e -> printError e
-    x -> putStrLn $ "Unrecognised arguments: " ++ (show x)
+    x -> putStrLn $ "Unrecognised arguments: " ++ show x
 
 printError :: (FilePath, Reach, Int) -> IO ()
 printError (f, r, n) = do putStr (f ++ ": parse error "); print r; putStr (show n) ; putStrLn " parses\n"

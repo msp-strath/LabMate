@@ -13,11 +13,13 @@ import Lex
 import Parse
 import Parse.Matlab
 import Syntax
+import Hide
 
 data MachineState = MS
   { position :: Cursor Frame
   , problem :: Problem
-  , namesupply :: (Root, Int)
+  , nameSupply :: (Root, Int)
+  , nonceTable :: Map Nonce String
   } deriving Show
 
 type Root = Bwd (String, Int)
@@ -27,7 +29,7 @@ name :: (Root, Int) -> String -> Name
 name (r, n) s = r <>> [(s, n)]
 
 fresh :: String -> MachineState -> (Name, MachineState)
-fresh s ms = let (r, n) = namesupply ms in (name (r, n) s, ms { namesupply = (r, n+1) })
+fresh s ms = let (r, n) = nameSupply ms in (name (r, n) s, ms { nameSupply = (r, n+1) })
 
 freshNames :: [String] -> MachineState -> ([Name], MachineState)
 freshNames [] st = ([], st)
@@ -99,11 +101,12 @@ nil = Atom ""
 yikes :: Term -> Term
 yikes t = P (Atom "yikes") t
 
-initMachine :: File -> MachineState
-initMachine f = MS
+initMachine :: File -> Map Nonce String -> MachineState
+initMachine f t = MS
   { position = B0 :<+>: []
   , problem = File f
-  , namesupply = (B0 :< ("labrat", 0), 0)
+  , nameSupply = (B0 :< ("labrat", 0), 0)
+  , nonceTable = t
   }
 
 findDeclaration :: DeclarationType -> Bwd Frame -> Maybe (Name, Bwd Frame)
@@ -130,6 +133,20 @@ ensureDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
 ensureDeclaration s ms@(MS { position = fz :<+>: fs}) = case findDeclaration s fz of
   Nothing -> makeDeclaration s ms
   Just (n, fz) -> (n, ms { position = fz :<+>: fs})
+
+nearestSource :: MachineState -> Source
+nearestSource ms@(MS { position = fz :<+>: _}) = go fz
+  where
+    go B0 = error "Impossible : no enclosing Source frame"
+    go (fz :< Source src) = src
+    go (fz :< _) = go fz
+
+onNearestSource :: ([Tok] -> [Tok]) -> MachineState -> MachineState
+onNearestSource f ms@(MS { position = fz :<+>: fs}) = ms{ position = go fz :<+>: fs }
+  where
+    go B0 = error "Impossible : no enclosing Source frame"
+    go (fz :< Source (n, Hide ts)) = fz :< Source (n, Hide $ f ts)
+    go (fz :< f) = go fz :< f
 
 run :: MachineState -> MachineState
 run ms@(MS { position = fz :<+>: [], problem = p })
@@ -176,7 +193,7 @@ run ms@(MS { position = fz :<+>: [], problem = p })
           case fundecls ms B0 cs of
             (ms, fz') -> move $ ms { position = (fz <> fz') <>< decls :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :<+>: []
                                    , problem = Done nil }
-
+  | Command (Respond ts) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
 -- run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
 run ms = move ms
 
