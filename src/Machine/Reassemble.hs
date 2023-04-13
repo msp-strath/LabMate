@@ -30,23 +30,22 @@ renameGripeResponse g = "Renaming not possible: " ++ case g of
   Capturing -> "the new name will be needed later."
   TooManyNames -> "too many new names for the same old name."
 
-type RenameProblems = Set (Source, RenameGripe)
+type RenameProblems = Set (ResponseLocation, RenameGripe)
 
 reassemble :: (Nonce, Map Nonce String) -> MachineState -> String
 reassemble (n, tab) ms =
   let (ms', probs) = runWriter (renamePass ms)
-      responses = foldr (\((n, _), grp) rs -> Map.insertWith (++) n [renameGripeResponse grp] rs) Map.empty probs in
-  fromMaybe [] $ Map.lookup n (nonceTable responses tab (resetCursor (position $ if Set.null probs then ms' else ms)))
+      tab' = foldr (\((n, c), grp) rs -> Map.insertWith (++) n (concat ["\n", replicate c ' ', "%< ", renameGripeResponse grp]) rs) tab probs
+  in fromMaybe [] $ Map.lookup n (nonceTable tab' (resetCursor (position $ if Set.null probs then ms' else ms)))
 
 
-
-nonceTable :: Map Nonce [String] -> Map Nonce String -> Cursor Frame -> Map Nonce String
-nonceTable responses table (fz :<+>: []) = table
-nonceTable responses table (fz :<+>: Fork _ fs' e : fs) = nonceTable responses (nonceTable responses table (fz :<+>: fs)) (fz :<+>: fs')
-nonceTable responses table (fz :<+>: Source (n, Hide ts) : fs) =
-  let m = nonceTable responses table (fz :<+>: fs) in
-  Map.insert n (L.intercalate "\n%< " $ (ts >>= nonceExpand m) : Map.findWithDefault [] n responses) m
-nonceTable responses table (fz :<+>: f : fs) = nonceTable responses table (fz :< f :<+>: fs)
+nonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
+nonceTable table (fz :<+>: []) = table
+nonceTable table (fz :<+>: Fork _ fs' e : fs) = nonceTable (nonceTable table (fz :<+>: fs)) (fz :<+>: fs')
+nonceTable table (fz :<+>: Source (n, Hide ts) : fs) =
+  let m = nonceTable table (fz :<+>: fs) in Map.insert n (ts >>= nonceExpand m) m
+  {- Map.insert n (L.intercalate "\n%< " $ (ts >>= nonceExpand m) : Map.findWithDefault [] n responses) m -}
+nonceTable table (fz :<+>: f : fs) = nonceTable table (fz :< f :<+>: fs)
 
 renamePass :: MachineState -> Writer RenameProblems MachineState
 renamePass ms = inbound ms

@@ -58,9 +58,8 @@ data DeclarationType
   = UserDecl
       String   -- current name
       Bool     -- have we seen it in user code?
-      [(String, Source)] -- renamed names and source of the directives
-                         -- requesting the renames (we hope of length
-                         -- at most 1)
+      [(String, ResponseLocation)] -- requested name and how to reply
+                                   -- (we hope of length at most 1)
       Bool     -- is it capturable?
   | LabratDecl
   deriving Show
@@ -73,7 +72,7 @@ data Problem
   | Done Term
   | Expression Expr'
   | Row [Expr]
-  | RenameAction String String Source
+  | RenameAction String String ResponseLocation
   | FunCalled Expr'
   deriving Show
 
@@ -166,8 +165,8 @@ run ms@(MS { position = fz :<+>: [], problem = p })
       [] -> move $ ms { problem = Done nil }
       ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
 
-  | Command (Direct (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new src}
-  | RenameAction old new src <- p = case ensureDeclaration (UserDecl old False [(new, src)] True) ms of
+  | Command (Direct rl (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new rl}
+  | RenameAction old new rl <- p = case ensureDeclaration (UserDecl old False [(new, rl)] True) ms of
       (n, ms) -> move $ ms { problem = Done nil}
 
   | Command (Function (lhs, fname, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) fz of

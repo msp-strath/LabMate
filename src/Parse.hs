@@ -83,6 +83,11 @@ pws' m p = Parser $ \ tabn ts -> reachBind (parser p tabn ts) $ \(az, a, tabn@(t
             let as = non m : az <>> [] in
             ((Nowhere, [(az, a :<=: (n, Hide as), (Map.insert n (as >>= nonceExpand table) table, n+1), ts)]), id)
 
+pwn :: Nonce -> Parser ()
+pwn n = Parser $ \ tabn ts -> (Nowhere , [(B0 :< Tok{raw = "", kin = Non n, pos = dump}, (), tabn, ts)])
+
+pblank :: Parser Nonce
+pblank = Parser $ \ (tab, n) ts -> (Nowhere, [(B0, n, (Map.insert n "" tab, n+1), ts)])
 
 -- TODO: at some point, we will need to record more provenance in the
 -- token sequence
@@ -112,21 +117,26 @@ pgrp f p = Parser $ \ n ts -> (max (reached ts) *** id) $ case ts of
   _ -> (Nowhere, [])
 
 
-pline :: Parser a -> Parser a
-pline p = id <$ many (ptok junkLine)
-            <*> pgrp isLine (id <$ pospc <*> p <* many (ptok (guard . junk)))
+pline :: (Nonce -> Parser a) -> Parser a
+pline np = do
+  n <- pblank
+  many (ptok junkLine)
+  pgrp isLine (id <$ pospc <*> np n <* pgreedy (ptok (guard . junk False)) <* pwn n <* pgreedy (ptok (guard . junk True)))
   where
     isLine (Line _) = True
     isLine _ = False
-    junk t = case kin t of
+    junk b t = case kin t of -- b tells us whether Ret is junk
       Spc -> True
-      Ret -> True
+      Ret -> b
       Grp Comment _ -> True
       Sym | raw t == ";" -> True
       _ -> False
     junkLine t = case kin t of
-      Grp (Line _) (Hide ts) | all junk ts -> Just ()
+      Grp (Line _) (Hide ts) | all (junk True) ts -> Just ()
       _ -> Nothing
+
+plink :: Parser a -> Parser a
+plink = pline . const
 
 ponespc :: Parser ()
 ponespc = ptok (\ t -> guard (kin t == Spc || isComment t))
@@ -159,6 +169,9 @@ pkin k s = ptok $ \ t -> guard $ Tok {kin = k, raw = s, pos = Hide (0,0)} == t
 
 psym :: String -> Parser ()
 psym = pkin Sym
+
+ppercent :: Parser Int -- returns the column of '%'
+ppercent = ptok $ \ t -> snd (unhide $ pos t) <$ guard (kin t == Sym && raw t == "%")
 
 prawif :: Kin -> Parser String
 prawif k = ptok $ \ t -> raw t <$ guard (kin t == k)

@@ -21,32 +21,32 @@ pfile = pws pfile'
 pfile' :: Parser [Command]
 pfile' = many (pline pcommand) <* peoi
 
-pcommand :: Parser Command
-pcommand = pws pcommand'
+pcommand :: Nonce -> Parser Command
+pcommand = pws . pcommand'
 
-pcommand' :: Parser Command'
-pcommand'
+pcommand' :: Nonce -> Parser Command'
+pcommand' n
   = pcond
   ( Assign <$> plhs <* punc "=" <*> pexpr topCI
   <|> Assign EmptyLHS <$> pexpr comCI
   <|> id <$> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
-       <|> For <$> pline ((,) <$ pkin Blk "for" <* pospc
+       <|> For <$> plink ((,) <$ pkin Blk "for" <* pospc
                              <*> pnom <* punc "="
                              <*> pexpr topCI)
                <*> many (pline pcommand)
                <*  pend
-       <|> While <$> pline (id <$ pkin Blk "while" <* pospc <*> pexpr topCI)
+       <|> While <$> plink (id <$ pkin Blk "while" <* pospc <*> pexpr topCI)
                  <*> many (pline pcommand)
                  <*  pend
        <|> Function
-           <$> pline ((,,) <$ pkin Blk "function" <* pospc
+           <$> plink ((,,) <$ pkin Blk "function" <* pospc
                  <*> (plhs <* punc "=" <|> pure EmptyLHS)
                  <*> pnom <* pospc
                  <*> (pgrp (== Bracket Round) (psep0 (punc ",") pnom) <|> pure []))
            <*> many (pline pcommand)
            <*  (pend <|> pure ())
-       <|> Switch <$> pline (id <$ pkin Blk "switch" <* pospc <*> pexpr topCI)
+       <|> Switch <$> plink (id <$ pkin Blk "switch" <* pospc <*> pexpr topCI)
                   <*> many pcase
                   <*> optional potherwise
                   <* pend
@@ -54,7 +54,7 @@ pcommand'
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
   <|> Return <$ pkin Key "return"
-  <|> Direct <$> pgrp (== Directive) (id <$ psym "%" <* psym ">" <* pospc <*> pdir <* pospc)
+  <|> pgrp (== Directive) (Direct <$> ((n,) <$> ppercent) <* psym ">" <* pospc <*> pdir <* pospc)
   <|> Respond <$> pgrp (== Response) pres
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
   )
@@ -67,17 +67,18 @@ pcommand'
   empty
   where
     pif b = (:)
-      <$> ((,) <$> pline (id <$ (if b then pkin Blk "if" else pkin Key "elseif")
+      <$> ((,) <$> plink (id <$ (if b then pkin Blk "if" else pkin Key "elseif")
                            <* pospc <*> pexpr topCI)
                <*> many (pline pcommand))
       <*> (pif False{-looking for elseif, from now on-} <|> pure [])
     pelse = pure Nothing
-        <|> Just <$ pline (pkin Key "else") <*> many (pline pcommand)
-    pend = pline (pkin Key "end")
-    pcase = (,) <$> pline (id <$ pkin Key "case" <* pospc <*> pexpr topCI)
+        <|> Just <$ plink (pkin Key "else") <*> many (pline pcommand)
+    pend = plink (pkin Key "end")
+    pcase = (,) <$> plink (id <$ pkin Key "case" <* pospc <*> pexpr topCI)
                 <*> many (pline pcommand)
-    potherwise = id <$  pline (id <$ pkin Key "otherwise")
+    potherwise = id <$  plink (id <$ pkin Key "otherwise")
                     <*> many (pline pcommand)
+
 
 pcmdarg :: Parser (WithSource String)
 pcmdarg = pws pcmdarg'
@@ -108,7 +109,7 @@ ptensortype :: Parser TensorType
 ptensortype = pws ptensortype'
 
 ptensortype' :: Parser TensorType'
-ptensortype' = Tensor <$> (id <$> pgrp (== Bracket Square) (pline psquex) <* pospc
+ptensortype' = Tensor <$> (id <$> pgrp (== Bracket Square) (plink psquex) <* pospc
                          <|> pure (one , one))
                      <*> pentrytype
   where
@@ -135,7 +136,7 @@ pres = id <$ psym "%" <* psym "<" <*> many (ptok Just)
 
 plhs' :: ContextInfo -> Parser LHS
 plhs' ci = (pws (LVar <$> pnom) >>= more)
-   <|> (pws (LMat <$> pgrp (== Bracket Square) (pline (psep0 (pspc <|> punc ",") p) <|> [] <$ peoi)))
+   <|> (pws (LMat <$> pgrp (== Bracket Square) (plink (psep0 (pspc <|> punc ",") p) <|> [] <$ peoi)))
   where
   more :: LHS -> Parser LHS
   more l = pcond
@@ -277,10 +278,10 @@ pargs :: Bracket -> Parser [Expr]
 pargs b = pgrp (== Bracket b) $ wrap b $ pspcaround $ psep0 (punc ",") (pexpr topCI)
   where
     wrap Round = id
-    wrap _     = pline
+    wrap _     = plink
 
 prow :: Parser [Expr]
-prow = pline (psep0 (pspc <|> punc ",") (pexpr matrixCI))
+prow = plink (psep0 (pspc <|> punc ",") (pexpr matrixCI))
 
 punaryop :: Parser UnOperator
 punaryop = UPlus <$ psym "+"

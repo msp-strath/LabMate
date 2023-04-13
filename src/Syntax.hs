@@ -17,11 +17,13 @@ data Command'
   | Return
   | Function (LHS, String, [String]) [Command]
   | Switch Expr [(Expr, [Command])] (Maybe [Command])
-  | Direct Dir
+  | Direct ResponseLocation Dir
   | Respond Res
   | GeneratedCode [Command]
   deriving (Show)
 
+
+type ResponseLocation = (Nonce, Int)
 type Dir = WithSource Dir'
 
 data Dir'
