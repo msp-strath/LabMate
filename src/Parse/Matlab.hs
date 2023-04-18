@@ -29,7 +29,7 @@ pcommand' n
   = pcond
   ( Assign <$> plhs <* punc "=" <*> pexpr topCI
   <|> Assign EmptyLHS <$> pexpr comCI
-  <|> id <$> pgrp (== Block)
+  <|> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
        <|> For <$> plink ((,) <$ pkin Blk "for" <* pospc
                              <*> pws pnom <* punc "="
@@ -90,7 +90,7 @@ pcmdarg' = pstring
       start t = case kin t of
         k | k `elem` [Nom, Blk, Key, Dig] -> Just (raw t)
         Grp (Bracket b) _ | b /= Round -> Just (raw t)
-        Sym | not (elem (raw t) [",", ";", "="]) -> Just (raw t)  -- only those?
+        Sym | raw t `notElem` [",", ";", "="] -> Just (raw t)  -- only those?
         _ -> Nothing
       more t = start t <|> extra t
       extra t = case kin t of
@@ -109,12 +109,12 @@ ptensortype :: Parser TensorType
 ptensortype = pws ptensortype'
 
 ptensortype' :: Parser TensorType'
-ptensortype' = Tensor <$> (id <$> pgrp (== Bracket Square) (plink psquex) <* pospc
+ptensortype' = Tensor <$> (pgrp (== Bracket Square) (plink psquex) <* pospc
                          <|> pure (one , one))
                      <*> pentrytype
   where
   one = ("", IntLiteral 1  :<=: (-1,Hide []))
-  psquex = (,) <$> (id <$> plarrow (pexpr topCI) <* pospc <* pkin Nom "x" <* pospc
+  psquex = (,) <$> (plarrow (pexpr topCI) <* pospc <* pkin Nom "x" <* pospc
                     <|> pure one)
                <*> plarrow (pexpr topCI)
 
@@ -136,7 +136,7 @@ pres = id <$ psym "%" <* psym "<" <*> many (ptok Just)
 
 plhs' :: ContextInfo -> Parser LHS
 plhs' ci = (pws (LVar <$> pnom) >>= more)
-   <|> (pws (LMat <$> pgrp (== Bracket Square) (plink (psep0 (pspc <|> punc ",") p) <|> [] <$ peoi)))
+   <|> pws (LMat <$> pgrp (== Bracket Square) (plink (psep0 (pspc <|> punc ",") p) <|> [] <$ peoi))
   where
   more :: LHS -> Parser LHS
   more l = pcond
@@ -144,8 +144,8 @@ plhs' ci = (pws (LVar <$> pnom) >>= more)
      <|> LDot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
     more
     (pure l)
-  yuk = () <$ psym "." <* pospc
-    <|> () <$ pspc <* psym "." <* pspc
+  yuk = void (psym ".") <* pospc
+    <|> void pspc <* psym "." <* pspc
   p :: Parser (Either Tilde LHS)
   p = Left Tilde <$ psym "~"  <|> Right <$> plhs
 
@@ -205,7 +205,7 @@ contextBinop ci (Or False)  | precedence ci < ororLevel   = Just (ci {precedence
 contextBinop ci op = Nothing
 
 pcxspc :: ContextInfo -> Parser ()
-pcxspc ci = if matrixMode ci then pure () else pospc
+pcxspc ci = unless (matrixMode ci) pospc
 
 pstring :: Parser String
 pstring = ptok stringy where
@@ -219,7 +219,7 @@ pstring = ptok stringy where
 pexpr :: ContextInfo -> Parser Expr
 pexpr ci = go >>= more ci where
   go :: Parser Expr
-  go = id <$> pgrp (== Bracket Round) (id <$ pospc <*> pexpr topCI <* pospc)
+  go = pgrp (== Bracket Round) (id <$ pospc <*> pexpr topCI <* pospc)
    <|> pws (UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel}))
        -- should UnaryOp check precedence level?
    <|> lhsstuff ci
@@ -238,20 +238,20 @@ pexpr ci = go >>= more ci where
                 <|> Dot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
               lmore
               (pure l)
-  yuk = () <$ psym "." <* pospc
-    <|> () <$ pspc <* psym "." <* pspc
+  yuk = void (psym ".") <* pospc
+    <|> void pspc <* psym "." <* pspc
 
   more :: ContextInfo -> Expr -> Parser Expr
   more ci e = ppeek >>= \case
     t1:t2:t3:ts | kin t1 == Spc
                && matrixMode ci
                && t2 `elem` [sym "+", sym "-"]
-               && not (kin t3 == Spc) -> pure e
+               && kin t3 /= Spc -> pure e
     t1:t2:t3:ts | kin t1 == Spc
                && commandMode ci
                && (case what e of { (Var _) -> True ; _ -> False })
                && t2 `elem` (sym <$> binOps)
-               && not (kin t3 == Spc) -> pure e
+               && kin t3 /= Spc -> pure e
     _ -> tight e
     -- pcond pspc (\ _ -> loose e) (tight e)
     where
@@ -310,7 +310,7 @@ pnumber ds = mkNum <$> optional (id <$ psym "." <*> (prawif Dig <|> pure "0"))
                    <*> optional ((,) <$ (pkin Nom "e" <|> pkin Nom "E")
                                     <*> ('-' <$ psym "-" <|> ('+' <$ psym "+"))
                                     <*> prawif Dig
-                                 <|> (ptok $ \case
+                                 <|> ptok (\case
                                    Tok {kin = Nom, raw = e:es@(_ : _)}
                                      | elem e "eE" && all isDigit es
                                         -> Just ('+', es)

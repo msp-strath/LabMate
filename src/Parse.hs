@@ -3,7 +3,7 @@ module Parse where
 
 import Control.Monad
 import Control.Applicative
-import Control.Arrow ((***), first)
+import Control.Arrow (first)
 
 import qualified Data.Text as T
 import Data.Map (Map)
@@ -38,7 +38,7 @@ reached tts@(t:_) = Reached (unhide $ pos t) (Hide tts)
 reachBind  :: (Reach,[a])
            -> (a -> ((Reach, [b]), b -> c))
            -> (Reach, [c])
-reachBind (r, as) k = max r *** id $ foldMap go as
+reachBind (r, as) k = first (max r) $ foldMap go as
   where
     go a = let ((r, bs), f) = k a
            in (r, map f bs)
@@ -108,13 +108,13 @@ ppeek = Parser $ \ n ts -> (Nowhere, [(B0, ts, n, ts)])
 
 -- The parser p must handle leading and trailing space/junk
 pgrp :: (Grouping -> Bool) -> Parser a -> Parser a
-pgrp f p = Parser $ \ n ts -> (max (reached ts) *** id) $ case ts of
-  t:ts | Grp g (Hide ss) <- kin t, f g -> reachBind (parser p n ss) $ \(az, a, n, as) ->
-           let toks = az <>> [] in
-             (,id) . (Nowhere,) $ case as of
-               [] -> [(B0 :< t { raw = groupRaw g toks, kin = Grp g (Hide toks) }, a, n, ts)]
-               _  -> []
-  _ -> (Nowhere, [])
+pgrp f p = Parser $ \ n ts -> first (max (reached ts)) $ case ts of
+ t:ts | Grp g (Hide ss) <- kin t, f g -> reachBind (parser p n ss) $ \(az, a, n, as) ->
+          let toks = az <>> [] in
+            (,id) . (Nowhere,) $ case as of
+              [] -> [(B0 :< t { raw = groupRaw g toks, kin = Grp g (Hide toks) }, a, n, ts)]
+              _  -> []
+ _ -> (Nowhere, [])
 
 
 pline :: (Nonce -> Parser a) -> Parser a
