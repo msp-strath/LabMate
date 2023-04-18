@@ -3,7 +3,7 @@ module Parse where
 
 import Control.Monad
 import Control.Applicative
-import Control.Arrow ((***))
+import Control.Arrow ((***), first)
 
 import qualified Data.Text as T
 import Data.Map (Map)
@@ -142,13 +142,13 @@ ponespc :: Parser ()
 ponespc = ptok (\ t -> guard (kin t == Spc || isComment t))
 
 pspc :: Parser ()
-pspc = () <$ ponespc <* pospc
+pspc = void ponespc <* pospc
 
 -- We are relying on the lexer combining all consecutive space tokens
 
 -- Optional space
 pospc :: Parser ()
-pospc = () <$ pgreedy ponespc
+pospc = void (pgreedy ponespc)
 
 -- The string s must be in the lexer symbol table
 -- Leading and trailing space is consumed => do not use on its own!
@@ -181,7 +181,7 @@ pnom = ptok $ \ t -> if kin t == Nom then Just (raw t) else Nothing
 
 pcond :: Parser a -> (a -> Parser b) -> Parser b -> Parser b
 pcond pc ps pf = Parser $ \ n ts -> case parser pc n ts of
-  (r,[]) -> max r *** id $ parser pf n ts
+  (r,[]) -> first (max r) $ parser pf n ts
   p ->
     reachBind p $ \(tz, a, n, ts) ->
     (parser (ps a) n ts,) $ \(tz', b, n, ts) ->

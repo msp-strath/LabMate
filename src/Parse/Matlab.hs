@@ -32,7 +32,7 @@ pcommand' n
   <|> id <$> pgrp (== Block)
       (    If <$> pif True{-looking for if-} <*> pelse <* pend
        <|> For <$> plink ((,) <$ pkin Blk "for" <* pospc
-                             <*> pnom <* punc "="
+                             <*> pws pnom <* punc "="
                              <*> pexpr topCI)
                <*> many (pline pcommand)
                <*  pend
@@ -42,8 +42,8 @@ pcommand' n
        <|> Function
            <$> plink ((,,) <$ pkin Blk "function" <* pospc
                  <*> (plhs <* punc "=" <|> pure EmptyLHS)
-                 <*> pnom <* pospc
-                 <*> (pgrp (== Bracket Round) (psep0 (punc ",") pnom) <|> pure []))
+                 <*> pws pnom <* pospc
+                 <*> (pgrp (== Bracket Round) (psep0 (punc ",") $ pws pnom) <|> pure []))
            <*> many (pline pcommand)
            <*  (pend <|> pure ())
        <|> Switch <$> plink (id <$ pkin Blk "switch" <* pospc <*> pexpr topCI)

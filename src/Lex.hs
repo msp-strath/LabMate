@@ -418,6 +418,8 @@ data WithSource a = (:<=:) { what :: a , source :: Source }
 nonce :: WithSource a -> Nonce
 nonce = fst . source
 
+noSource :: a -> WithSource a
+noSource a = a :<=: (-1, Hide [])
 {-
 instance Show a => Show (WithSource a) where
   show (a :<=: (n, src)) = "$" ++ show n ++ " = `" ++ (src >>= showEaten) ++ "`" ++ show a

@@ -10,12 +10,13 @@ type File = WithSource [Command]
 data Command'
   = Assign LHS Expr
   | If [(Expr, [Command])] (Maybe [Command])
-  | For (String, Expr) [Command]
+  | For (WithSource String, Expr) [Command]
   | While Expr [Command]
   | Break
   | Continue
   | Return
-  | Function (LHS, String, [String]) [Command]
+  -- should function names / args be enclosed in WithSource?
+  | Function (LHS, WithSource String, [WithSource String]) [Command]
   | Switch Expr [(Expr, [Command])] (Maybe [Command])
   | Direct ResponseLocation Dir
   | Respond Res

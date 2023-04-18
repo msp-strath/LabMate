@@ -43,14 +43,17 @@ data Frame
   | Declaration Name DeclarationType
   | Locale LocaleType
   | Expressions [Expr]
+  | TargetLHS LHS
+  | Conditionals [(Expr, [Command])]
   | MatrixRows [[Expr]]
   | RenameFrame String String
   | FunctionLeft Name LHS
+  | FormalParams [WithSource String]
   | Fork (Either Fork Fork) [Frame] Problem
   deriving Show
 
 data Fork = Solved | FunctionName Name
-  deriving (Show)
+  deriving Show
 
 
 data LocaleType = ScriptLocale | FunctionLocale
@@ -71,6 +74,7 @@ data Problem
   | BlockTop [Command]
   | Command Command'
   | LHS LHS'
+  | FormalParam String
   | Done Term
   | Expression Expr'
   | Row [Expr]
@@ -153,10 +157,11 @@ run ms@(MS { position = fz :<+>: [], problem = p })
   | File (cs :<=: src) <- p = case fundecls ms B0 cs of
       (ms, fz') -> run $ ms { position = fz <> fz' :< Locale ScriptLocale :< Source src :<+>: [] , problem = BlockTop cs }
   | BlockTop ((c :<=: src):cs) <- p = run $ ms { position = fz :< BlockRest cs :< Source src :<+>: [] , problem = Command c }
-  | Command (Assign (lhs :<=: src) e) <- p = run $ ms { position = fz :< Expressions [e] :< Source src :<+>: [] , problem = LHS lhs }
   | LHS (LVar x) <- p = case ensureDeclaration (UserDecl x True [] True) ms of
       (n, ms) -> move $ ms { problem = Done (FreeVar n) }
   | LHS (LMat []) <- p = move $ ms { problem = Done (Atom "") }
+  | FormalParam x <- p = case makeDeclaration (UserDecl x True [] False) ms of
+      (n, ms) -> move $ ms { problem = Done (FreeVar n) }
   | Expression (Var x) <- p = case findDeclaration (UserDecl x True [] False) fz of
       Nothing -> move $ ms { problem = Done (yikes (P (Atom "OutOfScope") (Atom x))) }
       Just (n, fz)  -> move $ ms { position = fz :<+>: [], problem = Done (FreeVar n) }
@@ -181,19 +186,24 @@ run ms@(MS { position = fz :<+>: [], problem = p })
   | Row rs <- p = case rs of
       [] -> move $ ms { problem = Done nil }
       ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
-
+  | Command (Assign lhs (e :<=: src)) <- p = run $ ms { position = fz :< TargetLHS lhs :< Source src :<+>: [] , problem = Expression e }
   | Command (Direct rl (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new rl}
+  | Command (Function (lhs, fname :<=: _, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) fz of
+      Nothing -> error "function should have been declared already"
+      Just (fname, fz) -> case fundecls ms B0 cs of
+            (ms, fz') -> move $ ms { position = (fz <> fz') :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :< FormalParams args :<+>: [] , problem = Done nil }
+  | Command (Respond ts) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
+  | Command (If brs els) <- p = let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
+      in move $ ms { position = fz :< Conditionals conds :<+>: [], problem = Done nil }
+  | Command (For (x, e :<=: src) cs) <- p = run $ ms { position = fz :< BlockRest cs :< TargetLHS (LVar <$> x) :< Source src :<+>: [], problem = Expression e }
+  | Command (While e cs) <- p = move $ ms { position = fz :< Conditionals [(e, cs)] :<+>: [], problem = Done nil }
+  | Command Break <- p =  move $ ms { problem = Done nil}
+  | Command Continue <- p =  move $ ms { problem = Done nil}
+  | Command Return <- p = move $ ms { problem = Done nil}
+--  | Command (Switch ws x0 m_wss) <- p = _wV
+--  | Command (GeneratedCode cs) <- p = _wY
   | RenameAction old new rl <- p = case ensureDeclaration (UserDecl old False [(new, rl)] True) ms of
       (n, ms) -> move $ ms { problem = Done nil}
-
-  | Command (Function (lhs, fname, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) fz of
-      Nothing -> error "function should have been declared already"
-      Just (fname, fz) -> case freshNames args ms of
-        (names, ms) -> let decls = map (\(n, s) -> Declaration n (UserDecl s True [] False)) (zip names args) in
-          case fundecls ms B0 cs of
-            (ms, fz') -> move $ ms { position = (fz <> fz') <>< decls :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :<+>: []
-                                   , problem = Done nil }
-  | Command (Respond ts) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
 -- run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
 run ms = move ms
 
@@ -214,11 +224,21 @@ move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t })
       (r:rs) -> run $ ms { position = fz :< Fork (Right Solved) fs (Done t) :< MatrixRows rs :<+>: [], problem = Row r }
   | FunctionLeft fname (lhs :<=: src) <- fr = run $
     ms { position = fz :< Fork (Right $ FunctionName fname) fs (Done t) :< Source src :<+>: [], problem = LHS lhs }
+  | TargetLHS (lhs :<=: src) <- fr = run $
+    ms { position = fz :< Fork (Right Solved) fs (Done t) :< Source src :<+>: [], problem = LHS lhs }
+  | Conditionals conds <- fr = case conds of
+      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
+      ((e :<=: src, cs) : conds) -> run $
+        ms { position = fz :< Fork (Right Solved) fs (Done t) :< Conditionals conds :< BlockRest cs :< Source src :<+>: [], problem = Expression e }
+  | FormalParams params <- fr = case params of
+      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
+      (p :<=: src) : ps -> run $
+        ms { position = fz :< Fork (Right Solved) fs (Done t) :< FormalParams ps :< Source src :<+>: [], problem = FormalParam p}
 move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t }) = move $ ms { position = fz :<+>: fr : fs }
 move ms = ms
 
 fundecls :: MachineState -> Bwd Frame -> [Command] -> (MachineState, Bwd Frame)
 fundecls ms fz [] = (ms, fz)
-fundecls ms fz (Function (_, fname, _) _ :<=: src:cs) = case fresh fname ms of
+fundecls ms fz (Function (_, fname :<=: _ , _) _ :<=: src:cs) = case fresh fname ms of
   (n, ms) -> fundecls ms (fz :< Declaration n (UserDecl fname False [] False)) cs
 fundecls ms fz (c:cs) = fundecls ms fz cs
