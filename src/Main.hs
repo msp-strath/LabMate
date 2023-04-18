@@ -6,9 +6,11 @@ import System.Directory
 import System.FilePath
 
 import qualified Data.Text.IO as T
+import Data.Text (Text)
 
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Bifunctor (first)
 
 import Bwd
 
@@ -25,41 +27,47 @@ import Machine.Reassemble
 import Data.Version
 import Paths_LabRat
 
+type ParseError = (Maybe FilePath, Reach, Int)
 
--- TODO : process stdin
 main :: IO ()
 main = do
   putStrLn ("%< LabRat " ++ showVersion version)
   getArgs >>= \case
-    [] -> actDir "."
+    [] -> stdin >>= go
+    ["-"] -> stdin >>= go
     [f] -> do
       doesDirectoryExist f >>= \case
         True -> actDir f
-        False -> actFile f >>= \case
-          Right (tab, cs@(_ :<=: (n,src))) -> do
-            let out = run (initMachine cs tab)
-            putStrLn $ reassemble n out
-          Left e -> printError e
+        False -> actFile f >>= go
     x -> putStrLn $ "Unrecognised arguments: " ++ show x
+ where
+   stdin = T.getContents >>= actInput
+   go (Right (tab, cs@(_ :<=: (n,src)))) = do
+      let out = run (initMachine cs tab)
+      putStrLn $ reassemble n out
+   go (Left e) = printError e
 
-printError :: (FilePath, Reach, Int) -> IO ()
-printError (f, r, n) = do putStr (f ++ ": parse error "); print r; putStr (show n) ; putStrLn " parses\n"
+printError :: ParseError -> IO ()
+printError (f, r, n) = let msg = foldMap (++ ": ") f ++ "parser error " in
+  do putStr msg; print r; putStr (show n) ; putStrLn " parses\n"
 
-actFile :: FilePath -> IO (Either (FilePath, Reach, Int) (Map Nonce String, WithSource [Command]))
+actInput :: Text -> IO (Either ParseError (Map Nonce String, WithSource [Command]))
+actInput c = do
+  let l = lexer $ unix c
+  -- termSize <- size
+  -- let w = maybe 80 width termSize
+  -- putStrLn $ pretty w l
+  case parser pfile (Map.empty, 0) l of
+    (_, [(_,cs,(tab,_),_)]) -> do
+      pure (Right (tab, cs))
+    (r, xs) -> pure (Left (Nothing, r, length xs))
+    -- putStrLn $ pretty w (tokenStreamToLisp l)
+
+actFile :: FilePath -> IO (Either ParseError (Map Nonce String, WithSource [Command]))
 actFile f = do
   doesFileExist f >>= \case
     False -> error $ "File does not exist: " ++ f
-    True -> do
-      d <- T.readFile f
-      let l = lexer $ unix d
-      -- termSize <- size
-      -- let w = maybe 80 width termSize
-      -- putStrLn $ pretty w l
-      case parser pfile (Map.empty, 0) l of
-        (_, [(_,cs,(tab,_),_)]) -> do
-          pure (Right (tab, cs))
-        (r, xs) -> pure (Left (f, r, length xs))
-          -- putStrLn $ pretty w (tokenStreamToLisp l)
+    True -> fmap (first (\(_, r, p) -> (Just f, r, p))) $ T.readFile f >>= actInput
 
 actDir :: FilePath -> IO ()
 actDir f = do
