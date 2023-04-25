@@ -115,7 +115,11 @@ lex1 = normal False False where
     | t == sym "..." = ecomment (B0 :< t) ts
     | t == sym "%<{" && not nsp
       = generatedCode False (B0 :< t {kin = Nop}) ts
-    | otherwise    = t : normal (updateNSP nsp t) (setXP t) ts
+    | otherwise    = t `spccons` normal (updateNSP nsp t) (setXP t) ts
+
+  spccons :: Tok -> [Tok] -> [Tok]
+  spccons t ts@(Tok{kin = Grp Response _}:_) | kin t == Spc  = ts
+  spccons t ts = t : ts
 
   charlit acc [] = grpCons Error acc []
   charlit acc (t:ts)

@@ -6,7 +6,7 @@
 ;;(defvar hacky-syntax-table (make-syntax-table))
 
 (defface labrat-directive
-  '((t :foreground "dim gray"
+  '((t :foreground "black"
        :background "pale turquoise"
        :weight bold
        :underline t
@@ -15,7 +15,7 @@
   :group 'labrat )
 
 (defface labrat-response-error
-  '((t :foreground "dim gray"
+  '((t :foreground "black"
        :background "light salmon"
        :weight bold
        :underline t
@@ -24,7 +24,7 @@
   :group 'labrat )
 
 (defface labrat-response-success
-  '((t :foreground "dark gray"
+  '((t :foreground "black"
        :background "pale green"
        :weight bold
        :underline t
@@ -41,6 +41,7 @@
   (font-lock-add-keywords nil '(("^\s*%>[^%|^\n]+" . 'labrat-directive)))
   (font-lock-add-keywords nil '(("^\s*%<.+" . 'labrat-response-error)))
   (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%|^\n]+" . 'labrat-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*LabRat[^%|^\n]+" . 'labrat-response-success)))
   (setq mode-name "labrat")
   ;; clear memory
   ;;(setq typos-keywords-regexp nil)
