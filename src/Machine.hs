@@ -200,7 +200,8 @@ run ms@(MS { position = fz :<+>: [], problem = p })
   | Command Break <- p =  move $ ms { problem = Done nil}
   | Command Continue <- p =  move $ ms { problem = Done nil}
   | Command Return <- p = move $ ms { problem = Done nil}
---  | Command (Switch ws x0 m_wss) <- p = _wV
+  | Command (Switch (exp :<=: src) brs els) <- p = let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els -- TODO: handle `otherwise` responsibly
+      in run $ ms { position = fz :< Conditionals conds :< Source src :<+>: [], problem = Expression exp }
 --  | Command (GeneratedCode cs) <- p = _wY
   | RenameAction old new rl <- p = case ensureDeclaration (UserDecl old False [(new, rl)] True) ms of
       (n, ms) -> move $ ms { problem = Done nil}
