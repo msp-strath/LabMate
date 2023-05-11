@@ -117,22 +117,28 @@ pgrp f p = Parser $ \ n ts -> first (max (reached ts)) $ case ts of
  _ -> (Nowhere, [])
 
 
+pjunk :: Bool -- is Ret junk?
+      -> Parser ()
+pjunk b = void (pgreedy (ptok (guard . isJunk b)))
+
+isJunk :: Bool -> Tok -> Bool
+isJunk b t = case kin t of
+  Spc -> True
+  Ret -> b
+  Grp Comment _ -> True
+  Sym | raw t == ";" -> True
+  _ -> False
+
 pline :: (Nonce -> Parser a) -> Parser a
 pline np = do
   n <- pblank
   many (ptok junkLine)
-  pgrp isLine (id <$ pospc <*> np n <* pgreedy (ptok (guard . junk False)) <* pwn n <* pgreedy (ptok (guard . junk True)))
+  pgrp isLine (id <$ pospc <*> np n <* pjunk False <* pwn n <* pjunk True)
   where
     isLine (Line _) = True
     isLine _ = False
-    junk b t = case kin t of -- b tells us whether Ret is junk
-      Spc -> True
-      Ret -> b
-      Grp Comment _ -> True
-      Sym | raw t == ";" -> True
-      _ -> False
     junkLine t = case kin t of
-      Grp (Line _) (Hide ts) | all (junk True) ts -> Just ()
+      Grp (Line _) (Hide ts) | all (isJunk True) ts -> Just ()
       _ -> Nothing
 
 plink :: Parser a -> Parser a
@@ -191,6 +197,9 @@ pgreedy :: Parser a -> Parser [a]
 pgreedy p = pcond p
   (\a -> (a:) <$> pgreedy p)
   (pure [])
+
+pstring :: Parser String
+pstring = concat <$> pgreedy (ptok (Just . raw))
 
 testparser :: String -> Parser a -> (Reach, [(a, Map Nonce String)])
 testparser s p = fmap (\ (a,b,n,c) -> (b, fst n)) <$> parser p (Map.empty, 0) (lexer (T.pack s))

@@ -43,6 +43,7 @@ data Tok = Tok
 data Grouping = Literal
               | Comment
               | Directive
+              | MLDirective
               | Response
               | Generated
               | Block
@@ -73,7 +74,7 @@ sym s = Tok s Sym dump
 type Doc = (T.Text, Pos)
 
 lexer :: T.Text -> [Tok]
-lexer = lex4 . lex3 . lex2 . lex1 . lex0
+lexer = lex5 . lex4 . lex3 . lex2 . lex1 . lex0
 
 -- basic lexing
 lex0 :: T.Text -> [Tok]
@@ -116,6 +117,8 @@ lex1 = normal False False where
     | t == sym "..." = ecomment (B0 :< t) ts
     | t == sym "%<{" && not nsp
       = generatedCode False (B0 :< t {kin = Nop}) ts
+    | t == sym "%>{" && not nsp
+      = mlDirective False (B0 :< t {kin = Nop}) ts
     | otherwise    = t `spccons` normal (updateNSP nsp t) (setXP t) ts
 
   spccons :: Tok -> [Tok] -> [Tok]
@@ -172,6 +175,15 @@ lex1 = normal False False where
     | t == sym "%<}" && not b = generatedCode True (acc :< t {kin = Nop}) ts
     | kin t == Ret && b =  grpCons Generated (acc :< t) (normal True False ts)
     | otherwise = generatedCode b (acc :< t) ts
+
+  mlDirective :: Bool -- have we seen the closing delimiter yet?
+                -> Bwd Tok -- accumulator
+                -> [Tok] -> [Tok]
+  mlDirective _ acc [] = grpCons MLDirective acc []
+  mlDirective b acc (t:ts)
+    | t == sym "%>}" && not b = mlDirective True (acc :< t {kin = Nop}) ts
+    | kin t == Ret && b =  grpCons MLDirective (acc :< t) (normal True False ts)
+    | otherwise = mlDirective b (acc :< t) ts
 
   blankToEOL :: [Tok] -> Bool
   blankToEOL [] = True
@@ -274,6 +286,13 @@ lex4 = helper B0 where
     | k `elem` passedthrough = Tok s (Grp k $ Hide $ map sublex4 $ unhide ss) p
   sublex4 t = t
 
+-- folds multiline directives into preceding directives
+lex5 :: [Tok] -> [Tok]
+lex5 [] = []
+lex5 (Tok r (Grp (Line e) (Hide (s:ss))) p : t@(Tok r' (Grp (Line e') (Hide (s':ss'))) p') : ts)
+  | Grp Directive ds <- kin s, Grp MLDirective _ <- kin s' = Tok r (Grp (Line e) (Hide (s:[] ++ [t]))) p : lex5 ts
+lex5 (t:ts) = t : lex5 ts
+
 grp :: Grouping -> Bwd Tok -> Tok
 grp g tz = case tz <>> [] of
   ts@(t:_) -> Tok (ts >>= raw)
@@ -344,6 +363,10 @@ keywords = Map.fromList (map (, True) ["if", "function", "for", "while", "switch
 %<{
     generated code
 %<}
+
+%>{
+%   multiline directive
+%>}
 -}
 
 binOps :: [String]
@@ -362,6 +385,7 @@ symbols = foldr insT empT $ binOps ++
   , "..."
   , "%", "%{", "%}"
   , "%<{", "%<}" -- generated code delimiters
+  , "%>{", "%>}" -- multiline directive delimiters
   , "!", "?"
   , "\"", "\"\""
   , "="
@@ -399,10 +423,12 @@ groupString g s = prefix g ++ s ++ suffix g
     prefix g = case g of
       Bracket b -> fst (brackets b)
       Generated -> "%<{"
+      MLDirective -> "%>{"
       _ -> ""
     suffix g = case g of
       Bracket b -> snd (brackets b)
       Generated -> "%<}"
+      MLDirective -> "%>}"
       _ -> ""
 
 groupRaw :: Grouping -> [Tok] -> String

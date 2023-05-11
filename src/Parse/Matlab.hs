@@ -15,6 +15,8 @@ import Parse
 
 import Lisp
 
+import Debug.Trace
+
 pfile :: Parser File
 pfile = pws pfile'
 
@@ -54,7 +56,7 @@ pcommand' n
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
   <|> Return <$ pkin Key "return"
-  <|> pgrp (== Directive) (Direct <$> ((n,) <$> ppercent) <* psym ">" <* pospc <*> pdir <* pospc)
+  <|> uncurry Direct <$> pdirs
   <|> Respond <$> pgrp (== Response) pres
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
   )
@@ -78,13 +80,22 @@ pcommand' n
                 <*> many (pline pcommand)
     potherwise = id <$  plink (id <$ pkin Key "otherwise")
                     <*> many (pline pcommand)
+    pdirs = do
+      firstline <- pgrp (== Directive) ((,) <$> ((n,) <$> ppercent) <* psym ">" <* pospc <*> pdir <* pospc)
+      (mldirect firstline <$> plink pmldir) <|> (pure firstline)
+    mldirect (x, InputFormat name _ :<=: src) desc = (x, InputFormat name (Just desc) :<=: src)
+    mkdirect y = y
 
+pmldir :: Parser String
+pmldir = id <$ pjunk True *> ptok (\x -> case kin x of
+                  Grp MLDirective _ -> Just (raw x)
+                  _ -> mempty)
 
 pcmdarg :: Parser (WithSource String)
 pcmdarg = pws pcmdarg'
 
 pcmdarg' :: Parser String
-pcmdarg' = pstring
+pcmdarg' = pstringlit
       <|> concat <$> ((:) <$> ptok start <*> many (ptok more))
       where
       start t = case kin t of
@@ -104,6 +115,7 @@ pdir = pws pdir'
 pdir' :: Parser Dir'
 pdir' = Declare <$> plarrow ptensortype
     <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
+    <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom <*> (pure Nothing)
 
 ptensortype :: Parser TensorType
 ptensortype = pws ptensortype'
@@ -207,8 +219,8 @@ contextBinop ci op = Nothing
 pcxspc :: ContextInfo -> Parser ()
 pcxspc ci = unless (matrixMode ci) pospc
 
-pstring :: Parser String
-pstring = ptok stringy where
+pstringlit :: Parser String
+pstringlit = ptok stringy where
   stringy (Tok {kin = Grp Literal _, raw = '\'': cs@(_ : _)}) = Just (escape (init cs))
   stringy _ = Nothing
 
@@ -226,7 +238,7 @@ pexpr ci = go >>= more ci where
    <|> pws (Cell <$> pgrp (== Bracket Curly) (many prow))
    <|> pws (prawif Dig >>= pnumber)
    <|> pws (ColonAlone <$ psym ":")
-   <|> pws (StringLiteral <$> pstring)
+   <|> pws (StringLiteral <$> pstringlit)
    <|> pws (Handle <$ psym "@" <* pospc <*> pnom)
    <|> pws (Lambda <$ psym "@" <* pospc
               <*> pgrp (== Bracket Round) (pspcaround $ psep0 (punc ",") pnom)
