@@ -4,12 +4,15 @@ import System.Environment
 import System.Console.Terminal.Size (size, width)
 import System.Directory
 import System.FilePath
+import System.IO
+import System.Exit
 
 import qualified Data.Text.IO as T
 import Data.Text (Text)
 
 import Data.Map (Map)
 import qualified Data.Map as Map
+
 import Data.Bifunctor (first)
 
 import Bwd
@@ -31,7 +34,6 @@ type ParseError = (Maybe FilePath, Reach, Int)
 
 main :: IO ()
 main = do
-  putStrLn ("%< LabRat " ++ showVersion version)
   getArgs >>= \case
     [] -> stdin >>= go
     ["-"] -> stdin >>= go
@@ -44,12 +46,16 @@ main = do
    stdin = T.getContents >>= actInput
    go (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = run (initMachine cs tab)
+      putStrLn ("%< LabRat " ++ showVersion version)
       putStrLn $ reassemble n out
-   go (Left e) = printError e
+   go (Left e) = do printError e; exitFailure
 
 printError :: ParseError -> IO ()
-printError (f, r, n) = let msg = foldMap (++ ": ") f ++ "parser error " in
-  do putStr msg; print r; putStr (show n) ; putStrLn " parses\n"
+printError (f, r, n) = do
+ putError msg; putError (show r); putError (show n); putError " parses\n"
+  where
+    msg = foldMap (++ ": ") f ++ "parser error "
+    putError = hPutStr stderr
 
 actInput :: Text -> IO (Either ParseError (Map Nonce String, WithSource [Command]))
 actInput c = do

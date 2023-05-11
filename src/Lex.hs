@@ -1,3 +1,4 @@
+
 {-# LANGUAGE OverloadedStrings, LambdaCase #-}
 
 module Lex where
@@ -6,7 +7,7 @@ import Data.Char
 import Data.List
 import Control.Monad
 import Control.Applicative
-import Control.Arrow ((***))
+import Control.Arrow (first)
 import qualified Data.Text as T
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -369,7 +370,7 @@ symbols = foldr insT empT $ binOps ++
   ]
 
 opener :: Tok -> Maybe Bracket
-opener = flip lookup $ map (sym *** id) [("(", Round), ("[", Square), ("{", Curly)]
+opener = flip lookup $ map (first sym) [("(", Round), ("[", Square), ("{", Curly)]
 
 closer :: Bracket -> Tok
 closer b = sym $ case b of

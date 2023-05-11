@@ -25,7 +25,7 @@ data RenameGripe
   deriving (Show, Eq, Ord)
 
 renameGripeResponse :: RenameGripe -> String
-renameGripeResponse g = "Renaming not possible: " ++ case g of
+renameGripeResponse g = "Error: renaming not possible: " ++ case g of
   Captured -> "the new name was already taken."
   Capturing -> "the new name will be needed later."
   TooManyNames -> "too many new names for the same old name."
