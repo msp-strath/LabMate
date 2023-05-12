@@ -20,7 +20,7 @@
        :weight bold
        :underline t
        ))
-  "Face for error directive responses."
+  "Face for errorneous directive responses."
   :group 'labrat )
 
 (defface labrat-response-success

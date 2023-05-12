@@ -84,7 +84,7 @@ pcommand' n
       firstline <- pgrp (== Directive) ((,) <$> ((n,) <$> ppercent) <* psym ">" <* pospc <*> pdir <* pospc)
       (mldirect firstline <$> plink pmldir) <|> (pure firstline)
     mldirect (x, InputFormat name _ :<=: src) desc = (x, InputFormat name (Just desc) :<=: src)
-    mkdirect y = y
+    mldirect y _ = y
 
 pmldir :: Parser String
 pmldir = id <$ pjunk True *> ptok (\x -> case kin x of
