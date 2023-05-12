@@ -41,14 +41,16 @@ main = do
       doesDirectoryExist f >>= \case
         True -> actDir f
         False -> actFile f >>= go
-    x -> putStrLn $ "Unrecognised arguments: " ++ show x
+    x -> do
+      putStrLn $ "Unrecognised arguments: " ++ show x
+      exitWith fatalExitCode
  where
    stdin = T.getContents >>= actInput
    go (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = run (initMachine cs tab)
       putStrLn ("%< LabRat " ++ showVersion version)
       putStrLn $ reassemble n out
-   go (Left e) = do printError e; exitFailure
+   go (Left e) = do printError e; exitWith fatalExitCode
 
 printError :: ParseError -> IO ()
 printError (f, r, n) = do
@@ -70,9 +72,11 @@ actInput c = do
     -- putStrLn $ pretty w (tokenStreamToLisp l)
 
 actFile :: FilePath -> IO (Either ParseError (Map Nonce String, WithSource [Command]))
-actFile f = do
+actFile f =
   doesFileExist f >>= \case
-    False -> error $ "File does not exist: " ++ f
+    False -> do
+      putStrLn $ "File does not exist: " ++ f
+      exitWith fatalExitCode
     True -> fmap (first (\(_, r, p) -> (Just f, r, p))) $ T.readFile f >>= actInput
 
 actDir :: FilePath -> IO ()
@@ -84,3 +88,9 @@ actDir f = do
   let msg = "Parsed " ++ show nothings ++ "/" ++ show total ++ " files.\n"
   traverse printError [ x | Left x <- done ]
   putStr msg
+
+fatalExitCode :: ExitCode
+fatalExitCode = ExitFailure 10
+
+couldBeBetterExitCode :: ExitCode
+couldBeBetterExitCode = ExitFailure 1

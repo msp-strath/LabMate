@@ -70,12 +70,19 @@
                      (when (boundp 'compilation-save-buffers-predicate)
                        compilation-save-buffers-predicate))
 
-  (let ((labrat-command-to-run (concat labrat-command " " labrat-file)))
-    (with-current-buffer (current-buffer)
-     (let ((old-point (point)))
+  (let* ((res (with-temp-buffer
+               (list (call-process labrat-command nil
+                                   (current-buffer) nil labrat-file)
+                     (buffer-string))))
+         (exitcode (car res))
+         (output (cadr res)))
+    (if (< exitcode 10)
+        (with-current-buffer (current-buffer)
+          (let ((old-point (point)))
           (erase-buffer)
-          (insert (shell-command-to-string labrat-command-to-run))
-          (goto-char old-point)))))
+          (insert output)
+          (goto-char old-point)))
+        (message "%s" output))))
 
 ;;;###autoload
 (defun labrat-run (override-options)
