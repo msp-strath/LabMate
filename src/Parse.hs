@@ -106,16 +106,22 @@ ppeek :: Parser [Tok]
 ppeek = Parser $ \ n ts -> (Nowhere, [(B0, ts, n, ts)])
 
 
--- The parser p must handle leading and trailing space/junk
-pgrp :: (Grouping -> Bool) -> Parser a -> Parser a
-pgrp f p = Parser $ \ n ts -> first (max (reached ts)) $ case ts of
- t:ts | Grp g (Hide ss) <- kin t, f g -> reachBind (parser p n ss) $ \(az, a, n, as) ->
+pgrp' :: (Grouping -> Bool)  -- which groupings are we intersted in
+      -> (Pos -> Parser a)   -- given the position of the grouping
+                             -- select the parser for the group, the
+                             -- parser must handle leading and
+                             -- trailing space/junk
+      -> Parser a
+pgrp' f p = Parser $ \ n ts -> first (max (reached ts)) $ case ts of
+ t:ts | Grp g (Hide ss) <- kin t, f g -> reachBind (parser (p (unhide $ pos t)) n ss) $ \(az, a, n, as) ->
           let toks = az <>> [] in
             (,id) . (Nowhere,) $ case as of
               [] -> [(B0 :< t { raw = groupRaw g toks, kin = Grp g (Hide toks) }, a, n, ts)]
               _  -> []
  _ -> (Nowhere, [])
 
+pgrp :: (Grouping -> Bool) -> Parser a -> Parser a
+pgrp f = pgrp' f . const
 
 pjunk :: Bool -- is Ret junk?
       -> Parser ()

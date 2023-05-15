@@ -56,7 +56,8 @@ pcommand' n
   <|> Break <$ pkin Key "break"
   <|> Continue <$ pkin Key "continue"
   <|> Return <$ pkin Key "return"
-  <|> uncurry Direct <$> pdirs
+  <|> pgrp' (== Directive) (\(_, col) -> Direct (n,col) <$ psym "%" <* psym ">" <* pospc <*> pdir <* pospc)
+  <|> pgrp' (== MLDirective) (\(_, col) -> Direct (n,col) <$ pospc <*> pdirs <* pospc)
   <|> Respond <$> pgrp (== Response) pres
   <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
   )
@@ -80,11 +81,6 @@ pcommand' n
                 <*> many (pline pcommand)
     potherwise = id <$  plink (id <$ pkin Key "otherwise")
                     <*> many (pline pcommand)
-    pdirs = do
-      firstline <- pgrp (== Directive) ((,) <$> ((n,) <$> ppercent) <* psym ">" <* pospc <*> pdir <* pospc)
-      (mldirect firstline <$> plink pmldir) <|> (pure firstline)
-    mldirect (x, InputFormat name _ :<=: src) desc = (x, InputFormat name (Just desc) :<=: src)
-    mldirect y _ = y
 
 pmldir :: Parser String
 pmldir = id <$ pjunk True *> ptok (\x -> case kin x of
@@ -115,7 +111,14 @@ pdir = pws pdir'
 pdir' :: Parser Dir'
 pdir' = Declare <$> plarrow ptensortype
     <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
-    <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom <*> (pure Nothing)
+
+
+pdirs :: Parser Dir
+pdirs = pws $ InputFormat
+        <$> asDir (pospc *> pkin Nom "input" *> pospc *> pnom)
+        <*> many (asDir pstring)
+  where
+    asDir p =  plink $ pgrp (== Directive) $ psym "%" *> psym ">" *> p
 
 ptensortype :: Parser TensorType
 ptensortype = pws ptensortype'

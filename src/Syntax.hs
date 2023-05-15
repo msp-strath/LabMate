@@ -30,7 +30,7 @@ type Dir = WithSource Dir'
 data Dir'
   = Declare (String, TensorType)
   | Rename String String
-  | InputFormat String {- name of function -} (Maybe String) {- description -}
+  | InputFormat String {- name of function -} [String] {- description -}
   deriving Show
 
 type TensorType = WithSource TensorType'

@@ -1,4 +1,3 @@
-
 {-# LANGUAGE OverloadedStrings, LambdaCase #-}
 
 module Lex where
@@ -11,6 +10,8 @@ import Control.Arrow (first)
 import qualified Data.Text as T
 import Data.Map (Map)
 import qualified Data.Map as Map
+
+import Debug.Trace
 
 import Bwd
 import Hide
@@ -74,7 +75,7 @@ sym s = Tok s Sym dump
 type Doc = (T.Text, Pos)
 
 lexer :: T.Text -> [Tok]
-lexer = lex5 . lex4 . lex3 . lex2 . lex1 . lex0
+lexer = lex4 . lex3 . lex2 . lex1 . lex0
 
 -- basic lexing
 lex0 :: T.Text -> [Tok]
@@ -117,6 +118,8 @@ lex1 = normal False False where
     | t == sym "..." = ecomment (B0 :< t) ts
     | t == sym "%<{" && not nsp
       = generatedCode False (B0 :< t {kin = Nop}) ts
+    -- unlike in the regular (single line) directives, DO NOT put back
+    -- the "%>{" in the token stream
     | t == sym "%>{" && not nsp
       = mlDirective False (B0 :< t {kin = Nop}) ts
     | otherwise    = t `spccons` normal (updateNSP nsp t) (setXP t) ts
@@ -144,6 +147,7 @@ lex1 = normal False False where
 
   fixup (t@Tok { kin = Grp g (Hide (a0:a1:as)) }:ts) | g `elem` [Directive, Response]
     = t { kin = Grp g (Hide (a0:a1:lex1 as))} : ts
+  fixup (t@Tok { kin = Grp MLDirective as}:ts) = t { kin = Grp MLDirective (lex1 <$> as) } : ts
   fixup ts = ts
 
   -- ellipsis comments include the line break in the comment
@@ -182,7 +186,7 @@ lex1 = normal False False where
   mlDirective _ acc [] = grpCons MLDirective acc []
   mlDirective b acc (t:ts)
     | t == sym "%>}" && not b = mlDirective True (acc :< t {kin = Nop}) ts
-    | kin t == Ret && b =  grpCons MLDirective (acc :< t) (normal True False ts)
+    | kin t == Ret && b = fixup $ grpCons MLDirective (acc :< t) (normal True False ts)
     | otherwise = mlDirective b (acc :< t) ts
 
   blankToEOL :: [Tok] -> Bool
@@ -243,7 +247,7 @@ lex3 = helper B0 where
   helper (az :< (b, a)) (t : ts)
     | t == closer b = helper az $ grpCons (Bracket b) (a :< t {kin = Nop}) ts
     | otherwise = helper (az :< (b, a :< t)) ts
-  helper B0 (Tok s (Grp g ss) p : ts) | g `elem` [Block, Directive, Generated] =
+  helper B0 (Tok s (Grp g ss) p : ts) | g `elem` [Block, Directive, Generated, MLDirective] =
     Tok s (Grp g $ Hide $ lex3 $ unhide ss) p : helper B0 ts
   helper B0 (t : ts)  = t : helper B0 ts
 
@@ -276,7 +280,7 @@ lex4 = helper B0 where
 
   semicolon = sym ";"
 
-  blocky = [Block, Bracket Square, Bracket Curly, Generated]
+  blocky = [Block, Bracket Square, Bracket Curly, Generated, MLDirective]
   passedthrough = [Bracket Round, Directive]
 
   sublex4 :: Tok -> Tok
@@ -286,12 +290,6 @@ lex4 = helper B0 where
     | k `elem` passedthrough = Tok s (Grp k $ Hide $ map sublex4 $ unhide ss) p
   sublex4 t = t
 
--- folds multiline directives into preceding directives
-lex5 :: [Tok] -> [Tok]
-lex5 [] = []
-lex5 (Tok r (Grp (Line e) (Hide (s:ss))) p : t@(Tok r' (Grp (Line e') (Hide (s':ss'))) p') : ts)
-  | Grp Directive ds <- kin s, Grp MLDirective _ <- kin s' = Tok r (Grp (Line e) (Hide (s:[] ++ [t]))) p : lex5 ts
-lex5 (t:ts) = t : lex5 ts
 
 grp :: Grouping -> Bwd Tok -> Tok
 grp g tz = case tz <>> [] of

@@ -1,9 +1,6 @@
-
-%> input getinputsfromfile
-
-% comment
-
 %>{
-%>   x : num
-%>   y : string
+    %> input getinputsfromfile
+   % comment
+    %> x : int % and another one
+    %> y : string
 %>}
