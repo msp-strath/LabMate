@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               LabRat
-version:            0.1.2.4
+version:            0.1.3.0
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -40,6 +40,7 @@ common haskell
                        terminal-size,
                        directory,
                        filepath,
+                       mgen
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances
 

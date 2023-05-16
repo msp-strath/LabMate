@@ -7,6 +7,10 @@ import Data.List
 import Data.Map (Map)
 import qualified Data.Map as Map
 
+-- mgen
+import TranslateContext
+import Translate
+
 import Bwd
 
 import Lex
@@ -79,6 +83,7 @@ data Problem
   | Expression Expr'
   | Row [Expr]
   | RenameAction String String ResponseLocation
+  | InputFormatAction String [String] ResponseLocation
   | FunCalled Expr'
   deriving Show
 
@@ -188,11 +193,13 @@ run ms@(MS { position = fz :<+>: [], problem = p })
       ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
   | Command (Assign lhs (e :<=: src)) <- p = run $ ms { position = fz :< TargetLHS lhs :< Source src :<+>: [] , problem = Expression e }
   | Command (Direct rl ((Rename old new :<=: src, _) :<=: src')) <- p = run $ ms { position = fz :< Source src' :< Source src :<+>: [] , problem = RenameAction old new rl}
+  | Command (Direct rl ((InputFormat name :<=: src, Just (InputFormatBody body)) :<=: src')) <- p = run $ ms { position = fz :< Source src' :< Source src :<+>: [] , problem = InputFormatAction name body rl}
   | Command (Function (lhs, fname :<=: _, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) fz of
       Nothing -> error "function should have been declared already"
       Just (fname, fz) -> case fundecls ms B0 cs of
             (ms, fz') -> move $ ms { position = (fz <> fz') :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :< FormalParams args :<+>: [] , problem = Done nil }
   | Command (Respond ts) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
+  | Command (GeneratedCode cs) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
   | Command (If brs els) <- p = let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
       in move $ ms { position = fz :< Conditionals conds :<+>: [], problem = Done nil }
   | Command (For (x, e :<=: src) cs) <- p = run $ ms { position = fz :< BlockRest cs :< TargetLHS (LVar <$> x) :< Source src :<+>: [], problem = Expression e }
@@ -205,6 +212,8 @@ run ms@(MS { position = fz :<+>: [], problem = p })
 --  | Command (GeneratedCode cs) <- p = _wY
   | RenameAction old new rl <- p = case ensureDeclaration (UserDecl old False [(new, rl)] True) ms of
       (n, ms) -> move $ ms { problem = Done nil}
+  | InputFormatAction name body (n, c) <- p = move $ ms { nonceTable = Map.insertWith (++) n (concat ["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) (nonceTable ms)
+                                                   , problem = Done nil}
 -- run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
 run ms = move ms
 
@@ -237,6 +246,11 @@ move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t })
         ms { position = fz :< Fork (Right Solved) fs (Done t) :< FormalParams ps :< Source src :<+>: [], problem = FormalParam p}
 move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t }) = move $ ms { position = fz :<+>: fr : fs }
 move ms = ms
+
+generateInputReader :: String -> [String] -> String
+generateInputReader name body = case translateString Matlab name (concat (init body)) of
+  Left err -> "% Error: " ++ show err
+  Right s -> s
 
 fundecls :: MachineState -> Bwd Frame -> [Command] -> (MachineState, Bwd Frame)
 fundecls ms fz [] = (ms, fz)

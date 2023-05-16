@@ -58,7 +58,7 @@ pcommand' n
   <|> Return <$ pkin Key "return"
   <|> pgrp' (== Directive) (\(_, col) -> Direct (n,col) <$> pdir)
   <|> Respond <$> pgrp (== Response) pres
-  <|> GeneratedCode <$> pgrp (== Generated) (many (pline pcommand))
+  <|> GeneratedCode <$> pgrp (== Generated) ([] <$ pgreedy (ptok Just)) -- (many (pline pcommand)) -- TODO: reinstate command parsing
   )
   (\ c -> case c of
      Assign EmptyLHS (Var f :<=: src) ->
@@ -106,8 +106,12 @@ pdir' :: Parser Dir'
 pdir' = pvspcaround $
         plink (id <$ pprejunk <*> pws pdirhead <* pospc)
                 >>= (\case
-                        h@(InputFormat x :<=: _) ->  (h, ). Just . InputFormatBody <$> pgreedy (plink pstring)
+                        h@(InputFormat x :<=: _) ->  (h, ). Just . InputFormatBody <$> pgreedy (pgrp isLine pstring)
                         h  -> pure (h, Nothing))
+  where
+    isLine (Line _) = True
+    isLine _ = False
+
 
 pprejunk :: Parser ()
 pprejunk = () <$ pospc <* (psym "%" <|> pure ())  <* psym ">"  <* pospc
