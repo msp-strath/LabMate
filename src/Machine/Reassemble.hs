@@ -67,9 +67,9 @@ renamePass ms = inbound ms
     outbound :: MachineState -> Writer RenameProblems MachineState
     outbound ms@(MS { position = B0 :<+>: _}) = pure ms
     outbound ms@(MS { position = fz :< f :<+>: fs, problem = p}) = case f of
-     Fork (Left frk) fs' p' -> inbound ms{ position = fz :< Fork (Right frk) fs p :<+>: fs' , problem = p' }
-     Fork (Right frk) fs' p' -> outbound ms{ position = fz :<+>: Fork (Left frk) fs p : fs', problem = p' }
-     _ -> outbound ms { position = fz :<+>: f : fs }
+      Fork (Left frk) fs' p' -> inbound ms{ position = fz :< Fork (Right frk) fs p :<+>: fs' , problem = p' }
+      Fork (Right frk) fs' p' -> outbound ms{ position = fz :<+>: Fork (Left frk) fs p : fs', problem = p' }
+      _ -> outbound ms { position = fz :<+>: f : fs }
 
     renamer :: Bwd Frame
             -> Name
@@ -117,10 +117,17 @@ renamePass ms = inbound ms
     newName d@(UserDecl old _ _ _) = old <$ tellGripes TooManyNames d
 
     respond :: [Tok] -> [Tok]
-    respond (t:ts)
-      | raw t == ">" = t{ raw = "<" } : ts
-      | otherwise = t: respond ts
+    respond (t : ts) | Grp (Line e) (Hide ss) <- kin t, Just ss <- inner ss =
+      t { kin = Grp (Line e) (Hide ss) } : ts
+     where
+       inner :: [Tok] -> Maybe [Tok]
+       inner (t:ts)
+         | raw t == ">" = Just $ t{ raw = "<" } : ts
+         | otherwise = (t :) <$> inner ts
+       inner [] = Nothing
+    respond (t : ts) = t : respond ts
     respond [] = []
+
 
     tellGripes :: RenameGripe -> DeclarationType -> Writer RenameProblems ()
     tellGripes grp = \case

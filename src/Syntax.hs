@@ -26,12 +26,17 @@ data Command'
 
 type ResponseLocation = (Nonce, Int)
 type Dir = WithSource Dir'
+type Dir' = (WithSource DirHeader, Maybe DirBody)
 
-data Dir'
+data DirHeader
   = Declare (String, TensorType)
   | Rename String String
-  | InputFormat String {- name of function -} [String] {- description -}
-  deriving Show
+  | InputFormat String {- name of function -}
+ deriving Show
+
+data DirBody
+  = InputFormatBody [String]
+ deriving Show
 
 type TensorType = WithSource TensorType'
 

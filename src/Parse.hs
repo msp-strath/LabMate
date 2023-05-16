@@ -132,7 +132,7 @@ isJunk b t = case kin t of
   Spc -> True
   Ret -> b
   Grp Comment _ -> True
-  Sym | raw t == ";" -> True
+  Sym | raw t `elem` [";", "%{"] -> True
   _ -> False
 
 pline :: (Nonce -> Parser a) -> Parser a
@@ -169,6 +169,11 @@ punc = pspcaround . psym
 
 pspcaround :: Parser a -> Parser a
 pspcaround p = id <$ pospc <*> p <* pospc
+
+pvspcaround :: Parser a -> Parser a
+pvspcaround p = id <$ pgreedy (plink $ pjunk True)
+                   <*> p
+                   <* pgreedy (plink $ pjunk True)
 
 psep1 :: Parser () -> Parser a -> Parser [a]
 psep1 sep p = (:) <$> p <*> many (id <$ sep <*> p)

@@ -49,6 +49,8 @@ main = do
    go (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = run (initMachine cs tab)
       putStrLn ("%< LabRat " ++ showVersion version)
+      print out
+      putStrLn "###########################"
       putStrLn $ reassemble n out
    go (Left e) = do printError e; exitWith fatalExitCode
 
