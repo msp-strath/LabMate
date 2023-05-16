@@ -149,7 +149,7 @@ lex1 = normal False False where
               -> Maybe (Grouping, [Tok])
   scanComment b (t : ts)
     | t == sym ">" = Just (Directive, t : lex1 ts)
-    | t == sym "<" = Just (Response, t : lex1 ts)
+    | t == sym "<" = Just (Response, t : ts)
   scanComment True (t : ts)
     | kin t `elem` [Spc, Ret] = fmap (t :) <$> scanComment True ts
   scanComment _ _ = Nothing

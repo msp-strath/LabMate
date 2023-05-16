@@ -1,5 +1,5 @@
-x = 5;
+y = 5;
 
-%> rename x y
+%> rename y x
 
-z = x + x;
+z = y + y;

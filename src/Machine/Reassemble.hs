@@ -56,11 +56,12 @@ renamePass ms = inbound ms
         (fz :< Source (n, Hide [t]), Done (FreeVar x)) | kin t == Nom -> do
           x' <- renamer fz x False
           outbound ms{ position = fz :<+>: [Source (n, Hide [t{ raw = x' }])] }
-        (fz :< Source (n, Hide (t:ts)) :< Source (m, Hide (t':ts')), Done (Atom ""))
-          | raw t' == "rename", Grp Directive (Hide dirts) <- kin t ->
+        (fz :< Source (l, Hide (s:ss)) :< Source (n, Hide ts) :< Source (m, Hide (t':ts')), Done (Atom ""))
+          | raw t' == "rename", Grp Directive dss <- kin s ->
             outbound ms{
               position = fz :<+>:
-                [Source (n, Hide (t{ kin = Grp Response (Hide $ respond dirts) } : ts))
+                [ Source (l, Hide (s{kin = Grp Response dss} : ss))
+                , Source (n, Hide (respond ts))
                 ,Source (m, Hide (t'{raw = "renamed"} : ts'))]}
         (fz, p) -> outbound ms{ position = fz :<+>: [] }
 

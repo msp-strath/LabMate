@@ -187,7 +187,7 @@ run ms@(MS { position = fz :<+>: [], problem = p })
       [] -> move $ ms { problem = Done nil }
       ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
   | Command (Assign lhs (e :<=: src)) <- p = run $ ms { position = fz :< TargetLHS lhs :< Source src :<+>: [] , problem = Expression e }
-  | Command (Direct rl (Rename old new :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [] , problem = RenameAction old new rl}
+  | Command (Direct rl ((Rename old new :<=: src, _) :<=: src')) <- p = run $ ms { position = fz :< Source src' :< Source src :<+>: [] , problem = RenameAction old new rl}
   | Command (Function (lhs, fname :<=: _, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) fz of
       Nothing -> error "function should have been declared already"
       Just (fname, fz) -> case fundecls ms B0 cs of

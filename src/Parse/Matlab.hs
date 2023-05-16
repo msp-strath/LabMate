@@ -145,7 +145,7 @@ pentrytype' =
   <|> Ty <$> pexpr topCI
 
 pres :: Parser Res
-pres = id <$ psym "%" <* psym "<" <*> many (ptok Just)
+pres = pgreedy (ptok Just)
 
 plhs' :: ContextInfo -> Parser LHS
 plhs' ci = (pws (LVar <$> pnom) >>= more)
