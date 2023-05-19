@@ -39,13 +39,11 @@
   :syntax-table (make-syntax-table)
   ;; code for syntax highlighting
   (font-lock-add-keywords nil '(("^\s*%>[^%|^\n]+" . 'labrat-directive)))
-  (font-lock-add-keywords nil '(("^\s*%<.+" . 'labrat-response-error)))
-  (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%|^\n]+" . 'labrat-response-success)))
-  (font-lock-add-keywords nil '(("^\s*%<\s*LabRat[^%|^\n]+" . 'labrat-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<[^%|^\n]+" . 'labrat-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*Error:[^%|^\n]+" . 'labrat-response-error)))
+  (setq next-error-highlight-timer t)
+  (setq next-error-highlight t)
   (setq mode-name "labrat")
-  ;; clear memory
-  ;;(setq typos-keywords-regexp nil)
-  ;;(setq typos-operators-regexp nil)
 )
 
 ;; Customisation options

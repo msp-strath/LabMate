@@ -12,6 +12,7 @@ import Lex
 
 import Syntax
 import Parse
+import Parse.InputFormat
 
 import Lisp
 
@@ -104,10 +105,9 @@ pdir = pws pdir'
 
 pdir' :: Parser Dir'
 pdir' = pvspcaround $
-        plink (id <$ pprejunk <*> pws pdirhead <* pospc)
-                >>= (\case
-                        h@(InputFormat x :<=: _) ->  (h, ). Just . InputFormatBody <$> pgreedy (pgrp isLine pstring)
-                        h  -> pure (h, Nothing))
+        plink (id <$ pprejunk <*> pws pdirhead <* pospc)  >>= \case
+           h@(InputFormat x :<=: _) ->  (h, ). Just . InputFormatBody <$> pdescription
+           h  -> pure (h, Nothing)
   where
     isLine (Line _) = True
     isLine _ = False

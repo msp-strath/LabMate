@@ -8,6 +8,7 @@ import Control.Arrow (first)
 import qualified Data.Text as T
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Char
 
 import Bwd
 import Hide

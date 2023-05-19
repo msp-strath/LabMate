@@ -3,6 +3,9 @@ module Syntax where
 import Lex
 import Hide
 
+-- mgen horrors
+import qualified Description as MGen
+
 type Command = WithSource Command'
 
 type File = WithSource [Command]
@@ -34,8 +37,9 @@ data DirHeader
   | InputFormat String {- name of function -}
  deriving Show
 
+type InputBody = MGen.Description MGen.Name
 data DirBody
-  = InputFormatBody [String]
+  = InputFormatBody InputBody
  deriving Show
 
 type TensorType = WithSource TensorType'

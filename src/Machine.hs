@@ -83,7 +83,7 @@ data Problem
   | Expression Expr'
   | Row [Expr]
   | RenameAction String String ResponseLocation
-  | InputFormatAction String [String] ResponseLocation
+  | InputFormatAction String InputBody ResponseLocation
   | FunCalled Expr'
   deriving Show
 
@@ -247,8 +247,8 @@ move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t })
 move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t }) = move $ ms { position = fz :<+>: fr : fs }
 move ms = ms
 
-generateInputReader :: String -> [String] -> String
-generateInputReader name body = case translateString Matlab name (concat (init body)) of
+generateInputReader :: String -> InputBody -> String
+generateInputReader name body =  case translate Matlab name body of
   Left err -> "% Error: " ++ show err
   Right s -> s
 

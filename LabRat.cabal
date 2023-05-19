@@ -56,6 +56,7 @@ executable labrat
                       Lisp,
                       Parse,
                       Parse.Matlab,
+                      Parse.InputFormat,
                       Syntax,
                       Machine,
                       Machine.Reassemble,
