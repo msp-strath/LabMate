@@ -1,0 +1,51 @@
+\documentclass{article}
+
+\newcommand{\pct}{\texttt{\symbol{37}}}
+\newcommand{\dir}{\texttt{\symbol{62}}}
+\newcommand{\res}{\texttt{\symbol{60}}}
+\newcommand{\lcb}{\texttt{\symbol{123}}}
+\newcommand{\rcb}{\texttt{\symbol{125}}}
+\newcommand{\lsb}{\texttt{\symbol{91}}}
+\newcommand{\rsb}{\texttt{\symbol{93}}}
+
+\newcommand{\lr}{\textsc{LabRat}}
+\newcommand{\ma}{\textsc{MatLab}}
+\newcommand{\remph}{\emph}
+\begin{document}
+\title{\lr --- an interactive assistant for \ma}
+\author{Fredrik Nordvall Forsberg, Conor McBride, Georgi Nakov}
+\maketitle
+
+We set out the prospectus for and report our progress on \lr, an interactive computer system designed to help human users of \ma\ write programs which actively make more of the sense those humans intend. This work is supported by the UK's National Physical Laboratory, and is significantly informed by a corpus of \ma\ code arising from their work, along with conversations and observations of their praxis. The latter is often healthy from an engineering perspective, with a discipline of documenting the structure and significance of each variable in \remph{comments} which, although not formal, exhibit a certain regularity of format. That is to say, the humans communicate to \remph{one another} information vital for comprehension of and interaction with their software, whilst withholding the very same from the \remph{machine}. We can and should do better.
+
+\lr\ introduces a language of \emph{directives} within the existing \ma\ comment syntax:
+\[\pct\dir\;\mathit{directive}
+\]
+\ma\ ignores these directives entirely, but \lr\ does not. \lr's input is \ma\ source code with directives on which to act; its output is a new version of that source code, transformed and queried as directed. We envisage four varieties of directive:
+\begin{itemize}
+\item documenting the \remph{type} of a function or variable, to determine not only its \ma\ data representation, but also more refined metadata, e.g., units of measure;
+\item querying the type of a function, a variable, or a hole in the program;
+\item requesting the systematic transformation of the user's code, e.g., renaming all occurrences of a given variable;
+\item generating low-level code serving some stated high-level purpose on the basis of the metadata supplied, e.g., to read a data set from a file.
+\end{itemize}
+Our intent is that programmers run \lr\ iteratively on their work in progress, gaining support, feedback, and the alleviation of such system\remph{atic} labour that we can render a \remph{system}. \lr\ acts on source code files, rather than by direct manual controls, so may readily be integrated with existing editors with minimal assumptions as to which. \lr\ communicates back to its users by including \emph{responses} (which are \ma\ comments meriting user attention)
+\[
+\pct\res\;\mathit{response}
+\]
+and \emph{syntheses} (which are \ma\ code segments meriting user indifference)
+\[\begin{array}{l}
+\pct\res\lcb\qquad \mbox{(which is a \remph{single line} \ma\ comment)}\\
+\mathit{synthesized}\; \mathit{code}\\
+\pct\res\rcb\qquad \mbox{(also a \remph{single line} \ma\ comment)} \\
+\end{array}\]
+
+The type of a \ma\ matrix variable is given by, at worst, its sizes in each dimension and its entry type. However, a size is but a number and such numbers are rightly seen as a special case of a \remph{list of headers}, such as you might find in the top row or left column of a spreadsheet: the type of each cell may depend on the headers which govern its position. An important use of this refinement takes headers to be \remph{units of measure}: our intent is for \lr\ to check that the units of each cell respect these headers and thus ensure that each inner product computed in matrix multiplication is dimensionally meaningful and in commensurate units.
+
+Current status.
+
+Ulterior motive.
+
+
+
+
+\end{document}
