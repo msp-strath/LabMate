@@ -48,11 +48,11 @@ which \ma{} treats as comments, but \lr{} acts on, transforming code with direct
 \item requesting the systematic transformation of the user's code, e.g., consistently renaming all occurrences of a given variable;
 \item generating low-level code serving some stated high-level purpose on the basis of supplied metadata, e.g., to read a data set from a file.
 \end{itemize}
-Programmers can run \lr{} iteratively on their work in progress, gaining support, feedback, and the alleviation of systematic drudgery. Controlled only by the directives in its input, \lr\ may readily be integrated with existing editors with minimal assumptions as to which. It communicates back by including \emph{responses} (comments with useful information)
+Programmers can run \lr{} iteratively on their work in progress, gaining support, feedback, and the alleviation of systematic drudgery. Controlled only by the directives in its input, \lr\ may readily be integrated with existing editors. It communicates back only via its output, including \emph{responses} (comments with useful information)
 \[
 \pct\res\;\mathit{response}
 \]
-and \emph{syntheses} (code segments unlikely to be of interest)
+and \emph{syntheses} (code segments unlikely to merit inspection)
 \[\begin{array}{l}
 \pct\res\lcb\qquad \mbox{(which is a \remph{single line} \ma{} comment)}\\
 \mathit{synthesized}\; \ma\;\mathit{code}\\
