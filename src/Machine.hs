@@ -70,7 +70,7 @@ data DeclarationType
       [(String, ResponseLocation)] -- requested name and how to reply
                                    -- (we hope of length at most 1)
       Bool     -- is it capturable?
-  | LabratDecl
+  | LabmateDecl
   deriving Show
 
 data Problem
@@ -114,12 +114,12 @@ initMachine :: File -> Map Nonce String -> MachineState
 initMachine f t = MS
   { position = B0 :<+>: []
   , problem = File f
-  , nameSupply = (B0 :< ("labrat", 0), 0)
+  , nameSupply = (B0 :< ("labmate", 0), 0)
   , nonceTable = t
   }
 
 findDeclaration :: DeclarationType -> Bwd Frame -> Maybe (Name, Bwd Frame)
-findDeclaration LabratDecl fz = Nothing
+findDeclaration LabmateDecl fz = Nothing
 findDeclaration (UserDecl old seen news _) fz = go fz False where
   go B0 _ = Nothing
   go (fz :< Locale ScriptLocale) True = Nothing
@@ -129,7 +129,7 @@ findDeclaration (UserDecl old seen news _) fz = go fz False where
   go (fz :< f) b = fmap (:< f) <$> go fz b
 
 makeDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
-makeDeclaration LabratDecl ms = error "making labratdecl declaration"
+makeDeclaration LabmateDecl ms = error "making labmatedecl declaration"
 makeDeclaration d@(UserDecl s seen news capturable) ms = case fresh s ms of
   (n, ms) -> case position ms of
     fz :<+>: fs -> (n, ms { position = findLocale fz (Declaration n d) :<+>: fs })

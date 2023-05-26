@@ -87,7 +87,7 @@ renamePass ms = inbound ms
             cap <- captured fz b s
             when cap $ tellGripes Captured d
           pure s
-        _ -> error "Impossible: renaming LabRat var"
+        _ -> error "Impossible: renaming LabMate var"
       else do
         s <- renamer fz n b
         s' <- newName d

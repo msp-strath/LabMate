@@ -28,7 +28,7 @@ import Machine
 import Machine.Reassemble
 
 import Data.Version
-import Paths_LabRat
+import Paths_LabMate
 
 type ParseError = (Maybe FilePath, Reach, Int)
 
@@ -48,7 +48,7 @@ main = do
    stdin = T.getContents >>= actInput
    go (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = run (initMachine cs tab)
-      putStrLn ("%< LabRat " ++ showVersion version)
+      putStrLn ("%< LabMate " ++ showVersion version)
       putStrLn $ reassemble n out
    go (Left e) = do printError e; exitWith fatalExitCode
 

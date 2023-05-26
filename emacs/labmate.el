@@ -5,44 +5,44 @@
 ;; syntax table
 ;;(defvar hacky-syntax-table (make-syntax-table))
 
-(defface labrat-directive
+(defface labmate-directive
   '((t :foreground "black"
        :background "pale turquoise"
        :weight bold
        :underline t
        ))
   "Face for directives."
-  :group 'labrat )
+  :group 'labmate )
 
-(defface labrat-response-error
+(defface labmate-response-error
   '((t :foreground "black"
        :background "light salmon"
        :weight bold
        :underline t
        ))
   "Face for errorneous directive responses."
-  :group 'labrat )
+  :group 'labmate )
 
-(defface labrat-response-success
+(defface labmate-response-success
   '((t :foreground "black"
        :background "pale green"
        :weight bold
        :underline t
        ))
   "Face for successful directive responses."
-  :group 'labrat )
+  :group 'labmate )
 
 ;; define the mode
-(define-derived-mode labrat-mode octave-mode
-  "LabRat mode"
+(define-derived-mode labmate-mode octave-mode
+  "LabMate mode"
   ;; handling comments
   :syntax-table (make-syntax-table)
   ;; code for syntax highlighting
-  (font-lock-add-keywords nil '(("^\s*%>[^%|^\n]+" . 'labrat-directive)))
-  (font-lock-add-keywords nil '(("^\s*%<.+" . 'labrat-response-error)))
-  (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%|^\n]+" . 'labrat-response-success)))
-  (font-lock-add-keywords nil '(("^\s*%<\s*LabRat[^%|^\n]+" . 'labrat-response-success)))
-  (setq mode-name "labrat")
+  (font-lock-add-keywords nil '(("^\s*%>[^%|^\n]+" . 'labmate-directive)))
+  (font-lock-add-keywords nil '(("^\s*%<.+" . 'labmate-response-error)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%|^\n]+" . 'labmate-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*LabMate[^%|^\n]+" . 'labmate-response-success)))
+  (setq mode-name "labmate")
   ;; clear memory
   ;;(setq typos-keywords-regexp nil)
   ;;(setq typos-operators-regexp nil)
@@ -50,29 +50,29 @@
 
 ;; Customisation options
 
-(defgroup labrat nil
+(defgroup labmate nil
   "A Matlab helper."
   :group 'languages)
 
-(defcustom labrat-command "labrat"
-  "The path to the LabRat command to run."
+(defcustom labmate-command "labmate"
+  "The path to the LabMate command to run."
   :type 'string
-  :group 'labrat)
+  :group 'labmate)
 
-(defface labrat-highlight-error-face
+(defface labmate-highlight-error-face
   '((t (:underline (:color "red" :style wave))))
   "The face used for errors.")
 
-(defun labrat-run-on-file (labrat-file)
-  "Run LabRat on the current buffer and replace the buffer contents with the LabRat output."
+(defun labmate-run-on-file (labmate-file)
+  "Run LabMate on the current buffer and replace the buffer contents with the LabMate output."
 
   (save-some-buffers compilation-ask-about-save
                      (when (boundp 'compilation-save-buffers-predicate)
                        compilation-save-buffers-predicate))
 
   (let* ((res (with-temp-buffer
-               (list (call-process labrat-command nil
-                                   (current-buffer) nil labrat-file)
+               (list (call-process labmate-command nil
+                                   (current-buffer) nil labmate-file)
                      (buffer-string))))
          (exitcode (car res))
          (output (cadr res)))
@@ -85,11 +85,11 @@
         (message "%s" output))))
 
 ;;;###autoload
-(defun labrat-run (override-options)
-  "Run LabRat on the current file."
+(defun labmate-run (override-options)
+  "Run LabMate on the current file."
   (interactive "P")
-    (labrat-run-on-file (shell-quote-argument (buffer-file-name))))
+    (labmate-run-on-file (shell-quote-argument (buffer-file-name))))
 
-(define-key labrat-mode-map (kbd "C-c C-l") 'labrat-run)
+(define-key labmate-mode-map (kbd "C-c C-l") 'labmate-run)
 
-(provide 'labrat-mode)
+(provide 'labmate-mode)

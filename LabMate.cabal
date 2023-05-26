@@ -1,5 +1,5 @@
 cabal-version:      2.4
-name:               LabRat
+name:               LabMate
 version:            0.1.3.0
 
 -- A short (one-line) description of the package.
@@ -44,7 +44,7 @@ common haskell
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances
 
-executable labrat
+executable labmate
     import:           haskell
     main-is:          Main.hs
 
@@ -59,8 +59,8 @@ executable labrat
                       Syntax,
                       Machine,
                       Machine.Reassemble,
-                      Paths_LabRat
-    autogen-modules:  Paths_LabRat
+                      Paths_LabMate
+    autogen-modules:  Paths_LabMate
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
