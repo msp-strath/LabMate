@@ -1,4 +1,4 @@
-{- LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections #-}
 
 module BRect where
 

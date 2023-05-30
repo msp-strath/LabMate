@@ -29,10 +29,12 @@ type Dir = WithSource Dir'
 type Dir' = (WithSource DirHeader, Maybe DirBody)
 
 data DirHeader
-  = Declare (String, TensorType)
+  = Declare (String, ConcreteType)
   | Rename String String
   | InputFormat String {- name of function -}
- deriving Show
+  | Typecheck ConcreteType Expr
+  | SynthType Expr
+  deriving Show
 
 data DirBody
   = InputFormatBody [String]
@@ -48,10 +50,12 @@ type EntryType = WithSource EntryType'
 
 data EntryType'
   = Ty Expr
-  | Cmhn (String, Expr) Expr
+  | Cmhn (String, Expr) Expr -- comprehensions
   deriving (Show)
 
 type Res = [Tok]
+
+type ConcreteType = TensorType
 
 type Expr = WithSource Expr'
 

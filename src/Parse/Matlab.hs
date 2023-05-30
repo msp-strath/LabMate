@@ -120,7 +120,8 @@ pdirhead :: Parser DirHeader
 pdirhead = Declare <$> plarrow ptensortype
     <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
     <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom
-
+    <|> Typecheck <$ pkin Nom "typecheck" <* pospc <*> ptensortype <* pspc <*> pexpr topCI
+    <|> SynthType <$ pkin Nom "typeof" <* pospc <*> pexpr topCI
 
 ptensortype :: Parser TensorType
 ptensortype = pws ptensortype'
