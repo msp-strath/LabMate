@@ -29,7 +29,7 @@ type Dir = WithSource Dir'
 type Dir' = (WithSource DirHeader, Maybe DirBody)
 
 data DirHeader
-  = Declare (String, ConcreteType)
+  = Declare [String] ConcreteType
   | Rename String String
   | InputFormat String {- name of function -}
   | Typecheck ConcreteType Expr
@@ -41,17 +41,29 @@ data DirBody
  deriving Show
 
 type TensorType = WithSource TensorType'
+type TypeExpr = WithSource TypeExpr'
 
 data TensorType'
-  = Tensor ((String, Expr), (String, Expr)) EntryType
+  = Tensor ((String, TypeExpr), (String, TypeExpr)) EntryType
   deriving Show
 
 type EntryType = WithSource EntryType'
 
 data EntryType'
-  = Ty Expr
-  | Cmhn (String, Expr) Expr -- comprehensions
+  = Ty TypeExpr
+--  | Cmhn (String, TypeExpr) Expr -- comprehensions
   deriving (Show)
+
+-- possibly incomplete list of type level expressions
+data TypeExpr'
+  = TyVar String -- might also be constants, e.g. Double
+  | TyNum Int
+  | TyApp TypeExpr [TypeExpr]
+  | TyMat [[TypeExpr]]
+  | TyBinaryOp BinOperator TypeExpr TypeExpr
+  | TyUnaryOp UnOperator TypeExpr
+  | TyStringLiteral String
+  deriving Show
 
 type Res = [Tok]
 

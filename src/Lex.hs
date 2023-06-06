@@ -383,6 +383,7 @@ symbols = foldr insT empT $ binOps ++
   , "="
   , ".?"
   , "(", ")", "[", "]", "{", "}", ",", ";"
+  , "::"
   ]
 
 opener :: Tok -> Maybe Bracket

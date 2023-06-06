@@ -1,4 +1,5 @@
 function z = typecheck(x, y)
- % TODO : add types to x and y
- z = x + y
+  %> x y :: Int
+  z = x + y
+  %> typecheck Int z
 end
