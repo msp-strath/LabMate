@@ -20,15 +20,19 @@ common haskell
                        DeriveTraversable,
                        FlexibleContexts,
                        FlexibleInstances,
+                       GADTs,
                        GeneralizedNewtypeDeriving,
                        MultiParamTypeClasses,
                        NamedFieldPuns,
+                       RankNTypes,
                        RecordWildCards,
                        ScopedTypeVariables,
                        StandaloneDeriving,
+                       PolyKinds,
                        TupleSections,
                        TypeFamilies,
                        TypeSynonymInstances,
+                       TypeOperators
                        LambdaCase,
                        PatternSynonyms,
                        PatternGuards
@@ -59,6 +63,11 @@ executable labmate
                       Syntax,
                       Machine,
                       Machine.Reassemble,
+                      Term,
+                      Term.Indexed,
+                      Term.Natty,
+                      Term.Thinning,
+                      Term.Vec
                       Paths_LabMate
     autogen-modules:  Paths_LabMate
 
