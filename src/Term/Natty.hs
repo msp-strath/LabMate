@@ -67,3 +67,10 @@ trichotomy (Sy n) (Sy m) = case trichotomy n m of
   GreaterThan d a -> GreaterThan d (AddS a)
 trichotomy d@(Sy n) Zy = GreaterThan d (AddZ d)
 trichotomy Zy d@(Sy n) = LessThan d (AddZ d)
+
+data Positive :: Nat -> * where
+  IsSy :: Natty n -> Positive (S n)
+
+positiveEh :: Natty n -> Either (n == Z) (Positive n)
+positiveEh Zy = Left Refl
+positiveEh (Sy n) = Right (IsSy n)

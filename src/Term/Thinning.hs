@@ -220,3 +220,18 @@ thAdd :: AddR a b c -> a <= d -> b <= e -> AddR d e f -> c <= f
 thAdd abc ad (No be) (AddS def) = No (thAdd abc ad be def)
 thAdd (AddS abc) ad (Su be) (AddS def) = Su (thAdd abc ad be def)
 thAdd (AddZ _) ad Ze (AddZ _) = ad
+
+
+instance NATTY n => Num (S Z <= n) where
+  fromInteger i = go i n
+    where
+      n = natty
+      go :: forall n. Integer -> Natty n -> S Z <= n
+      go 0 (Sy n) = Su $ no n
+      go i (Sy n) = No $ go (i - 1) n
+      go _ _ = error $ "DeBruijn idx out of bounds: " ++ show i ++ " <= " ++ show n ++ "."
+  (+) = undefined
+  (*) = undefined
+  (-) = undefined
+  abs = undefined
+  signum = undefined
