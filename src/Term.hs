@@ -14,6 +14,8 @@ data Term :: (Nat -> *) -- representation of metavars
   V :: Term m (S Z)
   -- atom
   A :: String -> Term m Z
+  -- integer constants
+  I :: Integer -> Term m Z
   -- pairing
   P :: Term m l -> Cov l r n -> Term m r -> Term m n
   -- constant function
@@ -28,6 +30,9 @@ var = (V :^)
 
 atom :: NATTY n => String -> Term m ^ n
 atom s = A s :^ no natty
+
+int :: NATTY n => Integer -> Term m ^ n
+int i = I i :^ no natty
 
 infixr 5 <&>
 (<&>) :: Term m ^ n -> Term m ^ n -> Term m ^ n
@@ -48,8 +53,7 @@ meta :: NATTY n => m k -> Vec k (Term m ^ n) -> Term m ^ n
 meta m tz | sig :^ th <- subst tz = M m sig :^ th
 
 tup :: NATTY n => [Term m ^ n] -> Term m ^ n
-tup [] = atom ""
-tup (t : ts) = t <&> tup ts
+tup = foldr (<&>) (atom "")
 
 data Subst :: (Nat -> *) -- representation of metavars
            -> Nat        -- src scope
@@ -76,7 +80,8 @@ tmShow b (V :^ th) ctx = barIf b ++ vonly (th ?^ ctx)
 tmShow b (A "" :^ _) _
   | b = ""
   | otherwise = "[]"
-tmShow b (A s :^ _)  _ = barIf b ++ "'" ++ s
+tmShow b (A s :^ _) _ = barIf b ++ "'" ++ s
+tmShow b (I i :^ _) _ = barIf b ++ show i
 tmShow b (P tl u tr :^ th) ctx =
   if b then " " ++ s else "[" ++ s ++ "]"
   where
@@ -152,10 +157,19 @@ instance Substable (Subst m k) where
   ST tau u t /// sig
     | Roof sigl u' sigr <- roofLemma u sig = ST (tau // sigl) u' (t // sigr)
 
+(//^) :: Term m ^ k -> Subst m k ^ n -> Term m ^ n
+(t :^ th) //^ (sig :^ ph) | Roof sigl u sigr <- roofLemma (rightAll th) sig =
+  t // sigl :^ covl u -< ph
+
+{-
 theTerm :: Term (Konst String) ^ S (S (S Z))
 theTerm = lam "w" $ tup [var 0, var 1, var 2]
   --meta (Konst "m") (atom <$> theCtx)
   --lam "x" $ var 0
 
+theSubst :: Subst (Konst String) (S (S (S Z))) ^ S (S (S Z))
+theSubst = subst $ VN :# var 1 :# var 0 :# var 2
+
 theCtx :: Vec (S (S (S Z))) String
 theCtx = VN :# "z" :# "y" :# "x"
+-}

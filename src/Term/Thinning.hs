@@ -111,6 +111,11 @@ allRight :: Cov Z r n -> r == n
 allRight ZZ = Refl
 allRight (NS u) | Refl <- allRight u = Refl
 
+rightAll :: n <= m -> Cov n m m
+rightAll (No th) = NS $ rightAll th
+rightAll (Su th) = SS $ rightAll th
+rightAll Ze      = ZZ
+
 lCov :: Natty l -> Cov l Z l
 lCov Zy = ZZ
 lCov (Sy l) = SN (lCov l)
