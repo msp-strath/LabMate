@@ -21,10 +21,11 @@ infixr 5 :*
 data (:->) :: (a -> *) -> (a -> *) -> (a -> *) where
   FunI :: (p n -> q n) -> (p :-> q) n
 
-newtype Flip (f :: b -> a -> *) (x :: a) (y :: b) =
-  Flip {getFlip :: f y x}
+newtype Flip :: (b -> a -> *) -> a -> b -> * where
+  Flip :: { getFlip :: f y x } -> Flip f x y
 
-newtype Konst (x :: *) (y :: b) = Konst {getKonst :: x}
+newtype Konst :: * -> b -> * where
+  Konst :: { getKonst :: x } -> Konst x y
 
 instance Show x => Show (Konst x y) where
   show = show . getKonst

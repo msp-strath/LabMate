@@ -1,6 +1,9 @@
 {-# LANGUAGE QuantifiedConstraints #-}
-module Term (module Term, module Term.Indexed, module Term.Natty, module Term.Thinning, module Term.Vec) where
-
+module Term (module Term
+            , module Term.Indexed
+            , module Term.Natty
+            , module Term.Thinning
+            , module Term.Vec) where
 import Term.Indexed
 import Term.Natty
 import Term.Thinning
@@ -25,6 +28,7 @@ data Term :: (Nat -> *) -- representation of metavars
   -- metavar usage
   M :: m k -> Subst m k n -> Term m n
 
+--------------- smart ctors ---------------
 var :: S Z <= n -> Term m ^ n
 var = (V :^)
 
@@ -54,6 +58,8 @@ meta m tz | sig :^ th <- subst tz = M m sig :^ th
 
 tup :: NATTY n => [Term m ^ n] -> Term m ^ n
 tup = foldr (<&>) (atom "")
+
+-------------------------------------------
 
 data Subst :: (Nat -> *) -- representation of metavars
            -> Nat        -- src scope

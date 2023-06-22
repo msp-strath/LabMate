@@ -91,7 +91,7 @@ data (^) :: (Nat -> *) -> Nat -> * where
   (:^) :: p n -> n <= m -> p ^ m
 
 -- (^) is the free Thinny on (p :: Nat -> *)
-instance Thinny ((^) p) where
+instance Thinny ((^) (p :: Nat -> *)) where
   (p :^ th) -< ph = p :^ (th -< ph)
 
 -- coproduct diagrams in (<= m) with the existential witness
@@ -220,12 +220,11 @@ thicken th ph = case pub th ph of
     (Refl, Refl) <- thinEqEh th' (io $ weeEnd th)
     pure ph'
 
--- (<=) are monoidal cat. wrt AddR
+-- (<=) are monoidal cat wrt AddR
 thAdd :: AddR a b c -> a <= d -> b <= e -> AddR d e f -> c <= f
 thAdd abc ad (No be) (AddS def) = No (thAdd abc ad be def)
 thAdd (AddS abc) ad (Su be) (AddS def) = Su (thAdd abc ad be def)
 thAdd (AddZ _) ad Ze (AddZ _) = ad
-
 
 instance NATTY n => Num (S Z <= n) where
   fromInteger i = go i n

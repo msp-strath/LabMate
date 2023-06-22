@@ -67,7 +67,8 @@ executable labmate
                       Term.Indexed,
                       Term.Natty,
                       Term.Thinning,
-                      Term.Vec
+                      Term.Vec,
+                      CoreTT
                       Paths_LabMate
     autogen-modules:  Paths_LabMate
 
