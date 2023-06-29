@@ -3,6 +3,9 @@ module Term.Indexed where
 data (==) :: a -> a -> * where
   Refl :: x == x
 
+-- `qs` is usually a tuple of equations
+data Ordering' qs = LT' | EQ' qs | GT'
+
 -- existential quantification
 data Ex :: (a -> *) -> * where
   Ex :: p x -> Ex p

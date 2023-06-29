@@ -32,7 +32,7 @@ common haskell
                        TupleSections,
                        TypeFamilies,
                        TypeSynonymInstances,
-                       TypeOperators
+                       TypeOperators,
                        LambdaCase,
                        PatternSynonyms,
                        PatternGuards

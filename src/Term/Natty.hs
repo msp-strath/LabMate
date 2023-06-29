@@ -29,6 +29,12 @@ nattyEqEh n m = case trichotomy n m of
    Equal -> pure Refl
    _ -> Nothing
 
+cmpNatty :: Natty n -> Natty m -> Ordering' (n == m)
+cmpNatty n m = case trichotomy n m of
+  LessThan _ _ -> LT'
+  Equal -> EQ' Refl
+  GreaterThan _ _ -> GT'
+
 -- the constraint that a singleton exist
 -- used in instance declaration, e.g. for Vec
 class NATTY n where

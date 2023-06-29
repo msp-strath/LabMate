@@ -1,3 +1,4 @@
+{-# LANGUAGE QuantifiedConstraints #-}
 module Term.Thinning where
 
 import Term.Indexed
@@ -33,6 +34,16 @@ thinEqEh (No th) (No ph) = do { (Refl, Refl) <- thinEqEh th ph ; pure (Refl, Ref
 thinEqEh (Su th) (Su ph) = do { (Refl, Refl) <- thinEqEh th ph ; pure (Refl, Refl) }
 thinEqEh  Ze      Ze     =                                       pure (Refl, Refl)
 thinEqEh  _       _      = Nothing
+
+cmpThin :: k <= m -> n <= m -> Ordering' (k == n)
+cmpThin (No th) (Su ph) = LT'
+cmpThin (Su th) (No ph) = GT'
+cmpThin (No th) (No ph) = cmpThin th ph
+cmpThin (Su th) (Su ph) = case cmpThin th ph of
+  LT' -> LT'
+  EQ' Refl -> EQ' Refl
+  GT' -> GT'
+cmpThin  Ze      Ze     = EQ' Refl
 
 -- identity for thinnings
 io :: forall m. Natty m -> m <= m
@@ -85,6 +96,15 @@ covr (NS u) = Su (covr u)
 covr (SS u) = Su (covr u)
 covr  ZZ    = Ze
 
+cmpCov :: Cov l r n -> Cov l' r' n -> Ordering' (l == l', r == r')
+cmpCov u u' = case cmpThin (covl u) (covl u') of
+  LT' -> LT'
+  GT' -> GT'
+  EQ' q -> case cmpThin (covr u) (covr u') of
+    LT' -> LT'
+    EQ' q' -> EQ' (q, q')
+    GT' -> GT'
+
 -- CoDeBruijn pairing of a thing with its thinning
 -- `n` is implicitly existential
 data (^) :: (Nat -> *) -> Nat -> * where
@@ -93,6 +113,17 @@ data (^) :: (Nat -> *) -> Nat -> * where
 -- (^) is the free Thinny on (p :: Nat -> *)
 instance Thinny ((^) (p :: Nat -> *)) where
   (p :^ th) -< ph = p :^ (th -< ph)
+
+instance (forall (n :: Nat). Eq (p n)) => Eq (p ^ m) where
+  (p :^ th) == (q :^ ph) = case cmpThin th ph of
+    EQ' Refl -> p == q
+    _ -> False
+
+instance (forall (n :: Nat). Ord (p n)) => Ord (p ^ m) where
+  compare (p :^ th) (q :^ ph) = case cmpThin th ph of
+    LT' -> LT
+    GT' -> GT
+    EQ' Refl -> compare p q
 
 -- coproduct diagrams in (<= m) with the existential witness
 -- and its thinning being coproduct object
