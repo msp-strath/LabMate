@@ -68,7 +68,8 @@ executable labmate
                       Term.Natty,
                       Term.Thinning,
                       Term.Vec,
-                      CoreTT
+                      CoreTT,
+                      NormalForm
                       Paths_LabMate
     autogen-modules:  Paths_LabMate
 

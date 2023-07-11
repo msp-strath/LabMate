@@ -12,8 +12,7 @@ import Hide
 
 type Name = String
 
-data Term (n :: Nat)        -- object variable support
-          :: *  where
+data Term (n :: Nat) where       -- object variable support
   -- the object var
   V :: Term (S Z)
   -- atom
@@ -29,35 +28,34 @@ data Term (n :: Nat)        -- object variable support
   -- metavar usage
   M :: (Name, Natty k) -> Subst k n -> Term n
 
+-- for documentary purposes; used only when we *know*
+-- (and not merely hope) a term is a type
+type Type = Term
+
 instance Eq (Term n) where
   t == t' = compare t t' == EQ
 
 instance Ord (Term n) where
-  compare V V = EQ
-  compare V _ = LT
-  compare _ V = GT
-  compare (A s) (A s') = compare s s'
-  compare  A{}   _    = LT
-  compare _     A{} = GT
-  compare (I n) (I n') = compare n n'
-  compare (I _) _ = LT
-  compare _ (I _) = GT
+  compare  V         V       = EQ
+  compare (A s)     (A s')   = compare s s'
+  compare (I n)     (I n')   = compare n n'
   compare (P l u r) (P l' u' r') = case cmpCov u u' of
     LT' -> LT
     GT' -> GT
     EQ' (Refl, Refl) -> compare (l', r') (l', r')
-  compare P{} _ = LT
-  compare _ P{} = GT
-  compare (K t) (K t') = compare t t'
-  compare K{} _ = LT
-  compare _ K{} = GT
-  compare (L _ t) (L _ t') = compare t t'
-  compare L{} _ = LT
-  compare _ L{} = GT
+  compare (K t)         (K t')   = compare t t'
+  compare (L _ t)       (L _ t') = compare t t'
   compare (M (s, k) su) (M (s', k') su') = case cmpNatty k k' of
     LT' -> LT
     GT' -> GT
     EQ' Refl -> compare (s, su) (s', su')
+
+  compare t1 t2 = compare (helper t1) (helper t2)
+   where
+      helper :: Term n -> Integer
+      helper = \case
+        { V{} -> 0; A{} -> 1; I{} -> 2; P{} -> 3
+        ; K{} -> 4; L{} -> 5; M{} -> 6 }
 
 --------------- smart ctors ---------------
 var :: S Z <= n -> Term ^ n
@@ -66,12 +64,20 @@ var = (V :^)
 atom :: NATTY n => String -> Term ^ n
 atom s = A s :^ no natty
 
+pattern At :: NATTY n => String -> Term ^ n
+pattern At s <- A s :^ _
+ where At s = atom s
+
 nil :: NATTY n => Term ^ n
 nil = atom ""
 
 nilEh :: Term ^ n -> Maybe ()
 nilEh (A "" :^ _) = Just ()
 nilEh _ = Nothing
+
+pattern Nil :: NATTY n => Term ^ n
+pattern Nil <- A "" :^ _
+  where Nil = nil
 
 int :: NATTY n => Integer -> Term ^ n
 int i = I i :^ no natty
@@ -80,7 +86,6 @@ infixr 5 <&>
 (<&>) :: Term ^ n -> Term ^ n -> Term ^ n
 (tl :^ th) <&> (tr :^ ph) | u :^ ps <- cop th ph = P tl u tr :^ ps
 
--- TODO : see how to turn to pattern synonym
 pairEh :: Term ^ n -> Maybe (Term ^ n, Term ^ n)
 pairEh (P tl u tr :^ ph) = Just (tl :^ covl u -< ph, tr :^ covr u -< ph)
 pairEh _ = Nothing
@@ -110,9 +115,7 @@ tupEh t = do
 
 -------------------------------------------
 
-data Subst :: Nat        -- src scope
-           -> Nat        -- tgt support
-           -> * where
+data Subst (srcScope :: Nat) (tgtSupport :: Nat) where
   S0 :: Subst Z Z
   ST :: Subst k l -> Cov l r n -> Term r -> Subst (S k) n
 
@@ -220,13 +223,13 @@ instance Substable (Subst k) where
 (t :^ th) //^ (sig :^ ph) | Roof sigl u sigr <- roofLemma (rightAll th) sig =
   t // sigl :^ covl u -< ph
 
-{-
+
 theTerm :: Term ^ S (S (S Z))
-theTerm = lam "w" $ tup [var 0, var 1, var 2]
+theTerm = lam "w" $ tup [var 0, var 2, var 3]
   --meta (Konst "m") (atom <$> theCtx)
   --lam "x" $ var 0
 
-theSubst :: Subst (S (S (S Z))) ^ S (S (S Z))
+theSubst :: Subst ('S ('S ('S 'Z))) ^ S (S (S Z))
 theSubst = subst $ VN :# var 1 :# var 0 :# var 2
 
 theCtx :: Vec (S (S (S Z))) String
@@ -234,4 +237,3 @@ theCtx = VN :# "z" :# "y" :# "x"
 
 testShow :: Term ^ S (S (S Z)) -> IO ()
 testShow t = putStrLn (tmShow False t theCtx)
--}
