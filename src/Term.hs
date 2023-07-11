@@ -113,6 +113,14 @@ tupEh t = do
   (h, t) <- pairEh t
   (h :) <$> tupEh t
 
+type Tag = String
+
+tagEh :: Term ^ n -> Maybe (Tag, [Term ^ n])
+tagEh (A s@(_:_) :^ _) = Just (s, [])
+tagEh t = case tupEh t of
+  Just ((A s@(_:_) :^ _):ts) -> Just (s, ts)
+  _   -> Nothing
+
 -------------------------------------------
 
 data Subst (srcScope :: Nat) (tgtSupport :: Nat) where

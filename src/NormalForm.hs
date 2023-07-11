@@ -1,31 +1,34 @@
-{-# LANGUAGE InstanceSigs #-}
 module NormalForm where
 
 import Term
 
-pattern Plus th = A "plus" :^ th
-pattern Plus'  <- A "plus" :^ _
+pattern Splus = "plus"
+pattern Sone = "one"
 
-pattern Abel th = A "abel" :^ th
-pattern Abel'  <- A "abel" :^ _
+pattern Plus th = A Splus :^ th
+pattern Plus'  <- A Splus :^ _
 
-data NFInteger' t {- terms -}
-                i {- integer multiplicities -}
- = NFInteger
+pattern One th = A Sone :^ th
+pattern One'  <- A Sone :^ _
+
+data NFAbel'
+ t {- terms -}
+ i {- integer multiplicities -}
+ = NFAbel
  { nfConst :: i        -- number of Nils
  , nfStuck :: [(t, i)] -- terms should be sorted
  } deriving (Functor)  -- acts uniformly on multiplicities
 
--- Integer constants are NFInteger
--- NFInteger is closed under Plus (via merging)
-type NFInteger m n = NFInteger' (Term ^ n) Integer
+-- Integer constants are NFAbel
+-- NFAbel is closed under Plus (via merging)
+type NFAbel n = NFAbel' (Term ^ n) Integer
 
-instance (Ord t, Num i, Eq i) => Semigroup (NFInteger' t i) where
+instance (Ord t, Num i, Eq i) => Semigroup (NFAbel' t i) where
   (<>) = mappend
 
-instance (Ord t, Num i, Eq i) => Monoid (NFInteger' t i) where
-  mempty = NFInteger {nfConst = 0, nfStuck = []}
-  NFInteger x xtis `mappend` NFInteger y ytis = NFInteger
+instance (Ord t, Num i, Eq i) => Monoid (NFAbel' t i) where
+  mempty = NFAbel {nfConst = 0, nfStuck = []}
+  NFAbel x xtis `mappend` NFAbel y ytis = NFAbel
     { nfConst = x + y
     , nfStuck = go xtis ytis
     }
@@ -39,8 +42,8 @@ instance (Ord t, Num i, Eq i) => Monoid (NFInteger' t i) where
           k -> ((xt, k) :)
         GT -> yh : go x ytis
 
-nfIntegerToTerm :: NATTY n => NFInteger m n -> Term ^ n
-nfIntegerToTerm NFInteger{..} = case (nfConst, nfStuck) of
+nfAbelToTerm :: NATTY n => NFAbel n -> Term ^ n
+nfAbelToTerm NFAbel{..} = case (nfConst, nfStuck) of
   (i, [])  -> int i
   (0, tis) -> go tis
   (i, tis) -> tup [Plus (no natty), int i, go tis]
@@ -52,9 +55,7 @@ nfIntegerToTerm NFInteger{..} = case (nfConst, nfStuck) of
     mu 1 tm = tm
     mu i tm = tup [int i, tm]
 
---termToNFInteger has to be in CoreTT
-
-
+--termToNFAbel has to be in CoreTT
 -- for debugging
 instance NATTY n => Num (Term ^ n) where
   s + t = tup [Plus (no natty), s, t]
@@ -64,3 +65,38 @@ instance NATTY n => Num (Term ^ n) where
   signum = undefined
   fromInteger = int
   negate t = tup [ int (-1), t]
+
+type NFList n =
+  [( Term ^ n
+   , Bool -- `True` means an element, `False` a stuck list
+   )]
+
+nfListToTerm :: NATTY n => NFList n -> Term ^ n
+nfListToTerm [] = Nil
+nfListToTerm (x : xs) = case xs of
+  [] -> go x
+  _  -> tup [Plus (no natty), go x, nfListToTerm xs]
+  where
+    go (tm, True) = tup [One (no natty), tm]
+    go (tm, False) = tm
+
+-- TODO : handle neutral x
+findInEnum :: Term ^ n -> NFList n -> Maybe (Integer, NFList n)
+findInEnum x ts = case (tagEh x, ts) of
+  (Just (s, []), (A s' :^ _, True) : us) ->
+    if s == s' then pure (0, ts)
+    else do
+      (n, ts) <- findInEnum x us
+      pure (1 + n, ts)
+  (Nothing, (_, True) : us) | I i :^ th <- x ->
+    case compare i 0 of
+      LT -> Nothing
+      EQ -> pure (0, ts)
+      GT -> do
+        (n, ts) <- findInEnum (I (i - 1) :^ th) us
+        pure (1 + n, ts)
+  (Just (Splus, [x,y]), _) -> do
+    (n, ts) <- findInEnum x ts
+    (m, ts) <- findInEnum y ts
+    pure (n + m, ts)
+  _ -> Nothing
