@@ -66,7 +66,7 @@ atom s = A s :^ no natty
 
 pattern At :: NATTY n => String -> Term ^ n
 pattern At s <- A s :^ _
- where At s = atom s
+  where At s = atom s
 
 nil :: NATTY n => Term ^ n
 nil = atom ""

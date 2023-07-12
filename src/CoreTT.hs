@@ -86,7 +86,6 @@ typeEh ty  = do
   gotTy <- synthEh ty
   withScope $ subtypeEh gotTy $ TyU (no natty)
 
-
 checkEh
   :: Type ^ n {- Ty -}
   -> Term ^ n {- tm -}
@@ -135,16 +134,16 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
   _ -> pure False
 checkCanEh _ _ = pure False
 
-
 synthEh :: Term ^ n {- t -} -> TC n (Type ^ n) {- t \in T -}
 synthEh (V :^ i) = typeOf i
 synthEh tm = fail "synthEh says \"no\""
 
-checkEval :: NATTY n
-          => Type ^ n {- Ty -}
-          -> Term ^ n {- tm -}
-          -- must be Ty \ni tm, i.e. already checked
-          -> Term ^ n
+checkEval
+  :: NATTY n
+  => Type ^ n {- Ty -}
+  -> Term ^ n {- tm -}
+  -- must be Ty \ni tm, i.e. already checked
+  -> Term ^ n
 checkEval ty tm
   | Just [TyAbel', genTy] <- tupEh ty = nfAbelToTerm . termToNFAbel genTy $ tm
   | Just [TyList', genTy] <- tupEh ty = if propEh genTy
@@ -165,7 +164,7 @@ termToNFList
 termToNFList ty tm
   | I j :^ _ <- tm = replicate (fromInteger j) (Nil, True)
   | Nil <- tm  = []
-  | Just [One th, t] <- tupEh tm = [(checkEval ty t, True)]
+  | Just [One', t] <- tupEh tm = [(checkEval ty t, True)]
   | Just [Plus', s, t] <- tupEh tm = termToNFList ty s ++ termToNFList ty t
 termToNFList ty tm = [(tm, False)]
 
