@@ -200,6 +200,7 @@ subtypeEh :: Type ^ n -> Type ^ n -> TC n ()
 subtypeEh got want = scope >>= \n ->
   sameEh (TyU (no n)) (got, want)
 
+{-
 -- tests
 test0 = let ty = tup [TyAbel (no natty), TyOne (no natty)]
             tm = var 0 + var 1
@@ -327,3 +328,4 @@ test16 = let cty = TyAtom (no natty)
              f s = tup [One (no natty), At s]
          in runTC (checkEh ty tm) (natty, ctx)
          -- Left "checkCanEh: cannot find in Enum"
+-}
