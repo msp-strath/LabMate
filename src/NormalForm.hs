@@ -55,8 +55,9 @@ nfAbelToTerm NFAbel{..} = case (nfConst, nfStuck) of
     mu 1 tm = tm
     mu i tm = tup [int i, tm]
 
---termToNFAbel has to be in CoreTT
--- for debugging
+-- termToNFAbel has to be in CoreTT
+
+-- num instance for debugging
 instance NATTY n => Num (Term ^ n) where
   s + t = tup [Plus (no natty), s, t]
   s * t = case s of
@@ -79,24 +80,3 @@ nfListToTerm (x : xs) = case xs of
   where
     go (tm, True) = tup [One (no natty), tm]
     go (tm, False) = tm
-
--- TODO : handle neutral x
-findInEnum :: Term ^ n -> NFList n -> Maybe (Integer, NFList n)
-findInEnum x ts = case (tagEh x, ts) of
-  (Just (s, []), (A s' :^ _, True) : us) ->
-    if s == s' then pure (0, ts)
-    else do
-      (n, ts) <- findInEnum x us
-      pure (1 + n, ts)
-  (Nothing, (_, True) : us) | I i :^ th <- x ->
-    case compare i 0 of
-      LT -> Nothing
-      EQ -> pure (0, ts)
-      GT -> do
-        (n, ts) <- findInEnum (I (i - 1) :^ th) us
-        pure (1 + n, ts)
-  (Just (Splus, [x,y]), _) -> do
-    (n, ts) <- findInEnum x ts
-    (m, ts) <- findInEnum y ts
-    pure (n + m, ts)
-  _ -> Nothing

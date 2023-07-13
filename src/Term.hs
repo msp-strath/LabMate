@@ -115,6 +115,9 @@ tupEh t = do
 
 type Tag = String
 
+tag :: NATTY n => Tag -> [Term ^ n] -> Term ^ n
+tag s ts = tup $ atom s : ts
+
 tagEh :: Term ^ n -> Maybe (Tag, [Term ^ n])
 tagEh (A s@(_:_) :^ _) = Just (s, [])
 tagEh t = case tupEh t of

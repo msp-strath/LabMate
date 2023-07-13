@@ -125,14 +125,38 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
     _ -> pure False
   (SEnum, [as]) -> do
     let nfs = termToNFList (TyAtom (no natty)) as
-    case findInEnum tm nfs of
-      Just _ -> pure True
-      Nothing -> fail "checkCanEh: cannot find in Enum"
+    True <$ checkEnumEh nfs tm
   (SOne, []) -> pure True
   (SAtom, []) | A _ :^ _ <- tm -> pure True
   (SType, []) -> True <$ typeEh tm
   _ -> pure False
 checkCanEh _ _ = pure False
+
+checkEnumEh                   -- typechecking op
+  :: NFList n                 -- haystack
+  -> Term ^ n                 -- needle
+  -> TC n (Maybe (NFList n))  -- longest guaranteed suffix of the
+                              -- haystack, starting with the needle;
+                              -- returns Nothing if we cannot put plus
+                              -- after.
+checkEnumEh ts tm = withScope $ case tagEh tm of
+  Just (s, []) -> case ts of
+     (A s' :^ _, True) : us ->
+       if s == s' then pure (Just ts) else checkEnumEh us tm
+     _ -> fail $ "checkEnumEh: position of atom '" ++ s ++ " not determined."
+  Nothing | I i :^ th <- tm -> case ts of
+    (_, True) : us -> case compare i 0 of
+      LT -> fail "checkEnumEh : negative tag index."
+      EQ -> pure $ Just ts
+      GT -> checkEnumEh us (I (i - 1) :^ th)
+    _ -> fail "checkEnumEh: tag at index not determined."
+  Just (Splus, [x, y]) -> do
+    Just ts <- checkEnumEh ts x
+    checkEnumEh ts y
+  -- neutral trms
+  _ -> synthEh tm >>= \ty -> do
+    subtypeEh ty (tag SEnum [nfListToTerm ts])
+    pure Nothing
 
 synthEh :: Term ^ n {- t -} -> TC n (Type ^ n) {- t \in T -}
 synthEh (V :^ i) = typeOf i
@@ -155,6 +179,27 @@ checkEval ty tm
        _ -> tm
 checkEval TyOne' _ = Nil
 checkEval _ tm = tm
+
+-- TODO : handle neutral x
+findInEnum :: Term ^ n -> NFList n -> Maybe (Integer, NFList n)
+findInEnum x ts = case (tagEh x, ts) of
+  (Just (s, []), (A s' :^ _, True) : us) ->
+    if s == s' then pure (0, ts)
+    else do
+      (n, ts) <- findInEnum x us
+      pure (1 + n, ts)
+  (Nothing, (_, True) : us) | I i :^ th <- x ->
+    case compare i 0 of
+      LT -> Nothing
+      EQ -> pure (0, ts)
+      GT -> do
+        (n, ts) <- findInEnum (I (i - 1) :^ th) us
+        pure (1 + n, ts)
+  (Just (Splus, [x,y]), _) -> do
+    (n, ts) <- findInEnum x ts
+    (m, ts) <- findInEnum y ts
+    pure (n + m, ts)
+  _ -> Nothing
 
 termToNFList
   :: NATTY n
@@ -189,16 +234,35 @@ propEh ty = case checkEval (TyU (no natty)) ty of
    TyOne' -> True
    _      -> False
 
-sameEh :: Type ^ n
-       -> (Term ^ n, Term ^ n) -- must check at that type
-       -> TC n ()
+sameEh
+  :: Type ^ n
+  -> (Term ^ n, Term ^ n) -- must check at that type
+  -> TC n ()
 sameEh ty (t1, t2) = withScope $
-  if propEh ty then pure ()
-  else guard $ checkEval ty t1 == checkEval ty t2
+  if propEh ty || checkEval ty t1 == checkEval ty t2 then pure ()
+  else fail "sameEh : different terms."
 
 subtypeEh :: Type ^ n -> Type ^ n -> TC n ()
-subtypeEh got want = scope >>= \n ->
-  sameEh (TyU (no n)) (got, want)
+subtypeEh got want = scope >>= \n -> nattily n $
+  case (tagEh got, tagEh want) of
+    (Just (SEnum, [gs]), Just (SEnum, [ws])) -> do
+      let tyA = TyAtom (no n)
+      let ngs = termToNFList tyA gs
+      let nws = termToNFList tyA ws
+      prefixEh tyA ngs nws
+    _ -> sameEh (TyU (no n)) (got, want)
+
+prefixEh
+  :: Type ^ n  -- element type
+  -> NFList n -> NFList n -> TC n ()
+prefixEh _ [] bs = pure ()
+prefixEh ty ((a, elemA) : as) ((b, elemB) : bs)
+  | elemA == elemB = withScope $ do
+      sameEh (if elemA then ty else tag SList [ty]) (a, b)
+      -- TODO: move prefixEh before sameEh call?
+      prefixEh ty as bs
+prefixEh _ _ _ = fail "prefixEh"
+
 
 -- tests
 test0 = let ty = tup [TyAbel (no natty), TyOne (no natty)]
@@ -326,4 +390,36 @@ test16 = let cty = TyAtom (no natty)
              ctx = VN :# cty :# cty :# cty
              f s = tup [One (no natty), At s]
          in runTC (checkEh ty tm) (natty, ctx)
-         -- Left "checkCanEh: cannot find in Enum"
+         -- Left "sameEh : different terms"
+
+test17 = let cty = TyAtom (no natty)
+             ty = tup [TyEnum (no natty), atoms]
+             atoms = f "a" + f "b" + f "c"
+             tm = var 0
+             ctx = VN :# cty :# cty :# ty
+             f s = tup [One (no natty), At s]
+         in runTC (checkEh ty tm) (natty, ctx)
+         -- Right ()
+
+test18 = let cty = TyAtom (no natty)
+             ty = tup [TyEnum (no natty), atoms]
+             subty = tup [TyEnum (no natty), subatoms]
+             atoms = f "a" + f "b" + f "c"
+             subatoms = f "a" + f "b"
+             tm = var 0
+             ctx = VN :# cty :# cty :# subty
+             f s = tup [One (no natty), At s]
+         in runTC (checkEh ty tm) (natty, ctx)
+         -- Right ()
+
+test19 = let cty = TyAtom (no natty)
+             zty = tag SList [cty]
+             yty = tup [TyEnum (no natty), var 2]
+             xty = tup [TyEnum (no natty), atoms]
+             ty  = tup [TyEnum (no natty), var 2 + atoms]
+             atoms = f "a" + f "b" + f "c"
+             tm = var 1
+             ctx = VN :# zty :# yty :# xty
+             f s = tup [One (no natty), At s]
+         in runTC (checkEh ty tm) (natty, ctx)
+         -- Right ()
