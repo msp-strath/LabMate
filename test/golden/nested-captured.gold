@@ -1,0 +1,23 @@
+ret > ExitSuccess
+out >
+out > f1()
+out >
+out > function x = f1()
+out >   % This is an example of a renaming the Matlab editor gets wrong.
+out >   % It should be disallowed, because it captures w in f2.
+out >
+out >   %> rename z w
+out >   %< Error: renaming not possible: the new name will be needed later.
+out >
+out >   z = 5;
+out >   k = f2();
+out >   x = z;
+out >
+out >   function y = f2()
+out >     w = 7;
+out >     y = w;
+out >   end
+out > end
+out >
+out >
+out >

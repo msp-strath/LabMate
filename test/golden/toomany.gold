@@ -1,0 +1,9 @@
+ret > ExitSuccess
+out > x = 5
+out > y = 7
+out > %> rename x z
+out > %< Error: renaming not possible: too many new names for the same old name.
+out > %> rename x w
+out > %< Error: renaming not possible: too many new names for the same old name.
+out >
+out >

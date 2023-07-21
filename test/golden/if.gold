@@ -1,0 +1,11 @@
+ret > ExitSuccess
+out > if r == c
+out >   % comment
+out >   A(r,c) = 2;
+out > elseif abs(r-c) == 1
+out >   A(r,c) = -1;
+out > else
+out >   A(r,c) = 0;
+out > end
+out >
+out >

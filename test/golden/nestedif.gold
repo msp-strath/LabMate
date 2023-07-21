@@ -1,0 +1,18 @@
+ret > ExitSuccess
+out > if a==1 % Front layer
+out >   if (b==0)
+out >     c=[];
+out >   else
+out >     1;
+out >   end
+out >   nz = [n1];
+out > else % Back layer
+out >   if (d==0)
+out >     n2 = nz;
+out >   else
+out >    n1 = 2;
+out >   end
+out >   nz = [];
+out > end
+out >
+out >
