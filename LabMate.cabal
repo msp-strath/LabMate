@@ -48,12 +48,9 @@ common haskell
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances
 
-executable labmate
+library
     import:           haskell
-    main-is:          Main.hs
-
-    -- Modules included in this executable, other than Main.
-    other-modules:    BRect,
+    exposed-modules:  BRect,
                       Bwd,
                       Hide,
                       Lex,
@@ -70,10 +67,33 @@ executable labmate
                       Term.Vec,
                       CoreTT,
                       NormalForm
-                      Paths_LabMate
-    autogen-modules:  Paths_LabMate
-
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     hs-source-dirs:   src
     default-language: Haskell2010
+
+executable labmate
+    import:           haskell
+    main-is:          src/Main.hs
+    build-depends:    LabMate
+    other-modules:    Paths_LabMate
+    autogen-modules:  Paths_LabMate
+    default-language: Haskell2010
+
+
+test-suite labmate-tests
+  import:              haskell
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test/
+  main-is:             Test/Main.hs
+  other-modules:       Test.CoreTT
+  build-depends:       base <5
+                     , directory
+                     , filepath
+                     , tasty
+                     , tasty-silver
+                     , tasty-hunit
+                     , LabMate
+  build-tool-depends:  LabMate:labmate
+  default-extensions:  OverloadedStrings
+  default-language:    Haskell2010

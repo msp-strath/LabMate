@@ -1,0 +1,8 @@
+ret > ExitSuccess
+out > x = 5
+out > y = 7
+out > %> rename x y
+out > %< Error: renaming not possible: the new name will be needed later.
+out > % expected an error - this is capturing rename
+out >
+out >

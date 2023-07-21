@@ -1,0 +1,15 @@
+ret > ExitSuccess
+out > function [] = nestedrename()
+out >
+out >   function y = f1()
+out >     %< renamed x y
+out >     y = 5;
+out >   end
+out >
+out >   function y = f2()
+out >     y = 7;
+out >   end
+out >
+out > end
+out >
+out >

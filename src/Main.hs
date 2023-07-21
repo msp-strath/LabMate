@@ -14,6 +14,8 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 
 import Data.Bifunctor (first)
+import Control.Monad (unless)
+import Data.List
 
 import Bwd
 
@@ -34,23 +36,26 @@ type ParseError = (Maybe FilePath, Reach, Int)
 
 main :: IO ()
 main = do
-  getArgs >>= \case
-    [] -> stdin >>= go
-    ["-"] -> stdin >>= go
+  getArgs >>= noVersionEh >>= \(hideVersion, args) ->
+    case args of
+    [] -> stdin >>= go hideVersion
+    ["-"] -> stdin >>= go hideVersion
     [f] -> do
       doesDirectoryExist f >>= \case
         True -> actDir f
-        False -> actFile f >>= go
+        False -> actFile f >>= go hideVersion
     x -> do
       putStrLn $ "Unrecognised arguments: " ++ show x
       exitWith fatalExitCode
  where
    stdin = T.getContents >>= actInput
-   go (Right (tab, cs@(_ :<=: (n,src)))) = do
+   go hideVersion (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = run (initMachine cs tab)
-      putStrLn ("%< LabMate " ++ showVersion version)
+      unless hideVersion $
+        putStrLn ("%< LabMate " ++ showVersion version)
       putStrLn $ reassemble n out
-   go (Left e) = do printError e; exitWith fatalExitCode
+   go _ (Left e) = do printError e; exitWith fatalExitCode
+   noVersionEh args = pure $ first (not . null) . partition (== "--no-version") $ args
 
 printError :: ParseError -> IO ()
 printError (f, r, n) = do

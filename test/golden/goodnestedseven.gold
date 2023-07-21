@@ -1,0 +1,10 @@
+ret > ExitSuccess
+out > function g
+out >   x = 7;
+out >
+out >   function y = f
+out >     y = [ (x + x) 12 ];
+out >   end
+out > end
+out >
+out >

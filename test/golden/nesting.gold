@@ -1,0 +1,36 @@
+ret > ExitSuccess
+out > %{
+out >
+out >
+out > > input nesting
+out > outer :
+out >   field : simple field @Km
+out >   inner_1 :
+out >     nlayer : contains the @number of layers (2 or 3) in the sample
+out >     inner_nesting :
+out >       another_field : @number
+out >   another_field : @number
+out >   inner_2 :
+out >      array : @inner_1.nlayer in @mm
+out > %}
+out > %<{
+out > function outer = nesting(fname);
+out > f1 = fopen(fname);
+out > c1 = textscan(f1, `%f`);
+out > src = c1{1};
+out > fclose(f1);
+out > readPtr = 1;
+out > outer.field = src[readPtr];
+out > readPtr = readPtr + 2;
+out > outer.inner_1.nlayer = src[readPtr];
+out > readPtr = readPtr + 2;
+out > outer.inner_1.inner_nesting.another_field = src[readPtr];
+out > outer.another_field = src[readPtr];
+out > readPtr = readPtr + 2;
+out > for i = 1:outer.inner_1.nlayer
+out >     outer.inner_2.array[i] = 1e-3 * src[readPtr + i];
+out > end
+out >
+out > %<}
+out >
+out >

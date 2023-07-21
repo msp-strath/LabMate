@@ -1,0 +1,8 @@
+ret > ExitSuccess
+out > x = 5;
+out >
+out > %< renamed y x
+out >
+out > z = x + x;
+out >
+out >

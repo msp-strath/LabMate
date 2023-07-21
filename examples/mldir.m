@@ -1,6 +1,6 @@
 %>{
     %> input getinputsfromfile
-   % comment
+    % comment
     %> x : int % and another one
     %> y : string
 %>}

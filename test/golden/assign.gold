@@ -1,0 +1,9 @@
+ret > ExitSuccess
+out >
+out > %{
+out >   < renamed x y
+out > %}
+out >
+out > y = 5
+out >
+out >

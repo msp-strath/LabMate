@@ -1,0 +1,15 @@
+ret > ExitSuccess
+out > function inputvals = test
+out > % this is a comment
+out > for i = (1:3)
+out >   str2num(values{i});
+out >   a = [2 3;
+out >        ;
+out >        1 2+...
+out > 	  7
+out >        % while we are at it
+out >        4 5]
+out > end
+out >
+out >
+out >

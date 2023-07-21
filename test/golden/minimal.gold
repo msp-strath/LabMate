@@ -1,0 +1,42 @@
+ret > ExitSuccess
+out > %{
+out >   > input minimal
+out > test :
+out >   field1 : @Int (`field1` has integral type)
+out >   field2 : @Km (`field2` carries unit information)
+out >   array1 : @ms (`array1` is an array with three elements and each is stored in ms)
+out >     - one
+out >     - two
+out >     - three
+out >   array2 : (the first two entries store some lenghts recorded in mm, while the last one - in Km)
+out >     - one in @mm 
+out >     - two in @mm
+out >     - three in @Km
+out >   vec1 : @field1 elements of @mm (`vec1` is an array containing `field1` many entries, each stored in mm)
+out > %}
+out > %<{
+out > function test = minimal(fname);
+out > f1 = fopen(fname);
+out > c1 = textscan(f1, `%f`);
+out > src = c1{1};
+out > fclose(f1);
+out > readPtr = 1;
+out > test.field1 = src[readPtr];
+out > readPtr = readPtr + 1;
+out > test.field2 = src[readPtr];
+out > readPtr = readPtr + 1;
+out > for i = 1:3
+out >     test.array1[i] = 1e-3 * src[readPtr + i];
+out > end
+out > readPtr = readPtr + 3;
+out > test.array2[1] = 1e-3 * src[readPtr + 1];
+out > test.array2[2] = 1e-3 * src[readPtr + 2];
+out > test.array2[3] = src[readPtr + 3];
+out > readPtr = readPtr + 3;
+out > for i = 1:test.field1
+out >     test.vec1[i] = 1e-3 * src[readPtr + i];
+out > end
+out >
+out > %<}
+out >
+out >
