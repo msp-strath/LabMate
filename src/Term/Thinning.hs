@@ -125,6 +125,9 @@ instance (forall (n :: Nat). Ord (p n)) => Ord (p ^ m) where
     GT' -> GT
     EQ' Refl -> compare p q
 
+wk :: p ^ n -> p ^ S n
+wk (p :^ th) = p :^ No th -- faster than composition
+
 -- coproduct diagrams in (<= m) with the existential witness
 -- and its thinning being coproduct object
 type Cop l r m = Cov l r ^ m
@@ -146,6 +149,9 @@ rightAll :: n <= m -> Cov n m m
 rightAll (No th) = NS $ rightAll th
 rightAll (Su th) = SS $ rightAll th
 rightAll Ze      = ZZ
+
+leftAll :: n <= m -> Cov m n m
+leftAll = swapCov . rightAll
 
 lCov :: Natty l -> Cov l Z l
 lCov Zy = ZZ

@@ -8,11 +8,13 @@ import Control.Applicative
 -- pattern synonyms for the type bikeshedding
 
 pattern SType = "Type"
-pattern SOne = "One"
+pattern SOne  = "One"
 pattern SAbel = "Abel"
 pattern SList = "List"
 pattern SAtom = "Atom"
 pattern SEnum = "Enum"
+pattern SPi   = "Pi"
+pattern SSig  = "Sigma"
 
 pattern TyU th = A SType :^ th
 pattern TyU'  <- A SType :^ _
@@ -32,8 +34,27 @@ pattern TyAtom'  <- A SAtom :^ _
 pattern TyEnum th = A SEnum :^ th
 pattern TyEnum'  <- A SEnum :^ _
 
+pattern TyPi th = A SPi :^ th
+pattern TyPi'  <- A SPi :^ _
+
+pattern TySig th = A SSig :^ th
+pattern TySig'  <- A SSig :^ _
+
+pattern Sapp = "app"
+pattern Sfst = "fst"
+pattern Ssnd = "snd"
+
+pattern App th = A Sapp :^ th
+pattern App'  <- A Sapp :^ _
+
+pattern Fst th = A Sfst :^ th
+pattern Fst'  <- A Sfst :^ _
+
+pattern Snd th = A Ssnd :^ th
+pattern Snd'  <- A Ssnd :^ _
+
 newtype TC n x =
- TC { runTC :: (Natty n, Vec n (Term ^ n)) -> Either String x }
+ TC { runTC :: (Natty n, Vec n (Type ^ n)) -> Either String x }
 
 instance Functor (TC n) where
   fmap k (TC f) = TC $ fmap (fmap k) f
@@ -69,14 +90,28 @@ withScope c = do
   n <- scope
   nattily n c
 
+under
+  :: Type ^ n
+  -> TC (S n) () -- TODO: generalise over dischargable things
+  -> TC n ()
+under ty (TC f) = TC $ \(n, ctx) -> f (Sy n, wk <$> (ctx :# ty))
+
 typeEh :: Term ^ n -> TC n ()
 typeEh TyOne' = pure ()
 typeEh TyAtom' = pure ()
+typeEh TyU' = pure ()
 typeEh ty | Just ts <- tupEh ty = case ts of
         [TyAbel', t] -> typeEh t
         [TyList', t] -> typeEh t
-        [TyEnum', t] -> withScope $ let n = no natty
-                                    in checkEh (tup [TyList n, TyAtom n]) t
+        [TyEnum', t] -> withScope $
+          let n = no natty
+          in checkEh (tup [TyList n, TyAtom n]) t
+        [TyPi', s, t] | Just t' <- lamEh t -> do
+          typeEh s
+          under s $ typeEh t'
+        [TySig', s, t] | Just t' <- lamEh t -> do
+          typeEh s
+          under s $ typeEh t'
         _ -> fail "Not a type"
 typeEh ty  = do
   gotTy <- synthEh ty
@@ -124,6 +159,14 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
     True <$ checkEnumEh nfs tm
   (SOne, []) -> pure True
   (SAtom, []) | A _ :^ _ <- tm -> pure True
+  (SPi, [s, t]) | Just t' <- lamEh t, Just tm' <- lamEh tm ->
+    True <$ under s (checkEh t' tm')
+  (SSig, [s, t]) | Just t' <- lamEh t, Just (a@(a' :^ th), d) <- pairEh tm -> do
+    checkEh s a
+    n <- scope
+    let sig = ST (idSubst n) (leftAll th) a' :^ io n
+    let ty = checkEval (TyU (no n)) (t' //^ sig)
+    True <$ checkEh ty d
   (SType, []) -> True <$ typeEh tm
   _ -> pure False
 checkCanEh _ _ = pure False
@@ -156,7 +199,26 @@ checkEnumEh ts tm = withScope $ case tagEh tm of
 
 synthEh :: Term ^ n {- t -} -> TC n (Type ^ n) {- t \in T -}
 synthEh (V :^ i) = typeOf i
-synthEh tm = fail "synthEh says \"no\""
+synthEh tm = withScope $ case tagEh tm of
+  Just (Sapp, [f, a@(a' :^ th)]) -> synthEh f >>= \ty -> case tagEh ty of
+    Just (SPi, [s, t]) | Just t' <- lamEh t -> do
+      checkEh s a
+      n <- scope
+      let sig = ST (idSubst n) (leftAll th) a' :^ io n
+      pure $ checkEval (TyU (no n)) (t' //^ sig)
+    _ -> fail "synthEh: application of a non-function"
+  Just (Sfst, [p]) -> synthEh p >>= \ty -> case tagEh ty of
+    Just (SSig, [s, _]) -> pure s
+    _ -> fail "synthEh: fst projection fail"
+  Just (Ssnd, [p]) -> synthEh p >>= \ty -> case tagEh ty of
+    Just (SSig, [s, t]) | Just t' <- lamEh t -> do
+      n <- scope
+      pure $ case tag Sfst [p] of
+        (x :^ th) ->
+          let sig = ST (idSubst n) (leftAll th) x :^ io n
+          in checkEval (TyU (no n)) (t' //^ sig)
+    _ -> fail "synthEh: snd projection fail"
+  _ -> fail "synthEh says \"no\""
 
 checkEval
   :: NATTY n
@@ -236,7 +298,7 @@ sameEh
   -> TC n ()
 sameEh ty (t1, t2) = withScope $
   if propEh ty || checkEval ty t1 == checkEval ty t2 then pure ()
-  else fail "sameEh : different terms."
+  else fail "sameEh: different terms."
 
 subtypeEh :: Type ^ n -> Type ^ n -> TC n ()
 subtypeEh got want = scope >>= \n -> nattily n $
@@ -258,3 +320,39 @@ prefixEh ty ((a, elemA) : as) ((b, elemB) : bs)
       -- TODO: move prefixEh before sameEh call?
       prefixEh ty as bs
 prefixEh _ _ _ = fail "prefixEh"
+
+
+test1 = let ty = tup [TyPi (no natty), TyU (no natty), lam "X" body]
+            body = tup [TyPi (no natty), var 0, lam "x" (var 1)]
+         in runTC (typeEh ty) (natty, VN)
+
+test2 = let ty = tup [TyPi (no natty), TyU (no natty), lam "X" body]
+            body = tup [TyPi (no natty), var 0, lam "x" (var 1)]
+            tm = lam "X" $ lam "x" (var 0)
+         in runTC (checkEh ty tm) (natty, VN)
+
+test3 = let arr :: Term ^ S Z -> Term ^ S Z -> Term ^ S Z
+            arr src (tgt :^ th) = tag SPi [src, K tgt :^ th]
+            ty = tup [TyPi (no natty), TyU (no natty), lam "X" body]
+            body = (var 0 `arr` var 0) `arr` (var 0  `arr` var 0)
+            tm = lam "X" $ lam "f" $ lam "x" $
+              tag Sapp [var 1, tag Sapp [var 1, var 0]]
+         in runTC (checkEh ty tm) (natty, VN)
+
+test4 = let arr :: Term ^ S Z -> Term ^ S Z -> Term ^ S Z
+            arr src (tgt :^ th) = tag SPi [src, K tgt :^ th]
+            ty = tup [TyPi (no natty), TyU (no natty), lam "X" body]
+            body = (var 0 `arr` var 0) `arr` (var 0  `arr` var 0)
+            tm = lam "X" $ lam "f" $ lam "x" $
+              tag Sapp [var 1, tag Sapp [var 0, var 0]]
+         in runTC (checkEh ty tm) (natty, VN)
+         -- Left "synthEh: application of a non-function"
+
+test5 = let arr :: Term ^ S Z -> Term ^ S Z -> Term ^ S Z
+            arr src (tgt :^ th) = tag SPi [src, K tgt :^ th]
+            ty = tup [TyPi (no natty), TyU (no natty), lam "X" body]
+            body = (var 0 `arr` var 0) `arr` (var 0  `arr` var 0)
+            tm = lam "X" $ lam "f" $ lam "x" $
+              tag Sapp [var 1, tag Sapp [var 1, var 1]]
+         in runTC (checkEh ty tm) (natty, VN)
+         -- Left "sameEh: different terms."

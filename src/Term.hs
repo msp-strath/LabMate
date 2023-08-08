@@ -94,6 +94,11 @@ lam :: String -> Term ^ S n -> Term ^ n
 lam _ (t :^ No th) = K t :^ th
 lam x (t :^ Su th) = L (Hide x) t :^ th
 
+lamEh :: Term ^ n -> Maybe (Term ^ S n)
+lamEh (K t :^ th) = Just (t :^ No th)
+lamEh (L _ t :^ th) = Just (t :^ Su th)
+lamEh _ = Nothing
+
 subst :: NATTY n => Vec k (Term ^ n) -> Subst k ^ n
 subst VN = S0 :^ no natty
 subst (tz :# (t :^ ph))
@@ -187,6 +192,10 @@ roofLemma (SS u0) (ST sig u1 t)
   | Roof sigl u2 sigr <- roofLemma u0 sig
   , MiddleFour u3 u4 u5 <- middleFour u2 u1 (allCov (weeEnd (covr u1)))
   = Roof (ST sigl u3 t) u4 (ST sigr u5 t)
+
+idSubst :: Natty n -> Subst n n
+idSubst Zy  = S0
+idSubst (Sy n) = ST (idSubst n) (NS (lCov n)) V
 
 idSubstEh :: Subst k n -> Either (Positive k) (k == n)
 idSubstEh S0 = Right Refl

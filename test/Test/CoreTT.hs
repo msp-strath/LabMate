@@ -221,7 +221,7 @@ test17 = mkTest
          )
 
 test18 = mkTest
-         ( "TC Enum('a, 'b, 'c) x :: Enum('a, 'b)"
+         ( "TC Enum('a, 'b, 'c): x :: Enum('a, 'b)"
          , let cty = TyAtom (no natty)
                ty = tup [TyEnum (no natty), atoms]
                subty = tup [TyEnum (no natty), subatoms]
@@ -235,7 +235,7 @@ test18 = mkTest
          )
 
 test19 = mkTest
-         ( "TC Enum('a, 'b, 'c) y :: Enum(z + ('a, 'b, 'c))"
+         ( "TC Enum('a, 'b, 'c): y :: Enum(z + ('a, 'b, 'c))"
          , let cty = TyAtom (no natty)
                zty = tag SList [cty]
                yty = tup [TyEnum (no natty), var 2]

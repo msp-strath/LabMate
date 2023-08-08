@@ -59,7 +59,6 @@ data Frame
 data Fork = Solved | FunctionName Name
   deriving Show
 
-
 data LocaleType = ScriptLocale | FunctionLocale
   deriving (Show, Eq)
 
