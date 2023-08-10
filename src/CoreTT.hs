@@ -1,3 +1,4 @@
+{-# LANGUAGE FunctionalDependencies, UndecidableInstances #-}
 module CoreTT where
 
 import Control.Monad
@@ -27,7 +28,6 @@ pattern TyAbel'  <- A SAbel :^ _
 
 pattern TyList th = A SList :^ th
 pattern TyList'  <- A SList :^ _
-
 pattern TyAtom th = A SAtom :^ th
 pattern TyAtom'  <- A SAtom :^ _
 
@@ -41,8 +41,11 @@ pattern TySig th = A SSig :^ th
 pattern TySig'  <- A SSig :^ _
 
 pattern Sapp = "app"
+-- FIXME : we cannot use untaged pairs as values in Sigma types
+-- simultenously with tagged elimination
 pattern Sfst = "fst"
 pattern Ssnd = "snd"
+pattern Srad = "rad"
 
 pattern App th = A Sapp :^ th
 pattern App'  <- A Sapp :^ _
@@ -52,6 +55,54 @@ pattern Fst'  <- A Sfst :^ _
 
 pattern Snd th = A Ssnd :^ th
 pattern Snd'  <- A Ssnd :^ _
+
+pattern Rad th = A Srad :^ th
+pattern Rad'  <- A Srad :^ _
+
+{-
+class Mk t where
+  type Scope t :: Nat
+  mk :: t
+
+instance NATTY n => Mk (Term ^ n) where
+  type Scope (Term ^ n) = n
+  mk = Nil
+
+instance (Mk t, n ~ Scope t) => Mk (Term ^ n -> t) where
+  type Scope (Term ^ n -> t) = n
+  mk tm = _
+-}
+
+class From (s :: *) (n :: Nat) (c :: *) | c -> s n where
+  from :: (s -> Term ^ n, (s -> Term ^ n) -> c)
+  mk :: c
+  mk = k f where (f, k) = from
+
+instance NATTY n => From () n (Term ^ n) where
+  from = (\() -> Nil, ($()))
+
+instance (NATTY n, From s n c) => From (String, s) n (String -> c) where
+  from = (\(a, s) -> atom a <&> g s, \f a -> k (\s -> f (a, s)))
+    where
+      (g, k) = from
+
+instance (NATTY n, From s n c) => From (Term ^ n, s) n (Term ^ n -> c) where
+  from = (\(a, s) -> a <&> g s, \f a -> k (\s -> f (a, s)))
+    where
+      (g, k) = from
+{-
+foo0 :: Term ^ S (S (S Z))
+foo0 = mk
+
+foo1 :: Term ^ S (S (S Z))
+foo1 = mk "Foo"
+
+foo2 :: Term ^ S (S (S Z))
+foo2 = mk "Foo" (var 0)
+
+foo3 :: Term ^ S (S (S Z))
+foo3 = mk "Foo" (var 0) (var 2)
+-}
 
 newtype TC n x =
  TC { runTC :: (Natty n, Vec n (Type ^ n)) -> Either String x }
@@ -79,7 +130,7 @@ instance Monad (TC n) where
 instance MonadFail (TC n) where
   fail  = TC . const . Left
 
-typeOf :: (S Z <= n) -> TC n (Term ^ n)
+typeOf :: (S Z <= n) -> TC n (Type ^ n)
 typeOf i = TC $ Right . vonly . (i ?^) . snd
 
 scope :: TC n (Natty n)
@@ -92,8 +143,8 @@ withScope c = do
 
 under
   :: Type ^ n
-  -> TC (S n) () -- TODO: generalise over dischargable things
-  -> TC n ()
+  -> TC (S n) a
+  -> TC n a -- discharging the bound variable is the caller's problem
 under ty (TC f) = TC $ \(n, ctx) -> f (Sy n, wk <$> (ctx :# ty))
 
 typeEh :: Term ^ n -> TC n ()
@@ -125,14 +176,14 @@ checkEh
   -> TC n ()  {- Ty \ni tm -}
 checkEh ty tm = do
   n <- scope
-  wantTy <- checkEval (TyU (no n)) ty
+  wantTy <- typeEval ty
   isCanon <- checkCanEh wantTy tm
   if isCanon then pure () else do
     gotTy <- synthEh tm
     subtypeEh gotTy wantTy
 
 checkCanEh
-  :: Type ^ n {- Ty -}
+  :: NmTy ^ n {- Ty -}
   -> Term ^ n {- tm -}
   -> TC n Bool {- Ty \ni tm -}
 checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
@@ -164,12 +215,9 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
   (SAtom, []) | A _ :^ _ <- tm -> pure True
   (SPi, [s, t]) | Just t' <- lamEh t, Just tm' <- lamEh tm ->
     True <$ under s (checkEh t' tm')
-  (SSig, [s, t]) | Just t' <- lamEh t, Just (a@(a' :^ th), d) <- pairEh tm -> do
+  (SSig, [s, t]) | Just t' <- lamEh t, Just (a, d) <- pairEh tm -> withScope $ do
     checkEh s a
-    n <- scope
-    let sig = ST (idSubst n) (leftAll th) a' :^ io n
-    ty <- checkEval (TyU (no n)) (t' //^ sig)
-    True <$ checkEh ty d
+    True <$ checkEh (t' //^ sub0 (tag Srad [a, s])) d
   (SType, []) -> True <$ typeEh tm
   _ -> pure False
 checkCanEh _ _ = pure False
@@ -200,47 +248,106 @@ checkEnumEh ts tm = withScope $ case tagEh tm of
     subtypeEh ty (tag SEnum [nfListToTerm ts])
     pure Nothing
 
-synthEh :: Term ^ n {- t -} -> TC n (Type ^ n) {- t \in T -}
+synthEh
+  :: Term ^ n        {- t -}
+  -> TC n (Type ^ n) {- t \in T, T need *not* be normal -}
 synthEh (V :^ i) = typeOf i
 synthEh tm = case tagEh tm of
-  Just (Sapp, [f, a@(a' :^ th)]) -> synthEh f >>= \ty -> case tagEh ty of
-    Just (SPi, [s, t]) | Just t' <- lamEh t -> do
+  Just (Sapp, [f, a]) -> synthEhNorm f >>= \ty -> case tagEh ty of
+    Just (SPi, [s, t]) | Just t' <- lamEh t -> withScope $ do
       checkEh s a
-      n <- scope
-      let sig = ST (idSubst n) (leftAll th) a' :^ io n
-      checkEval (TyU (no n)) (t' //^ sig)
+      pure (t' //^ sub0 (tag Srad [a, s]))
     _ -> fail "synthEh: application of a non-function"
-  Just (Sfst, [p]) -> synthEh p >>= \ty -> case tagEh ty of
+  Just (Sfst, [p]) -> synthEhNorm p >>= \ty -> case tagEh ty of
     Just (SSig, [s, _]) -> pure s
     _ -> fail "synthEh: fst projection fail"
-  Just (Ssnd, [p]) -> synthEh p >>= \ty -> case tagEh ty of
-    Just (SSig, [s, t]) | Just t' <- lamEh t -> withScope $ do
-      n <- scope
-      case tag Sfst [p] of
-        (x :^ th) -> do
-          let sig = ST (idSubst n) (leftAll th) x :^ io n
-          checkEval (TyU (no n)) (t' //^ sig)
+  Just (Ssnd, [p]) -> synthEhNorm p >>= \ty -> case tagEh ty of
+    Just (SSig, [s, t]) | Just t' <- lamEh t -> withScope $
+      pure (t' //^ sub0 (tag Sfst [p]))
     _ -> fail "synthEh: snd projection fail"
+  Just (Srad, [tm, ty]) -> ty <$ typeEh ty <* checkEh ty tm
   _ -> fail "synthEh says \"no\""
+
+synthEhNorm :: Term ^ n {- t -} -> TC n (NmTy ^ n) {- t \in T -}
+synthEhNorm tm = synthEh tm >>= typeEval
+
+checkNormEval
+  :: NmTy ^ n {- Ty -}
+  -> Term ^ n {- tm -}
+  -- must be Ty \ni tm, i.e. already checked
+  -> TC n (Term ^ n)
+checkNormEval ty tm = case ty of
+  TyU'   -> typeEval tm
+  TyOne' -> withScope $ pure Nil
+  ty -> case tagEh ty of
+    Just (SAbel, [genTy]) -> withScope $ nfAbelToTerm <$> termToNFAbel genTy tm
+    Just (SList, [genTy]) -> withScope $ propEh genTy >>= \case
+      True  -> nfAbelToTerm <$> termToNFAbel genTy tm
+      False -> nfListToTerm <$> termToNFList genTy tm
+    Just (SEnum, [as]) -> withScope $ termToNFList (At SAtom) as >>= \x ->
+      pure $ case findInEnum tm x of
+        Just (i, _)  -> int i
+        -- TODO : handle neutrals, reduce further
+        _ -> tm
+    _ -> fst <$> evalSynth tm
 
 checkEval
   :: Type ^ n {- Ty -}
   -> Term ^ n {- tm -}
   -- must be Ty \ni tm, i.e. already checked
   -> TC n (Term ^ n)
-checkEval ty tm
-  | Just [TyAbel', genTy] <- tupEh ty = withScope $ nfAbelToTerm <$> termToNFAbel genTy tm
-  | Just [TyList', genTy] <- tupEh ty = withScope $ propEh genTy >>= \case
-      True  -> nfAbelToTerm <$> termToNFAbel genTy tm
-      False -> nfListToTerm <$> termToNFList genTy tm
-  | Just [TyEnum', as] <- tupEh ty = withScope $
-    termToNFList (At SAtom) as >>= \x ->
-      pure $ case findInEnum tm x of
-        Just (i, _)  -> int i
-        -- TODO : handle neutrals, reduce further
-        _ -> tm
-checkEval TyOne' _ = withScope $ pure Nil
-checkEval _ tm = pure tm
+checkEval ty tm = do
+  ty <- typeEval ty
+  checkNormEval ty tm
+
+typeEval :: Type ^ n -> TC n (NmTy ^ n)
+typeEval ty = withScope $ case ty of
+  TyU' -> pure ty
+  TyOne' -> pure ty
+  TyAtom' -> pure ty
+  ty -> case tagEh ty of
+    Just (SAbel, [genTy]) -> mk SAbel <$> typeEval genTy
+    Just (SList, [genTy]) -> mk SList <$> typeEval genTy
+    Just (SEnum, [as]) -> mk SEnum <$> checkNormEval (mk SList (atom SAtom)) as
+    Just (SPi, [s, t]) | Just (x, t') <- lamNameEh t ->
+      mk SPi <$> typeEval s <*> (lam x <$> under s (typeEval t'))
+    Just (SSig, [s, t]) | Just (x, t') <- lamNameEh t ->
+      mk SSig <$> typeEval s <*> (lam x <$> under s (typeEval t'))
+    _ -> fst <$> evalSynth ty
+
+evalSynth :: Term ^ n -> TC n (Term ^ n, Type ^ n)
+evalSynth tm = case tm of
+  V :^ i -> (tm,) <$> typeOf i
+  _ -> withScope $ case tagEh tm of
+    Just (Srad, [tm, ty]) -> do
+      ty <- typeEval ty
+      (, ty) <$> checkNormEval ty tm
+    Just (Sapp, [f, a]) -> do
+      (f, ty) <- evalSynth f
+      ty <- typeEval ty
+      (a, resTy, sig) <- case tagEh ty of
+        Just (SPi, [s, t]) | Just t' <- lamEh t -> do
+          a <- checkNormEval s a
+          let sig = sub0 (mk Srad a s)
+          pure (a, t' //^ sig, sig)
+        _ -> fail "evalSynth: application of a non-function."
+      (, resTy) <$> case lamEh f of
+        Just bd -> checkEval resTy (bd //^ sig)
+        Nothing -> pure $ mk Sapp f a
+    Just (Sfst, [p]) -> do
+      (p, ty) <- evalSynth p
+      ty <- typeEval ty
+      resTy <- case tagEh ty of
+        Just (SSig, [s, _]) -> pure s
+        _ -> fail "evalSynth: first projection of a non-pair."
+      pure $ (, resTy) $ case pairEh p of
+        Just (s, _)-> s
+        Nothing -> mk Sfst p
+    Just (Ssnd, [p]) -> do
+      (p, ty) <- evalSynth p
+      ty <- typeEval ty
+      _
+    _ -> _
 
 -- TODO : handle neutral x
 findInEnum :: Term ^ n -> NFList n -> Maybe (Integer, NFList n)
@@ -292,7 +399,7 @@ termToNFAbel ty tm = pure $ NFAbel 0 [(tm, 1)]
 propEh :: Type ^ n -> TC n Bool
 propEh ty = do
   n <- scope
-  checkEval (TyU (no n)) ty >>= \case
+  typeEval ty >>= \case
     TyOne' -> pure True
     _      -> pure False
 
@@ -327,7 +434,6 @@ prefixEh ty ((a, elemA) : as) ((b, elemB) : bs)
       -- TODO: move prefixEh before sameEh call?
       prefixEh ty as bs
 prefixEh _ _ _ = fail "prefixEh"
-
 
 test1 = let ty = tup [TyPi (no natty), TyU (no natty), lam "X" body]
             body = tup [TyPi (no natty), var 0, lam "x" (var 1)]

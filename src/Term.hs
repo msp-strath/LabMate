@@ -28,9 +28,10 @@ data Term (n :: Nat) where       -- object variable support
   -- metavar usage
   M :: (Name, Natty k) -> Subst k n -> Term n
 
--- for documentary purposes; used only when we *know*
--- (and not merely hope) a term is a type
+-- for documentary purposes; used only when we *know* (and not merely
+-- hope) a term is a type and a normalised type, respectively
 type Type = Term
+type NmTy = Type
 
 instance Eq (Term n) where
   t == t' = compare t t' == EQ
@@ -99,6 +100,11 @@ lamEh (K t :^ th) = Just (t :^ No th)
 lamEh (L _ t :^ th) = Just (t :^ Su th)
 lamEh _ = Nothing
 
+lamNameEh :: Term ^ n -> Maybe (String, Term ^ S n)
+lamNameEh (K t :^ th) = Just ("_", t :^ No th)
+lamNameEh (L (Hide x) t :^ th) = Just (x, t :^ Su th)
+lamNameEh _ = Nothing
+
 subst :: NATTY n => Vec k (Term ^ n) -> Subst k ^ n
 subst VN = S0 :^ no natty
 subst (tz :# (t :^ ph))
@@ -142,6 +148,10 @@ substSrc (ST sig _ _) = Sy (substSrc sig)
 substSupport :: Subst k n -> Natty n
 substSupport S0 = Zy
 substSupport (ST _ u _) = bigEnd (covl u)
+
+sub0 :: Term ^ n -> Subst (S n) ^ n
+sub0 (tm :^ th) = let n = bigEnd th
+  in ST (idSubst n) (leftAll th) tm :^ io n
 
 tmShow :: forall n
        .  Bool         -- is the term a cdr
