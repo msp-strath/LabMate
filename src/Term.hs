@@ -12,27 +12,54 @@ import Hide
 
 type Name = String
 
-data Term (n :: Nat) where       -- object variable support
-  -- the object var
-  V :: Term (S Z)
-  -- atom
-  A :: String -> Term Z
-  -- integer constants
-  I :: Integer -> Term Z
-  -- pairing
-  P :: Term l -> Cov l r n -> Term r -> Term n
-  -- constant function
-  K :: Term n -> Term n
-  -- relevant function
-  L :: Hide String -> Term (S n) -> Term n
+data Sort
+  = Syn
+  | Chk
+  | One
+  | Prd Sort Sort
+  | Sub Nat
+  -- | SynTo Sort    -- Syn -> _, i.e., variable binding
+  deriving (Show)
+
+data Ctor (s :: Sort) (t :: Sort) where
+  -- atoms
+  A :: String -> Ctor One Chk
+  -- integers
+  I :: Integer -> Ctor One Chk
+  -- embedding
+  E :: Ctor Syn Chk
+  -- radicals
+  R :: Ctor (Prd Chk Chk) Syn
+  -- pairs (or `t`uples)
+  T :: Ctor (Prd Chk Chk) Chk
+  -- elimintaion forms (or `d`esctructors)
+  D :: Ctor (Prd Syn Chk) Syn
   -- metavar usage
-  M :: (Name, Natty k) -> Subst k n -> Term n
+  M :: (Name, Natty k) -> Ctor (Sub k) Chk
+  -- subst
+  S0 :: Ctor One (Sub Z)
+  ST :: Ctor (Prd (Sub n) Syn) (Sub (S n))
+
+data Term (s :: Sort) (n :: Nat) where       -- object variable support
+  -- the object var
+  V :: Term Syn (S Z)
+  -- empty tuple
+  U :: Term One Z
+  -- pairing
+  P :: Term a l -> Cov l r n -> Term b r -> Term (Prd a b) n
+  -- constant function
+  K :: Term Chk n -> Term Chk n
+  -- relevant function
+  L :: Hide String -> Term Chk (S n) -> Term Chk n
+  -- strictness annotation to shut up the coverage checker
+  (:$) :: !(Ctor s t) -> Term s n -> Term t n
 
 -- for documentary purposes; used only when we *know* (and not merely
 -- hope) a term is a type and a normalised type, respectively
 type Type = Term
 type NmTy = Type
 
+{-
 instance Eq (Term n) where
   t == t' = compare t t' == EQ
 
@@ -100,7 +127,7 @@ lamEh (K t :^ th) = Just (t :^ No th)
 lamEh (L _ t :^ th) = Just (t :^ Su th)
 lamEh _ = Nothing
 
-lamNameEh :: Term ^ n -> Maybe (String, Term ^ S n)
+lamNameEh :: Term ^ n -> Maybe (Name, Term ^ S n)
 lamNameEh (K t :^ th) = Just ("_", t :^ No th)
 lamNameEh (L (Hide x) t :^ th) = Just (x, t :^ Su th)
 lamNameEh _ = Nothing
@@ -134,25 +161,40 @@ tagEh (A s@(_:_) :^ _) = Just (s, [])
 tagEh t = case tupEh t of
   Just ((A s@(_:_) :^ _):ts) -> Just (s, ts)
   _   -> Nothing
-
+-}
 -------------------------------------------
-
+{-
 data Subst (srcScope :: Nat) (tgtSupport :: Nat) where
   S0 :: Subst Z Z
   ST :: Subst k l -> Cov l r n -> Term r -> Subst (S k) n
+-}
+type Subst k = Term (Sub k)
+
 
 substSrc :: Subst k n -> Natty k
-substSrc S0 = Zy
-substSrc (ST sig _ _) = Sy (substSrc sig)
+substSrc (S0 :$ U) = Zy
+substSrc (ST :$ P t _ _) = Sy (substSrc t)
 
 substSupport :: Subst k n -> Natty n
-substSupport S0 = Zy
-substSupport (ST _ u _) = bigEnd (covl u)
+substSupport (S0 :$ U) = Zy
+substSupport (ST :$ P _ u _) = bigEnd (covl u)
 
-sub0 :: Term ^ n -> Subst (S n) ^ n
+idSubst :: Natty n -> Subst n n
+idSubst Zy = S0 :$ U
+idSubst (Sy n) = ST :$ P (idSubst n) (NS (lCov n)) V
+
+idSubstEh :: Subst k n -> Either (Positive k) (k == n)
+idSubstEh (S0 :$ U) = Right Refl
+idSubstEh (ST :$ P sig (NS u) V) | Refl <- allRight (swapCov u) = case idSubstEh sig of
+  Left (IsSy n) -> Left $ IsSy (Sy n)
+  Right Refl -> Right Refl
+idSubstEh (ST :$ P t _ _) = Left (IsSy (substSrc t))
+
+sub0 :: Term Syn ^ n -> Subst (S n) ^ n
 sub0 (tm :^ th) = let n = bigEnd th
-  in ST (idSubst n) (leftAll th) tm :^ io n
+  in (ST :$ P (idSubst n) (leftAll th) tm) :^ io n
 
+{-
 tmShow :: forall n
        .  Bool         -- is the term a cdr
        -> Term ^ n
@@ -202,17 +244,6 @@ roofLemma (SS u0) (ST sig u1 t)
   | Roof sigl u2 sigr <- roofLemma u0 sig
   , MiddleFour u3 u4 u5 <- middleFour u2 u1 (allCov (weeEnd (covr u1)))
   = Roof (ST sigl u3 t) u4 (ST sigr u5 t)
-
-idSubst :: Natty n -> Subst n n
-idSubst Zy  = S0
-idSubst (Sy n) = ST (idSubst n) (NS (lCov n)) V
-
-idSubstEh :: Subst k n -> Either (Positive k) (k == n)
-idSubstEh S0 = Right Refl
-idSubstEh (ST sig (NS u) V) | Refl <- allRight (swapCov u) = case idSubstEh sig of
-  Left (IsSy n) -> Left $ IsSy (Sy n)
-  Right Refl -> Right Refl
-idSubstEh (ST sig _ _) = Left (IsSy (substSrc sig))
 
 instance Eq (Subst k n) where
   s == t = compare s t == EQ
@@ -267,3 +298,4 @@ theCtx = VN :# "z" :# "y" :# "x"
 
 testShow :: Term ^ S (S (S Z)) -> IO ()
 testShow t = putStrLn (tmShow False t theCtx)
+-}

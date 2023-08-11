@@ -1,4 +1,4 @@
-{-# LANGUAGE FunctionalDependencies, UndecidableInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 module CoreTT where
 
 import Control.Monad
@@ -59,38 +59,32 @@ pattern Snd'  <- A Ssnd :^ _
 pattern Rad th = A Srad :^ th
 pattern Rad'  <- A Srad :^ _
 
-{-
 class Mk t where
   type Scope t :: Nat
+  type Uncurry t :: *
+
+  from :: (Uncurry t -> Term ^ Scope t, (Uncurry t -> Term ^ Scope t) -> t)
+
   mk :: t
+  mk = k f where (f, k) = from
 
 instance NATTY n => Mk (Term ^ n) where
   type Scope (Term ^ n) = n
-  mk = Nil
-
-instance (Mk t, n ~ Scope t) => Mk (Term ^ n -> t) where
-  type Scope (Term ^ n -> t) = n
-  mk tm = _
--}
-
-class From (s :: *) (n :: Nat) (c :: *) | c -> s n where
-  from :: (s -> Term ^ n, (s -> Term ^ n) -> c)
-  mk :: c
-  mk = k f where (f, k) = from
-
-instance NATTY n => From () n (Term ^ n) where
+  type Uncurry (Term ^ n) = ()
   from = (\() -> Nil, ($()))
 
-instance (NATTY n, From s n c) => From (String, s) n (String -> c) where
+instance (Mk t, NATTY (Scope t)) => Mk (String -> t) where
+  type Scope (String -> t) = Scope t
+  type Uncurry (String -> t) = (String, Uncurry t)
   from = (\(a, s) -> atom a <&> g s, \f a -> k (\s -> f (a, s)))
-    where
-      (g, k) = from
+    where (g, k) = from
 
-instance (NATTY n, From s n c) => From (Term ^ n, s) n (Term ^ n -> c) where
+instance (Mk t, NATTY n, Scope t ~ n) => Mk (Term ^ n -> t) where
+  type Scope (Term ^ n -> t) = n
+  type Uncurry (Term ^ n -> t) = (Term ^ n, Uncurry t)
   from = (\(a, s) -> a <&> g s, \f a -> k (\s -> f (a, s)))
-    where
-      (g, k) = from
-{-
+    where (g, k) = from
+
 foo0 :: Term ^ S (S (S Z))
 foo0 = mk
 
@@ -102,7 +96,7 @@ foo2 = mk "Foo" (var 0)
 
 foo3 :: Term ^ S (S (S Z))
 foo3 = mk "Foo" (var 0) (var 2)
--}
+
 
 newtype TC n x =
  TC { runTC :: (Natty n, Vec n (Type ^ n)) -> Either String x }
@@ -346,8 +340,8 @@ evalSynth tm = case tm of
     Just (Ssnd, [p]) -> do
       (p, ty) <- evalSynth p
       ty <- typeEval ty
-      _
-    _ -> _
+      undefined    -- TODO: FIXME
+    _ -> undefined -- TODO: FIXME
 
 -- TODO : handle neutral x
 findInEnum :: Term ^ n -> NFList n -> Maybe (Integer, NFList n)
