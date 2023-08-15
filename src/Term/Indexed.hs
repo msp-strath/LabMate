@@ -5,6 +5,7 @@ data (==) :: a -> a -> * where
 
 -- `qs` is usually a tuple of equations
 data Ordering' eqs = LT' | EQ' eqs | GT'
+  deriving Functor
 
 fromOrd :: a -> Ordering -> Ordering' a
 fromOrd a = \case

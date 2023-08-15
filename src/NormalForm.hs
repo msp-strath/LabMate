@@ -5,11 +5,11 @@ import Term
 pattern Splus = "plus"
 pattern Sone = "one"
 
-pattern EPlus th <- A Splus :$ U :^ th
-pattern EPlus'   <- A Splus :$ U :^ _
+--pattern EPlus th <- A Splus :$ U :^ th
+pattern EPlus  <- Atom Splus
 
-pattern EOne th <- A Sone :$ U :^ th
-pattern EOne'   <- A Sone :$ U :^ _
+--pattern EOne th <- A Sone :$ U :^ th
+pattern EOne   <- Atom Sone
 
 data NFAbel'
  t {- terms -}
@@ -61,7 +61,7 @@ nfAbelToTerm NFAbel{..} = case (nfConst, nfStuck) of
 instance NATTY n => Num (Term Chk ^ n) where
   s + t = tup [atom Splus, s, t]
   s * t = case s of
-   I i :$ U :^ th -> tup [s, t]
+   Intg i -> tup [s, t]
   abs = undefined
   signum = undefined
   fromInteger = int

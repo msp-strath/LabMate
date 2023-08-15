@@ -20,12 +20,6 @@ data Sort
   | Sub Nat
   deriving (Eq, Show)
 
-type family Fst (t :: Sort) where
-  Fst (Prd a b) = a
-
-type family Snd (t :: Sort) where
-  Snd (Prd a b) = b
-
 data Ctor (s :: Sort) (t :: Sort) where
   -- atoms
   A :: String -> Ctor One Chk
@@ -117,25 +111,30 @@ instance Ord (Term s n) where
 var :: S Z <= n -> Term Syn ^ n
 var = (V :^)
 
+evar :: S Z <= n -> Term Chk ^ n
+evar = (E $^). var
+
 atom :: NATTY n => String -> Term Chk ^ n
 atom s = (A s :$ U) :^ no natty
 
-pattern Atom :: (NATTY n) => (s ~ Chk) => String -> Term s ^ n
-pattern Atom s <- (A s :$ U) :^ _
-   where Atom s = (A s :$ U) :^ no natty
+pattern Atom :: () => (s ~ Chk) => String -> Term s ^ n
+pattern Atom s <- A s :$ U :^ _
 
 nil :: NATTY n => Term Chk ^ n
 nil = atom ""
+
+pattern Nil :: () => (s ~ Chk) => Term s ^ n
+pattern Nil <- Atom ""
 
 nilEh :: Term s ^ n -> Maybe ()
 nilEh (A "" :$ U :^ _) = Just ()
 nilEh _ = Nothing
 
-pattern Nil :: (NATTY n) => (s ~ Chk) => Term s ^ n
-pattern Nil <- Atom ""
-
 int :: NATTY n => Integer -> Term Chk ^ n
 int i = (I i :$ U) :^ no natty
+
+pattern Intg :: () => (s ~ Chk) => Integer -> Term s ^ n
+pattern Intg i <- I i :$ U :^ _
 
 infixr 5 <&>
 (<&>) :: Term s ^ n -> Term t ^ n -> Term (Prd s t) ^ n
@@ -155,7 +154,7 @@ c $? _ = Nothing
 -- if we don't now that we are in Chk, we cannot really ask for
 -- canonical pairs
 pairEh :: Term Chk ^ n -> Maybe (Term Chk ^ n, Term Chk ^ n)
-pairEh t = split <$> (T $? t)
+pairEh t = split <$> T $? t
 
 lam :: String -> Term Chk ^ S n -> Term Chk ^ n
 lam _ (t :^ No th) = K t :^ th
@@ -191,7 +190,6 @@ tupEh t = do
   (h, t) <- pairEh t
   (h :) <$> tupEh t
 
-
 type Tag = String
 
 tag :: NATTY n => Tag -> [Term Chk ^ n] -> Term Chk ^ n
@@ -207,27 +205,39 @@ tagEh t = case tupEh t of
 
 type Subst k = Term (Sub k)
 
+{-# COMPLETE Sub0, SubT #-}
+
+pattern Sub0 :: () => (k ~ Z, n ~ Z) => Subst k n
+pattern Sub0 = S0 :$ U
+
+pattern SubT :: () => (k ~ S j)
+             => Subst j l
+             -> Cov l r n
+             -> Term Syn r
+             -> Subst k n
+pattern SubT l u r = ST :$ P l u r
+
 substSrc :: Subst k n -> Natty k
-substSrc (S0 :$ U) = Zy
-substSrc (ST :$ P t _ _) = Sy (substSrc t)
+substSrc Sub0 = Zy
+substSrc (SubT t _ _) = Sy (substSrc t)
 
 substSupport :: Subst k n -> Natty n
-substSupport (S0 :$ U) = Zy
-substSupport (ST :$ P _ u _) = bigEnd (covl u)
+substSupport Sub0 = Zy
+substSupport (SubT _ u _) = bigEnd (covl u)
 
 wkSubst :: Subst k n -> Subst (S k) (S n)
-wkSubst sig = ST :$ P sig (NS (lCov (substSupport sig))) V
+wkSubst sig = SubT sig (NS (lCov (substSupport sig))) V
 
 idSubst :: Natty n -> Subst n n
 idSubst Zy = S0 :$ U
 idSubst (Sy n) = wkSubst (idSubst n)
 
 idSubstEh :: Subst k n -> Either (Positive k) (k == n)
-idSubstEh (S0 :$ U) = Right Refl
-idSubstEh (ST :$ P sig (NS u) V) | Refl <- allRight (swapCov u) = case idSubstEh sig of
+idSubstEh Sub0 = Right Refl
+idSubstEh (SubT sig (NS u) V) | Refl <- allRight (swapCov u) = case idSubstEh sig of
   Left (IsSy n) -> Left $ IsSy (Sy n)
   Right Refl -> Right Refl
-idSubstEh (ST :$ P t _ _) = Left (IsSy (substSrc t))
+idSubstEh (SubT t _ _) = Left (IsSy (substSrc t))
 
 sub0 :: Term Syn ^ n -> Subst (S n) ^ n
 sub0 (tm :^ th) = let n = bigEnd th
@@ -253,12 +263,12 @@ tmShow b (L (Hide nm) tm :^ th) ctx = concat [barIf b, "(\\", x, ". ", tmShow Fa
 tmShow b (E :$ t :^ th) ctx = tmShow b (t :^ th) ctx
 tmShow b (M m :$ sig :^ th) ctx = barIf b ++ show m ++ case idSubstEh sig of
   Left (IsSy n) -> case sig of
-    ST :$ P sig u t -> concat ["{", substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, "}"]
+    SubT sig u t -> concat ["{", substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, "}"]
   Right Refl -> ""
   where
     substShow :: forall j n . Subst j ^ n -> Vec n String -> String
-    substShow (S0 :$ U :^ _) _ = ""
-    substShow (ST :$ P sig u t :^ th) ctx = concat [substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, ", "]
+    substShow (Sub0 :^ _) _ = ""
+    substShow (SubT sig u t :^ th) ctx = concat [substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, ", "]
 tmShow b (T :$ P tl u tr :^ th) ctx =
   if b then " " ++ s else "[" ++ s ++ "]"
   where
@@ -273,19 +283,19 @@ data Roof :: Nat -> Nat -> Nat -> * where
   Roof :: Subst l l' -> Cov l' r' n -> Subst r r' -> Roof l r n
 
 roofLemma :: Cov l r k -> Subst k n -> Roof l r n
-roofLemma ZZ (S0 :$ U) = Roof (S0 :$ U) ZZ (S0 :$ U)
-roofLemma (SN u0) (ST :$ P sig u1 t)
+roofLemma ZZ Sub0 = Roof Sub0 ZZ Sub0
+roofLemma (SN u0) (SubT sig u1 t)
   | Roof sigl u2 sigr <- roofLemma u0 sig
   , u3 :^\^: u4 <- rotateRCov (swapCov u2) u1
-  = Roof (ST :$ P sigl u4 t) (swapCov u3) sigr
-roofLemma (NS u0) (ST :$ P sig u1 t)
+  = Roof (SubT sigl u4 t) (swapCov u3) sigr
+roofLemma (NS u0) (SubT sig u1 t)
   | Roof sigl u2 sigr <- roofLemma u0 sig
   , u3 :^\^: u4 <- rotateRCov u2 u1
-  = Roof sigl u3 (ST :$ P sigr u4 t)
-roofLemma (SS u0) (ST :$ P sig u1 t)
+  = Roof sigl u3 (SubT sigr u4 t)
+roofLemma (SS u0) (SubT sig u1 t)
   | Roof sigl u2 sigr <- roofLemma u0 sig
   , MiddleFour u3 u4 u5 <- middleFour u2 u1 (allCov (weeEnd (covr u1)))
-  = Roof (ST :$ P sigl u3 t) u4 (ST :$ P sigr u5 t)
+  = Roof (SubT sigl u3 t) u4 (SubT sigr u5 t)
 
 class Substable (t :: Nat -> *) where
 
@@ -301,7 +311,7 @@ class Substable (t :: Nat -> *) where
 
 instance Substable (Term s) where
 
-  V /// (ST :$ P (S0 :$ U) u t) | Refl <- allRight u = t
+  V /// (SubT Sub0 u t) | Refl <- allRight u = t
   P tl u tr /// sig | Roof sigl u' sigr <- roofLemma u sig =
     P (tl // sigl) u' (tr // sigr)
   K t /// sig = K (t /// sig)
@@ -312,7 +322,6 @@ instance Substable (Term s) where
 (//^) :: Term s ^ k -> Subst k ^ n -> Term s ^ n
 (t :^ th) //^ (sig :^ ph) | Roof sigl u sigr <- roofLemma (rightAll th) sig =
   t // sigl :^ covl u -< ph
-
 
 theTerm :: Term Chk ^ S (S (S Z))
 theTerm = lam "w" $ tup [E $^ var 0, E $^ var 2, E $^ var 3]
@@ -326,4 +335,7 @@ theCtx :: Vec (S (S (S Z))) String
 theCtx = VN :# "z" :# "y" :# "x"
 
 testShow :: Term Chk ^ S (S (S Z)) -> IO ()
-testShow t = putStrLn (tmShow False t theCtx)
+testShow = putStrLn . testShow'
+
+testShow' :: Term Chk ^ S (S (S Z)) -> String
+testShow' t = tmShow False t theCtx
