@@ -5,11 +5,11 @@ import Term
 pattern Splus = "plus"
 pattern Sone = "one"
 
-pattern Plus th = A Splus :^ th
-pattern Plus'  <- A Splus :^ _
+pattern EPlus th <- A Splus :$ U :^ th
+pattern EPlus'   <- A Splus :$ U :^ _
 
-pattern One th = A Sone :^ th
-pattern One'  <- A Sone :^ _
+pattern EOne th <- A Sone :$ U :^ th
+pattern EOne'   <- A Sone :$ U :^ _
 
 data NFAbel'
  t {- terms -}
@@ -21,7 +21,7 @@ data NFAbel'
 
 -- Integer constants are NFAbel
 -- NFAbel is closed under Plus (via merging)
-type NFAbel n = NFAbel' (Term ^ n) Integer
+type NFAbel n = NFAbel' (Term Chk ^ n) Integer
 
 instance (Ord t, Num i, Eq i) => Semigroup (NFAbel' t i) where
   (<>) = mappend
@@ -42,14 +42,14 @@ instance (Ord t, Num i, Eq i) => Monoid (NFAbel' t i) where
           k -> ((xt, k) :)
         GT -> yh : go x ytis
 
-nfAbelToTerm :: NATTY n => NFAbel n -> Term ^ n
+nfAbelToTerm :: NATTY n => NFAbel n -> Term Chk ^ n
 nfAbelToTerm NFAbel{..} = case (nfConst, nfStuck) of
   (i, [])  -> int i
   (0, tis) -> go tis
-  (i, tis) -> tup [Plus (no natty), int i, go tis]
+  (i, tis) -> tup [atom Splus, int i, go tis]
   where
     go [(tm, i)] = mu i tm
-    go ((tm, i) : tis) = tup [Plus (no natty), mu i tm, go tis]
+    go ((tm, i) : tis) = tup [atom Splus, mu i tm, go tis]
     go [] = error "impossible"
 
     mu 1 tm = tm
@@ -58,25 +58,25 @@ nfAbelToTerm NFAbel{..} = case (nfConst, nfStuck) of
 -- termToNFAbel has to be in CoreTT
 
 -- num instance for debugging
-instance NATTY n => Num (Term ^ n) where
-  s + t = tup [Plus (no natty), s, t]
+instance NATTY n => Num (Term Chk ^ n) where
+  s + t = tup [atom Splus, s, t]
   s * t = case s of
-   I i :^ th -> tup [s, t]
+   I i :$ U :^ th -> tup [s, t]
   abs = undefined
   signum = undefined
   fromInteger = int
   negate t = tup [ int (-1), t]
 
 type NFList n =
-  [( Term ^ n
+  [( Term Chk ^ n
    , Bool -- `True` means an element, `False` a stuck list
    )]
 
-nfListToTerm :: NATTY n => NFList n -> Term ^ n
-nfListToTerm [] = Nil
+nfListToTerm :: NATTY n => NFList n -> Term Chk ^ n
+nfListToTerm [] = nil
 nfListToTerm (x : xs) = case xs of
   [] -> go x
-  _  -> tup [Plus (no natty), go x, nfListToTerm xs]
+  _  -> tup [atom Splus, go x, nfListToTerm xs]
   where
-    go (tm, True) = tup [One (no natty), tm]
+    go (tm, True) = tup [atom Sone, tm]
     go (tm, False) = tm

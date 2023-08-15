@@ -4,7 +4,13 @@ data (==) :: a -> a -> * where
   Refl :: x == x
 
 -- `qs` is usually a tuple of equations
-data Ordering' qs = LT' | EQ' qs | GT'
+data Ordering' eqs = LT' | EQ' eqs | GT'
+
+fromOrd :: a -> Ordering -> Ordering' a
+fromOrd a = \case
+  LT -> LT'
+  GT -> GT'
+  EQ -> EQ' a
 
 -- existential quantification
 data Ex :: (a -> *) -> * where

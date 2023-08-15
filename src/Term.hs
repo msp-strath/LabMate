@@ -1,5 +1,5 @@
 {-# LANGUAGE QuantifiedConstraints #-}
-module Term (module Term
+module Term ( module Term
             , module Term.Indexed
             , module Term.Natty
             , module Term.Thinning
@@ -18,8 +18,13 @@ data Sort
   | One
   | Prd Sort Sort
   | Sub Nat
-  -- | SynTo Sort    -- Syn -> _, i.e., variable binding
-  deriving (Show)
+  deriving (Eq, Show)
+
+type family Fst (t :: Sort) where
+  Fst (Prd a b) = a
+
+type family Snd (t :: Sort) where
+  Snd (Prd a b) = b
 
 data Ctor (s :: Sort) (t :: Sort) where
   -- atoms
@@ -30,9 +35,9 @@ data Ctor (s :: Sort) (t :: Sort) where
   E :: Ctor Syn Chk
   -- radicals
   R :: Ctor (Prd Chk Chk) Syn
-  -- pairs (or `t`uples)
+  -- tuples
   T :: Ctor (Prd Chk Chk) Chk
-  -- elimintaion forms (or `d`esctructors)
+  -- desctructors
   D :: Ctor (Prd Syn Chk) Syn
   -- metavar usage
   M :: (Name, Natty k) -> Ctor (Sub k) Chk
@@ -40,7 +45,33 @@ data Ctor (s :: Sort) (t :: Sort) where
   S0 :: Ctor One (Sub Z)
   ST :: Ctor (Prd (Sub n) Syn) (Sub (S n))
 
-data Term (s :: Sort) (n :: Nat) where       -- object variable support
+cmpCtor :: Ctor s t -> Ctor s' t -> Ordering' (s == s')
+cmpCtor (A s) (A s') = fromOrd Refl $ compare s s'
+cmpCtor (I i) (I i') = fromOrd Refl $ compare i i'
+cmpCtor E E = EQ' Refl
+cmpCtor R R = EQ' Refl
+cmpCtor T T = EQ' Refl
+cmpCtor D D = EQ' Refl
+cmpCtor (M (n, k)) (M (n', k')) = case compare n n' of
+  LT -> LT'
+  GT -> GT'
+  EQ -> (\Refl -> Refl) <$> cmpNatty k k'
+cmpCtor S0 S0 = EQ' Refl
+cmpCtor ST ST = EQ' Refl
+cmpCtor t t' = case compare (helper t) (helper t') of
+  LT -> LT'
+  GT -> GT'
+  EQ -> error "cmpCtor::IMPOSSIBLE"
+  where
+    helper :: Ctor s t -> Integer
+    helper = \case
+      { A{} -> 1; I{} -> 2; E -> 3; R -> 4
+      ; T -> 5; D -> 6; M{} -> 7; S0 -> 8
+      ; ST{} -> 9 }
+
+data Term (s :: Sort)
+          (n :: Nat)     -- object variable support
+  where
   -- the object var
   V :: Term Syn (S Z)
   -- empty tuple
@@ -51,125 +82,130 @@ data Term (s :: Sort) (n :: Nat) where       -- object variable support
   K :: Term Chk n -> Term Chk n
   -- relevant function
   L :: Hide String -> Term Chk (S n) -> Term Chk n
-  -- strictness annotation to shut up the coverage checker
+  -- strictness annotation to shut the coverage checker up
   (:$) :: !(Ctor s t) -> Term s n -> Term t n
 
 -- for documentary purposes; used only when we *know* (and not merely
 -- hope) a term is a type and a normalised type, respectively
-type Type = Term
+type Type = Term Chk
 type NmTy = Type
 
-{-
-instance Eq (Term n) where
+instance Eq (Term s n) where
   t == t' = compare t t' == EQ
 
-instance Ord (Term n) where
-  compare  V         V       = EQ
-  compare (A s)     (A s')   = compare s s'
-  compare (I n)     (I n')   = compare n n'
+instance Ord (Term s n) where
+  compare  V         V        = EQ
+  compare  U         U        = EQ
   compare (P l u r) (P l' u' r') = case cmpCov u u' of
     LT' -> LT
     GT' -> GT
     EQ' (Refl, Refl) -> compare (l', r') (l', r')
-  compare (K t)         (K t')   = compare t t'
-  compare (L _ t)       (L _ t') = compare t t'
-  compare (M (s, k) su) (M (s', k') su') = case cmpNatty k k' of
+  compare (K t)     (K t')    = compare t t'
+  compare (L _ t)   (L _ t')  = compare t t'
+  compare (c :$ t)  (c':$ t') = case cmpCtor c c' of
     LT' -> LT
     GT' -> GT
-    EQ' Refl -> compare (s, su) (s', su')
-
+    EQ' Refl -> compare t t'
   compare t1 t2 = compare (helper t1) (helper t2)
-   where
-      helper :: Term n -> Integer
-      helper = \case
-        { V{} -> 0; A{} -> 1; I{} -> 2; P{} -> 3
-        ; K{} -> 4; L{} -> 5; M{} -> 6 }
+    where
+       helper :: Term s n -> Integer
+       helper = \case
+         { V{} -> 0; U{} -> 1; P{} -> 2;
+         ; K{} -> 3; L{} -> 4; (:$){} -> 6 }
 
 --------------- smart ctors ---------------
-var :: S Z <= n -> Term ^ n
+var :: S Z <= n -> Term Syn ^ n
 var = (V :^)
 
-atom :: NATTY n => String -> Term ^ n
-atom s = A s :^ no natty
+atom :: NATTY n => String -> Term Chk ^ n
+atom s = (A s :$ U) :^ no natty
 
-pattern At :: NATTY n => String -> Term ^ n
-pattern At s <- A s :^ _
-  where At s = atom s
+pattern Atom :: (NATTY n) => (s ~ Chk) => String -> Term s ^ n
+pattern Atom s <- (A s :$ U) :^ _
+   where Atom s = (A s :$ U) :^ no natty
 
-nil :: NATTY n => Term ^ n
+nil :: NATTY n => Term Chk ^ n
 nil = atom ""
 
-nilEh :: Term ^ n -> Maybe ()
-nilEh (A "" :^ _) = Just ()
+nilEh :: Term s ^ n -> Maybe ()
+nilEh (A "" :$ U :^ _) = Just ()
 nilEh _ = Nothing
 
-pattern Nil :: NATTY n => Term ^ n
-pattern Nil <- A "" :^ _
-  where Nil = nil
+pattern Nil :: (NATTY n) => (s ~ Chk) => Term s ^ n
+pattern Nil <- Atom ""
 
-int :: NATTY n => Integer -> Term ^ n
-int i = I i :^ no natty
+int :: NATTY n => Integer -> Term Chk ^ n
+int i = (I i :$ U) :^ no natty
 
 infixr 5 <&>
-(<&>) :: Term ^ n -> Term ^ n -> Term ^ n
+(<&>) :: Term s ^ n -> Term t ^ n -> Term (Prd s t) ^ n
 (tl :^ th) <&> (tr :^ ph) | u :^ ps <- cop th ph = P tl u tr :^ ps
 
-pairEh :: Term ^ n -> Maybe (Term ^ n, Term ^ n)
-pairEh (P tl u tr :^ ph) = Just (tl :^ covl u -< ph, tr :^ covr u -< ph)
-pairEh _ = Nothing
+split :: Term (Prd a b) ^ n -> (Term a ^ n, Term b ^ n)
+split (P tl u tr :^ ph) = (tl :^ covl u -< ph, tr :^ covr u -< ph)
 
-lam :: String -> Term ^ S n -> Term ^ n
+infixr 5 $^
+($^) :: Ctor s t -> Term s ^ n -> Term t ^ n
+c $^ (t :^ th) = (c :$ t) :^ th
+
+($?) :: Ctor s t -> Term t ^ n -> Maybe (Term s ^ n)
+c $? (c' :$ t :^ th) | EQ' Refl <- cmpCtor c c' = Just (t :^ th)
+c $? _ = Nothing
+
+-- if we don't now that we are in Chk, we cannot really ask for
+-- canonical pairs
+pairEh :: Term Chk ^ n -> Maybe (Term Chk ^ n, Term Chk ^ n)
+pairEh t = split <$> (T $? t)
+
+lam :: String -> Term Chk ^ S n -> Term Chk ^ n
 lam _ (t :^ No th) = K t :^ th
 lam x (t :^ Su th) = L (Hide x) t :^ th
 
-lamEh :: Term ^ n -> Maybe (Term ^ S n)
+lamEh :: Term s ^ n -> Maybe (Term Chk ^ S n)
 lamEh (K t :^ th) = Just (t :^ No th)
 lamEh (L _ t :^ th) = Just (t :^ Su th)
 lamEh _ = Nothing
 
-lamNameEh :: Term ^ n -> Maybe (Name, Term ^ S n)
+lamNameEh :: Term s ^ n -> Maybe (Name, Term Chk ^ S n)
 lamNameEh (K t :^ th) = Just ("_", t :^ No th)
 lamNameEh (L (Hide x) t :^ th) = Just (x, t :^ Su th)
 lamNameEh _ = Nothing
 
-subst :: NATTY n => Vec k (Term ^ n) -> Subst k ^ n
-subst VN = S0 :^ no natty
+subst :: NATTY n => Vec k (Term Syn ^ n) -> Subst k ^ n
+subst VN = (S0 :$ U) :^ no natty
 subst (tz :# (t :^ ph))
   | sig :^ th <- subst tz
   , u :^ ps <- cop th ph
-  = ST sig u t :^ ps
+  = (ST :$ P sig u t) :^ ps
 
-meta :: NATTY n => (Name, Natty k) -> Vec k (Term ^ n) -> Term ^ n
-meta m tz | sig :^ th <- subst tz = M m sig :^ th
+meta :: NATTY n => (Name, Natty k) -> Vec k (Term Syn ^ n) -> Term Chk ^ n
+meta m tz | sig :^ th <- subst tz = (M m :$ sig) :^ th
 
-tup :: NATTY n => [Term ^ n] -> Term ^ n
-tup = foldr (<&>) (atom "")
+tup :: NATTY n => [Term Chk ^ n] -> Term Chk ^ n
+tup [] = nil
+tup (t : ts) = T $^ t <&> tup ts
 
-tupEh :: Term ^ n -> Maybe [Term ^ n]
+tupEh :: Term Chk ^ n -> Maybe [Term Chk ^ n]
 tupEh t | Just () <- nilEh t = Just []
 tupEh t = do
   (h, t) <- pairEh t
   (h :) <$> tupEh t
 
+
 type Tag = String
 
-tag :: NATTY n => Tag -> [Term ^ n] -> Term ^ n
+tag :: NATTY n => Tag -> [Term Chk ^ n] -> Term Chk ^ n
 tag s ts = tup $ atom s : ts
 
-tagEh :: Term ^ n -> Maybe (Tag, [Term ^ n])
-tagEh (A s@(_:_) :^ _) = Just (s, [])
+tagEh :: Term Chk ^ n -> Maybe (Tag, [Term Chk ^ n])
+tagEh (A s :$ U :^ _) = Just (s, [])
 tagEh t = case tupEh t of
-  Just ((A s@(_:_) :^ _):ts) -> Just (s, ts)
+  Just ((A s :$ U :^ _) : ts) -> Just (s, ts)
   _   -> Nothing
--}
--------------------------------------------
-{-
-data Subst (srcScope :: Nat) (tgtSupport :: Nat) where
-  S0 :: Subst Z Z
-  ST :: Subst k l -> Cov l r n -> Term r -> Subst (S k) n
--}
-type Subst k = Term (Sub k)
 
+-------------------------------------------
+
+type Subst k = Term (Sub k)
 
 substSrc :: Subst k n -> Natty k
 substSrc (S0 :$ U) = Zy
@@ -179,9 +215,12 @@ substSupport :: Subst k n -> Natty n
 substSupport (S0 :$ U) = Zy
 substSupport (ST :$ P _ u _) = bigEnd (covl u)
 
+wkSubst :: Subst k n -> Subst (S k) (S n)
+wkSubst sig = ST :$ P sig (NS (lCov (substSupport sig))) V
+
 idSubst :: Natty n -> Subst n n
 idSubst Zy = S0 :$ U
-idSubst (Sy n) = ST :$ P (idSubst n) (NS (lCov n)) V
+idSubst (Sy n) = wkSubst (idSubst n)
 
 idSubstEh :: Subst k n -> Either (Positive k) (k == n)
 idSubstEh (S0 :$ U) = Right Refl
@@ -194,66 +233,59 @@ sub0 :: Term Syn ^ n -> Subst (S n) ^ n
 sub0 (tm :^ th) = let n = bigEnd th
   in (ST :$ P (idSubst n) (leftAll th) tm) :^ io n
 
-{-
-tmShow :: forall n
+tmShow :: forall s n
        .  Bool         -- is the term a cdr
-       -> Term ^ n
+       -> Term s ^ n
        -> Vec n String -- we know the names of all vars in scope
        -> String
 tmShow b (V :^ th) ctx = barIf b ++ vonly (th ?^ ctx)
-tmShow b (A "" :^ _) _
+tmShow b (A "" :$ U :^ _) _
   | b = ""
   | otherwise = "[]"
-tmShow b (A s :^ _) _ = barIf b ++ "'" ++ s
-tmShow b (I i :^ _) _ = barIf b ++ show i
-tmShow b (P tl u tr :^ th) ctx =
-  if b then " " ++ s else "[" ++ s ++ "]"
-  where
-    s = tmShow False (tl :^ covl u -< th) ctx ++ tmShow True (tr :^ covr u -< th) ctx
+tmShow b (A s :$ U :^ _) _ = barIf b ++ "'" ++ s
+tmShow b (I i :$ U :^ _) _ = barIf b ++ show i
+tmShow b (U :^ _) _ = ""
+tmShow b (P tl u tr :^ th) _ = "tmShow: not in a great spot"
 tmShow b (K tm :^ th) ctx = barIf b ++ "(\\_. " ++ tmShow b (tm :^ th) ctx ++ ")"
 tmShow b (L (Hide nm) tm :^ th) ctx = concat [barIf b, "(\\", x, ". ", tmShow False (tm :^ Su th) (ctx :# x), ")"]
   where
     x = head $ filter (not . (`elem` ctx)) (nm : [nm ++ show i | i <- [0..]])
-tmShow b (M m sig :^ th) ctx = barIf b ++ show m ++ case idSubstEh sig of
+tmShow b (E :$ t :^ th) ctx = tmShow b (t :^ th) ctx
+tmShow b (M m :$ sig :^ th) ctx = barIf b ++ show m ++ case idSubstEh sig of
   Left (IsSy n) -> case sig of
-    ST sig u t -> concat ["{", substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, "}"]
+    ST :$ P sig u t -> concat ["{", substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, "}"]
   Right Refl -> ""
   where
     substShow :: forall j n . Subst j ^ n -> Vec n String -> String
-    substShow (S0 :^ _) _ = ""
-    substShow (ST sig u t :^ th) ctx = concat [substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, ", "]
+    substShow (S0 :$ U :^ _) _ = ""
+    substShow (ST :$ P sig u t :^ th) ctx = concat [substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, ", "]
+tmShow b (T :$ P tl u tr :^ th) ctx =
+  if b then " " ++ s else "[" ++ s ++ "]"
+  where
+    s = tmShow False (tl :^ covl u -< th) ctx ++ tmShow True (tr :^ covr u -< th) ctx
+-- TODO : add the remaining cases
 
 barIf :: Bool -> String
 barIf True = " | "
 barIf False = ""
 
-data Roof ::  Nat -> Nat -> Nat -> * where
+data Roof :: Nat -> Nat -> Nat -> * where
   Roof :: Subst l l' -> Cov l' r' n -> Subst r r' -> Roof l r n
 
 roofLemma :: Cov l r k -> Subst k n -> Roof l r n
-roofLemma ZZ S0 = Roof S0 ZZ S0
-roofLemma (SN u0) (ST sig u1 t)
+roofLemma ZZ (S0 :$ U) = Roof (S0 :$ U) ZZ (S0 :$ U)
+roofLemma (SN u0) (ST :$ P sig u1 t)
   | Roof sigl u2 sigr <- roofLemma u0 sig
   , u3 :^\^: u4 <- rotateRCov (swapCov u2) u1
-  = Roof (ST sigl u4 t) (swapCov u3) sigr
-roofLemma (NS u0) (ST sig u1 t)
+  = Roof (ST :$ P sigl u4 t) (swapCov u3) sigr
+roofLemma (NS u0) (ST :$ P sig u1 t)
   | Roof sigl u2 sigr <- roofLemma u0 sig
   , u3 :^\^: u4 <- rotateRCov u2 u1
-  = Roof sigl u3 (ST sigr u4 t)
-roofLemma (SS u0) (ST sig u1 t)
+  = Roof sigl u3 (ST :$ P sigr u4 t)
+roofLemma (SS u0) (ST :$ P sig u1 t)
   | Roof sigl u2 sigr <- roofLemma u0 sig
   , MiddleFour u3 u4 u5 <- middleFour u2 u1 (allCov (weeEnd (covr u1)))
-  = Roof (ST sigl u3 t) u4 (ST sigr u5 t)
-
-instance Eq (Subst k n) where
-  s == t = compare s t == EQ
-
-instance Ord (Subst k n) where
-  compare S0 S0 = EQ
-  compare (ST sig u t) (ST sig' u' t') = case cmpCov u u' of
-    LT' -> LT
-    GT' -> GT
-    EQ' (Refl, Refl) -> compare (sig, t) (sig', t')
+  = Roof (ST :$ P sigl u3 t) u4 (ST :$ P sigr u5 t)
 
 class Substable (t :: Nat -> *) where
 
@@ -267,26 +299,23 @@ class Substable (t :: Nat -> *) where
         -> Subst (S k) n -- must not be the id subst
         -> t n
 
-instance Substable Term where
+instance Substable (Term s) where
 
-  V /// ST S0 u t | Refl <- allRight u = t
+  V /// (ST :$ P (S0 :$ U) u t) | Refl <- allRight u = t
   P tl u tr /// sig | Roof sigl u' sigr <- roofLemma u sig =
     P (tl // sigl) u' (tr // sigr)
   K t /// sig = K (t /// sig)
-  L x t /// sig = L x (t /// ST sig (NS (lCov (substSupport sig))) V)
-  M m tau /// sig = M m (tau /// sig)
+  L x t /// sig = L x (t /// wkSubst sig)
+  (c :$ t) /// sig = c :$ t /// sig
 
-instance Substable (Subst k) where
-  ST tau u t /// sig
-    | Roof sigl u' sigr <- roofLemma u sig = ST (tau // sigl) u' (t // sigr)
 
-(//^) :: Term ^ k -> Subst k ^ n -> Term ^ n
+(//^) :: Term s ^ k -> Subst k ^ n -> Term s ^ n
 (t :^ th) //^ (sig :^ ph) | Roof sigl u sigr <- roofLemma (rightAll th) sig =
   t // sigl :^ covl u -< ph
 
 
-theTerm :: Term ^ S (S (S Z))
-theTerm = lam "w" $ tup [var 0, var 2, var 3]
+theTerm :: Term Chk ^ S (S (S Z))
+theTerm = lam "w" $ tup [E $^ var 0, E $^ var 2, E $^ var 3]
   --meta (Konst "m") (atom <$> theCtx)
   --lam "x" $ var 0
 
@@ -296,6 +325,5 @@ theSubst = subst $ VN :# var 1 :# var 0 :# var 2
 theCtx :: Vec (S (S (S Z))) String
 theCtx = VN :# "z" :# "y" :# "x"
 
-testShow :: Term ^ S (S (S Z)) -> IO ()
+testShow :: Term Chk ^ S (S (S Z)) -> IO ()
 testShow t = putStrLn (tmShow False t theCtx)
--}
