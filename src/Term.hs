@@ -1,4 +1,4 @@
-{-# LANGUAGE QuantifiedConstraints #-}
+{-# LANGUAGE QuantifiedConstraints, UndecidableInstances #-}
 module Term ( module Term
             , module Term.Indexed
             , module Term.Natty
@@ -39,6 +39,28 @@ data Ctor (s :: Sort) (t :: Sort) where
   S0 :: Ctor One (Sub Z)
   ST :: Ctor (Prd (Sub n) Syn) (Sub (S n))
 
+data Term (s :: Sort)
+          (n :: Nat)     -- object variable support
+  where
+  -- the object var
+  V :: Term Syn (S Z)
+  -- empty tuple
+  U :: Term One Z
+  -- pairing
+  P :: Term a l -> Cov l r n -> Term b r -> Term (Prd a b) n
+  -- constant function
+  K :: Term Chk n -> Term Chk n
+  -- relevant function
+  L :: Hide String -> Term Chk (S n) -> Term Chk n
+  -- strictness annotation to shut the coverage checker up
+  (:$) :: !(Ctor s t) -> Term s n -> Term t n
+
+-- for documentary purposes; used only when we *know* (and not merely
+-- hope) a term is a type and a normalised type, respectively
+type Type = Term Chk
+type NmTy = Type
+
+
 cmpCtor :: Ctor s t -> Ctor s' t -> Ordering' (s == s')
 cmpCtor (A s) (A s') = fromOrd Refl $ compare s s'
 cmpCtor (I i) (I i') = fromOrd Refl $ compare i i'
@@ -62,27 +84,6 @@ cmpCtor t t' = case compare (helper t) (helper t') of
       { A{} -> 1; I{} -> 2; E -> 3; R -> 4
       ; T -> 5; D -> 6; M{} -> 7; S0 -> 8
       ; ST{} -> 9 }
-
-data Term (s :: Sort)
-          (n :: Nat)     -- object variable support
-  where
-  -- the object var
-  V :: Term Syn (S Z)
-  -- empty tuple
-  U :: Term One Z
-  -- pairing
-  P :: Term a l -> Cov l r n -> Term b r -> Term (Prd a b) n
-  -- constant function
-  K :: Term Chk n -> Term Chk n
-  -- relevant function
-  L :: Hide String -> Term Chk (S n) -> Term Chk n
-  -- strictness annotation to shut the coverage checker up
-  (:$) :: !(Ctor s t) -> Term s n -> Term t n
-
--- for documentary purposes; used only when we *know* (and not merely
--- hope) a term is a type and a normalised type, respectively
-type Type = Term Chk
-type NmTy = Type
 
 instance Eq (Term s n) where
   t == t' = compare t t' == EQ
@@ -171,18 +172,17 @@ lamNameEh (L (Hide x) t :^ th) = Just (x, t :^ Su th)
 lamNameEh _ = Nothing
 
 subst :: NATTY n => Vec k (Term Syn ^ n) -> Subst k ^ n
-subst VN = (S0 :$ U) :^ no natty
+subst VN = Sub0 :^ no natty
 subst (tz :# (t :^ ph))
   | sig :^ th <- subst tz
-  , u :^ ps <- cop th ph
-  = (ST :$ P sig u t) :^ ps
+  , u   :^ ps <- cop th ph
+  = SubT sig u t :^ ps
 
 meta :: NATTY n => (Name, Natty k) -> Vec k (Term Syn ^ n) -> Term Chk ^ n
-meta m tz | sig :^ th <- subst tz = (M m :$ sig) :^ th
+meta m tz | sig :^ th <- subst tz = M m :$ sig :^ th
 
 tup :: NATTY n => [Term Chk ^ n] -> Term Chk ^ n
-tup [] = nil
-tup (t : ts) = T $^ t <&> tup ts
+tup = foldr (\x y -> T $^ x <&> y) nil
 
 tupEh :: Term Chk ^ n -> Maybe [Term Chk ^ n]
 tupEh t | Just () <- nilEh t = Just []
@@ -323,19 +323,68 @@ instance Substable (Term s) where
 (t :^ th) //^ (sig :^ ph) | Roof sigl u sigr <- roofLemma (rightAll th) sig =
   t // sigl :^ covl u -< ph
 
-theTerm :: Term Chk ^ S (S (S Z))
-theTerm = lam "w" $ tup [E $^ var 0, E $^ var 2, E $^ var 3]
-  --meta (Konst "m") (atom <$> theCtx)
-  --lam "x" $ var 0
+class Mk t where
+  type Scope t :: Nat
+  type Uncurry t :: *
 
-theSubst :: Subst ('S ('S ('S 'Z))) ^ S (S (S Z))
-theSubst = subst $ VN :# var 1 :# var 0 :# var 2
+  from :: (Uncurry t -> Term Chk ^ Scope t, (Uncurry t -> Term Chk ^ Scope t) -> t)
+
+  mk :: t
+  mk = k f where (f, k) = from
+
+instance (NATTY n) => Mk (Term Chk ^ n) where
+  type Scope (Term Chk ^ n) = n
+  type Uncurry (Term Chk ^ n) = ()
+  from = (\() -> nil, ($()))
+
+instance (Mk t, NATTY (Scope t)) => Mk (String -> t) where
+  type Scope (String -> t) = Scope t
+  type Uncurry (String -> t) = (String, Uncurry t)
+  from = (\(a, s) -> T $^ (atom a <&> g s), \f a -> k (\s -> f (a, s)))
+    where (g, k) = from
+
+instance (Mk t, NATTY n, Scope t ~ n) => Mk (Term Chk ^ n -> t) where
+  type Scope (Term Chk ^ n -> t) = n
+  type Uncurry (Term Chk ^ n -> t) = (Term Chk ^ n, Uncurry t)
+  from = (\(a, s) -> T $^ (a <&> g s), \f a -> k (\s -> f (a, s)))
+    where (g, k) = from
+
+instance (Mk t, NATTY n, Scope t ~ n) => Mk (Term Syn ^ n -> t) where
+  type Scope (Term Syn ^ n -> t) = n
+  type Uncurry (Term Syn ^ n -> t) = (Term Syn ^ n, Uncurry t)
+  from = (\(a, s) -> T $^ (E $^ a) <&> g s, \f a -> k (\s -> f (a, s)))
+    where (g, k) = from
+
+class Wk (s :: Nat) (t :: Nat) where
+  weaken :: Term a ^ s ->  Term a ^ t
+
+instance Wk Z Z where
+  weaken t = t
+
+instance (Wk Z t) => Wk Z (S t) where
+  weaken t = wk $ weaken t
+
+instance (Wk s t) => Wk (S s) (S t) where
+  weaken = weaken
+
+foo0 :: Term Chk ^ S (S (S Z))
+foo0 = mk
+
+
+foo1 :: Term Chk ^ S (S (S Z))
+foo1 = mk "Foo"
+
+foo2 :: Term Chk ^ S (S (S Z))
+foo2 = mk "Foo" (var 0)
+
+foo3 :: Term Chk ^ S (S (S Z))
+foo3 = mk "Foo" (var 0) (var 2)
+
+theTerm :: Term Chk ^ S (S (S Z))
+theTerm = lam "w" $ mk (evar 0) (evar 2) (evar 3)
 
 theCtx :: Vec (S (S (S Z))) String
 theCtx = VN :# "z" :# "y" :# "x"
 
 testShow :: Term Chk ^ S (S (S Z)) -> IO ()
-testShow = putStrLn . testShow'
-
-testShow' :: Term Chk ^ S (S (S Z)) -> String
-testShow' t = tmShow False t theCtx
+testShow t = putStrLn $ tmShow False t theCtx

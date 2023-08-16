@@ -1,4 +1,4 @@
-{-# LANGUAGE UndecidableInstances #-}
+
 module CoreTT where
 
 import Control.Monad
@@ -16,52 +16,8 @@ pattern SAtom = "Atom"
 pattern SEnum = "Enum"
 pattern SPi   = "Pi"
 pattern SSig  = "Sigma"
-pattern Sfst = "fst"
-pattern Ssnd = "snd"
-
-class Mk t where
-  type Scope t :: Nat
-  type Uncurry t :: *
-
-  from :: (Uncurry t -> Term Chk ^ Scope t, (Uncurry t -> Term Chk ^ Scope t) -> t)
-
-  mk :: t
-  mk = k f where (f, k) = from
-
-instance (NATTY n) => Mk (Term Chk ^ n) where
-  type Scope (Term Chk ^ n) = n
-  type Uncurry (Term Chk ^ n) = ()
-  from = (\() -> nil, ($()))
-
-instance (Mk t, NATTY (Scope t)) => Mk (String -> t) where
-  type Scope (String -> t) = Scope t
-  type Uncurry (String -> t) = (String, Uncurry t)
-  from = (\(a, s) -> T $^ (atom a <&> g s), \f a -> k (\s -> f (a, s)))
-    where (g, k) = from
-
-instance (Mk t, NATTY n, Scope t ~ n) => Mk (Term Chk ^ n -> t) where
-  type Scope (Term Chk ^ n -> t) = n
-  type Uncurry (Term Chk ^ n -> t) = (Term Chk ^ n, Uncurry t)
-  from = (\(a, s) -> T $^ (a <&> g s), \f a -> k (\s -> f (a, s)))
-    where (g, k) = from
-
-instance (Mk t, NATTY n, Scope t ~ n) => Mk (Term Syn ^ n -> t) where
-  type Scope (Term Syn ^ n -> t) = n
-  type Uncurry (Term Syn ^ n -> t) = (Term Syn ^ n, Uncurry t)
-  from = (\(a, s) -> T $^ (E $^ a) <&> g s, \f a -> k (\s -> f (a, s)))
-    where (g, k) = from
-
-foo0 :: Term Chk ^ S (S (S Z))
-foo0 = mk
-
-foo1 :: Term Chk ^ S (S (S Z))
-foo1 = mk "Foo"
-
-foo2 :: Term Chk ^ S (S (S Z))
-foo2 = mk "Foo" (var 0)
-
-foo3 :: Term Chk ^ S (S (S Z))
-foo3 = mk "Foo" (var 0) (var 2)
+pattern Sfst  = "fst"
+pattern Ssnd  = "snd"
 
 newtype TC n x =
  TC { runTC :: (Natty n, Vec n (Type ^ n)) -> Either String x }
@@ -245,7 +201,7 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
         Just (i, _)  -> int i
         -- TODO : handle neutrals, reduce further
         _ -> tm
-  _ -> fail "checkNormEval: unknown type"
+  (t, _) -> fail $ "checkNormEval: unknown type " ++ t
 checkNormEval _ tm | Just tm <- E $? tm =
   fst <$> evalSynth tm
 checkNormEval _ _ = fail "checkNormEval: no"
@@ -271,24 +227,24 @@ typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
       mk SSig <$> typeEval s <*> (lam x <$> under s (typeEval t'))
   _ -> fail "typeEval: unknown type"
 typeEval ty | Just ty <- E $? ty = fst <$> evalSynth ty
-typeEval _ = fail "typeEval: no"
+typeEval ty = fail "typeEval: no"
 
 evalSynth :: Term Syn ^ n -> TC n (Term Chk ^ n, Type ^ n)
 evalSynth tm = withScope $ case tm of
   V :^ i -> (E $^ tm,) <$> typeOf i
-  tm | Just tm <- R $? tm, (ty, tm) <- split tm -> do
+  tm | Just tm <- R $? tm, (tm, ty) <- split tm -> do
     ty <- typeEval ty
     (, ty) <$> checkNormEval ty tm
   tm | Just tm <- D $? tm, (tgt, a) <- split tm -> do
     (tgt', ty) <- evalSynth tgt
     ty <- typeEval ty
-    r <- case tagEh ty of
+    r  <- case tagEh ty of
       Just (SPi, [s, t]) | Just t' <- lamEh t -> do
         a <- checkNormEval s a
         let sig = sub0 $ R $^ a <&> s
         case lamEh tgt of
-          Nothing -> pure (E $^ D $^ (tgt <&> a))
           Just bd -> checkEval (t' //^ sig) (bd //^ sig)
+          Nothing -> pure (E $^ D $^ (tgt <&> a))
       Just (SSig, [s, t])
         | Atom Sfst <- a -> case pairEh tgt' of
           Just (a, _) -> pure a
@@ -300,8 +256,7 @@ evalSynth tm = withScope $ case tm of
                 let sig = sub0 $ R $^ a <&> s
                 checkEval (t' //^ sig) b
               Nothing -> pure (E $^ D $^ (tgt <&> atom Ssnd))
-          --pure (t' //^ sub0 (D $^ tgt <&> atom Sfst))
-      _ -> fail "synthEh: eliminator for unknown type"
+      _ -> fail "synthEh: eliminator for an unknown type"
     pure (r, ty)
   _ -> fail "synthEh: no"
 
@@ -392,6 +347,18 @@ prefixEh ty ((a, elemA) : as) ((b, elemB) : bs)
 prefixEh _ _ _ = fail "prefixEh"
 
 
+(==>) :: Type ^ S Z -> Type ^ S Z -> Type ^ S Z
+src ==> (tgt :^ th) = mk SPi src (K tgt :^ th)
+
+testShowTC :: Wk k ('S ('S ('S 'Z)))
+           => TC n (Term 'Chk ^ k)
+           -> (Natty n, Vec n (Type ^ n))
+           -> IO ()
+testShowTC tc (n, types) =
+  case runTC tc (n, types) of
+    Left err -> putStrLn err
+    Right tm -> testShow (weaken tm)
+
 test1 = let ty = mk SPi SType (lam "X" body)
             body = mk SPi (var 0) (lam "x" (E $^ var 1))
          in runTC (typeEh ty) (natty, VN)
@@ -401,37 +368,28 @@ test2 = let ty = mk SPi SType (lam "X" body)
             tm = lam "X" $ lam "x" (E $^ var 0)
          in runTC (checkEh ty tm) (natty, VN)
 
-test3 = let arr :: Term Chk ^ S Z -> Term Chk ^ S Z -> Term Chk ^ S Z
-            arr src (tgt :^ th) = mk SPi src (K tgt :^ th)
-            ty = mk SPi SType (lam "X" body)
-            body = (evar 0 `arr` evar 0) `arr` (evar 0 `arr` evar 0)
+test3 = let ty = mk SPi SType (lam "X" body)
+            body = (evar 0 ==> evar 0) ==> (evar 0 ==> evar 0)
             tm = lam "X" $ lam "f" $ lam "x" $
-               E $^ D $^ var 1 <&> (E $^ D $^ var 1 <&> evar 0)
-         in runTC (checkEh ty tm) (natty, VN)
+              E $^ D $^ var 1 <&> (E $^ D $^ var 1 <&> evar 0)
+        in runTC (checkEh ty tm) (natty, VN)
 
-test4 = let arr :: Term Chk ^ S Z -> Term Chk ^ S Z -> Term Chk ^ S Z
-            arr src (tgt :^ th) = mk SPi src (K tgt :^ th)
-            ty = mk SPi SType (lam "X" body)
-            body = (evar 0 `arr` evar 0) `arr` (evar 0  `arr` evar 0)
+test4 = let ty = mk SPi SType (lam "X" body)
+            body = (evar 0 ==> evar 0) ==> (evar 0 ==> evar 0)
             tm = lam "X" $ lam "f" $ lam "x" $
               E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
          in runTC (checkEh ty tm) (natty, VN)
          -- Left "synthEh: no"
 
-test5 = let arr :: Term Chk ^ S Z -> Term Chk ^ S Z -> Term Chk ^ S Z
-            arr src (tgt :^ th) = mk SPi src (K tgt :^ th)
-            ty = mk SPi SType (lam "X" body)
-            body = (evar 0 `arr` evar 0) `arr` (evar 0  `arr` evar 0)
+test5 = let ty = mk SPi SType (lam "X" body)
+            body = (evar 0 ==> evar 0) ==> (evar 0 ==> evar 0)
             tm = lam "X" $ lam "f" $ lam "x" $
               E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
         in runTC (checkEh ty tm) (natty, VN)
          -- Left "synthEh : no"
 
-test6 = let arr :: Term Chk ^ S Z -> Term Chk ^ S Z -> Term Chk ^ S Z
-            arr src (tgt :^ th) = mk SPi src (K tgt :^ th)
-            ty = wk . wk . wk $ mk SPi SType (lam "X" body)
-            body = (evar 0 `arr` evar 0) `arr` (evar 0  `arr` evar 0)
-            tm = lam "X" $ lam "f" $ lam "x" $
-              E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
-            types = VN :# mk Sone :# mk Sone :# mk Sone
-        in  testShow' <$> runTC (checkEval ty tm) (natty, types)
+test6 = let ty = mk SSig SType (lam "X" (evar 0))
+            -- tm = snd (SOne, var 2)
+            tm = D $^ (R $^ (T $^ mk SOne <&> evar 2) <&> ty) <&> mk Ssnd
+            types = VN :# mk SOne :# mk SOne :# mk SOne
+        in  testShowTC (fst <$> evalSynth tm) (natty, types)
