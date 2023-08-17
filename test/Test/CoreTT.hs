@@ -1,6 +1,6 @@
 module Test.CoreTT where
 
-import CoreTT
+import CoreTT (checkEval, checkEh)
 import Term hiding (testShow)
 import Term.Natty
 import Term.Vec
@@ -12,7 +12,7 @@ import Test.Tasty.HUnit
 testCtx :: Vec (S (S (S Z))) String
 testCtx = VN :# "z" :# "y" :# "x"
 
-testShow :: Term ^ S (S (S Z)) -> String
+testShow :: Term s ^ S (S (S Z)) -> String
 testShow t = tmShow False t testCtx
 
 mkTest :: (Eq a, Show a, HasCallStack) => (String, a, a) -> TestTree
@@ -26,7 +26,7 @@ coreTests = [ test0, test1, test2, test3, test4, test5, test5', test6, test7
 
 test0 = mkTest
         ( "Eval Abel (prop): x + y"
-        , let ty = tup [TyAbel (no natty), TyOne (no natty)]
+        , let ty = tup [mk SAbel, mk SOne]
               tm = var 0 + var 1
           in testShow $ checkEval ty tm
         , "['plus y x]"

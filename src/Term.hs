@@ -33,8 +33,8 @@ data Ctor (s :: Sort) (t :: Sort) where
   T :: Ctor (Prd Chk Chk) Chk
   -- desctructors
   D :: Ctor (Prd Syn Chk) Syn
-  -- metavar usage
-  M :: (Name, Natty k) -> Ctor (Sub k) Chk
+  -- metavar usage (these are unknowns, not schematic vars)
+  M :: (Name, Natty k) -> Ctor (Sub k) Syn
   -- subst
   S0 :: Ctor One (Sub Z)
   ST :: Ctor (Prd (Sub n) Syn) (Sub (S n))
@@ -56,11 +56,13 @@ data Term (s :: Sort)
   (:$) :: !(Ctor s t) -> Term s n -> Term t n
 
 -- for documentary purposes; used only when we *know* (and not merely
--- hope) a term is a type and a normalised type, respectively
+-- hope) a term is a type, a normalised type or a canonical form,
+-- respectively
 type Type = Term Chk
 type NmTy = Type
+type Norm = Term
 
-
+----------------------------------------------
 cmpCtor :: Ctor s t -> Ctor s' t -> Ordering' (s == s')
 cmpCtor (A s) (A s') = fromOrd Refl $ compare s s'
 cmpCtor (I i) (I i') = fromOrd Refl $ compare i i'
@@ -85,10 +87,12 @@ cmpCtor t t' = case compare (helper t) (helper t') of
       ; T -> 5; D -> 6; M{} -> 7; S0 -> 8
       ; ST{} -> 9 }
 
-instance Eq (Term s n) where
+
+-- these instances should only be used for Norm
+instance Eq (Norm s n) where
   t == t' = compare t t' == EQ
 
-instance Ord (Term s n) where
+instance Ord (Norm s n) where
   compare  V         V        = EQ
   compare  U         U        = EQ
   compare (P l u r) (P l' u' r') = case cmpCov u u' of
@@ -178,7 +182,7 @@ subst (tz :# (t :^ ph))
   , u   :^ ps <- cop th ph
   = SubT sig u t :^ ps
 
-meta :: NATTY n => (Name, Natty k) -> Vec k (Term Syn ^ n) -> Term Chk ^ n
+meta :: NATTY n => (Name, Natty k) -> Vec k (Term Syn ^ n) -> Term Syn ^ n
 meta m tz | sig :^ th <- subst tz = M m :$ sig :^ th
 
 tup :: NATTY n => [Term Chk ^ n] -> Term Chk ^ n
@@ -261,6 +265,9 @@ tmShow b (L (Hide nm) tm :^ th) ctx = concat [barIf b, "(\\", x, ". ", tmShow Fa
   where
     x = head $ filter (not . (`elem` ctx)) (nm : [nm ++ show i | i <- [0..]])
 tmShow b (E :$ t :^ th) ctx = tmShow b (t :^ th) ctx
+tmShow b (R :$ t :^ th) ctx =
+  concat [barIf b, "(", tmShow False tm ctx, " : ", tmShow False ty ctx, ")"]
+    where (tm, ty) = split (t :^ th)
 tmShow b (M m :$ sig :^ th) ctx = barIf b ++ show m ++ case idSubstEh sig of
   Left (IsSy n) -> case sig of
     SubT sig u t -> concat ["{", substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, "}"]
@@ -316,7 +323,7 @@ instance Substable (Term s) where
     P (tl // sigl) u' (tr // sigr)
   K t /// sig = K (t /// sig)
   L x t /// sig = L x (t /// wkSubst sig)
-  (c :$ t) /// sig = c :$ t /// sig
+  (c :$ t) /// sig = c :$ (t /// sig)
 
 
 (//^) :: Term s ^ k -> Subst k ^ n -> Term s ^ n
@@ -369,7 +376,6 @@ instance (Wk s t) => Wk (S s) (S t) where
 
 foo0 :: Term Chk ^ S (S (S Z))
 foo0 = mk
-
 
 foo1 :: Term Chk ^ S (S (S Z))
 foo1 = mk "Foo"

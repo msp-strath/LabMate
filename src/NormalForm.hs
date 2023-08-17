@@ -5,23 +5,22 @@ import Term
 pattern Splus = "plus"
 pattern Sone = "one"
 
---pattern EPlus th <- A Splus :$ U :^ th
-pattern EPlus  <- Atom Splus
-
---pattern EOne th <- A Sone :$ U :^ th
-pattern EOne   <- Atom Sone
+pattern Eplus  <- Atom Splus
+pattern Eone   <- Atom Sone
 
 data NFAbel'
  t {- terms -}
  i {- integer multiplicities -}
  = NFAbel
- { nfConst :: i        -- number of Nils
+ { nfConst :: i        -- number of *generator* Nils, rendered as an
+                       -- integer in terms, i.e., 0 unless Nil is a
+                       -- generator
  , nfStuck :: [(t, i)] -- terms should be sorted
  } deriving (Functor)  -- acts uniformly on multiplicities
 
 -- Integer constants are NFAbel
 -- NFAbel is closed under Plus (via merging)
-type NFAbel n = NFAbel' (Term Chk ^ n) Integer
+type NFAbel n = NFAbel' (Norm Chk ^ n) Integer
 
 instance (Ord t, Num i, Eq i) => Semigroup (NFAbel' t i) where
   (<>) = mappend
@@ -42,41 +41,43 @@ instance (Ord t, Num i, Eq i) => Monoid (NFAbel' t i) where
           k -> ((xt, k) :)
         GT -> yh : go x ytis
 
-nfAbelToTerm :: NATTY n => NFAbel n -> Term Chk ^ n
+nfAbelToTerm :: NATTY n => NFAbel n -> Norm Chk ^ n
 nfAbelToTerm NFAbel{..} = case (nfConst, nfStuck) of
   (i, [])  -> int i
   (0, tis) -> go tis
-  (i, tis) -> tup [atom Splus, int i, go tis]
+  (i, tis) -> mk Splus (int i) (go tis)
   where
     go [(tm, i)] = mu i tm
-    go ((tm, i) : tis) = tup [atom Splus, mu i tm, go tis]
+    go ((tm, i) : tis) = mk Splus (mu i tm) (go tis)
     go [] = error "impossible"
 
-    mu 1 tm = tm
-    mu i tm = tup [int i, tm]
+    mu 1 = id
+    mu i = mk (int i)
 
 -- termToNFAbel has to be in CoreTT
 
 -- num instance for debugging
 instance NATTY n => Num (Term Chk ^ n) where
-  s + t = tup [atom Splus, s, t]
+  s + t = mk Splus s t
   s * t = case s of
-   Intg i -> tup [s, t]
+   Intg _ -> mk s t
   abs = undefined
   signum = undefined
   fromInteger = int
-  negate t = tup [ int (-1), t]
+  negate = mk (int (-1))
 
 type NFList n =
-  [( Term Chk ^ n
-   , Bool -- `True` means an element, `False` a stuck list
-   )]
+  [ Either
+     (Norm Syn ^ n)  -- stuck list - it is either an embedding or a
+                     -- metavariable
+     (Norm Chk ^ n)  -- an element
+  ]
 
-nfListToTerm :: NATTY n => NFList n -> Term Chk ^ n
+nfListToTerm :: NATTY n => NFList n -> Norm Chk ^ n
 nfListToTerm [] = nil
 nfListToTerm (x : xs) = case xs of
   [] -> go x
-  _  -> tup [atom Splus, go x, nfListToTerm xs]
+  _  -> mk Splus (go x) (nfListToTerm xs)
   where
-    go (tm, True) = tup [atom Sone, tm]
-    go (tm, False) = tm
+    go (Right tm) = mk Sone tm
+    go (Left tm)  = E $^ tm
