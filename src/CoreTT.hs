@@ -1,10 +1,10 @@
-
 module CoreTT where
 
-import Control.Monad
-import Term
-import NormalForm
 import Control.Applicative
+import Control.Monad
+import NormalForm
+import Term
+import Data.List (stripPrefix)
 
 -- pattern synonyms for the type bikeshedding
 
@@ -206,12 +206,20 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
         Just (i, _)  -> int i
         -- TODO : handle neutrals, reduce further
         _ -> tm
-  (SPi, [s, t])  -> pure tm
-  (SSig, [s, t]) -> pure tm
+  (SPi, [s, t])
+    | Just t' <- lamEh t
+    , Just (x, tm') <- lamNameEh tm ->
+        lam x <$> under s (checkNormEval t' tm')
+  (SSig, [s, t])
+    | Just  t' <- lamEh t
+    , Just (a, d) <- pairEh tm -> do
+        a <- checkNormEval s a
+        d <- checkEval (t' //^ sub0 (R $^ a <&> s)) d
+        pure (T $^ a <&> d)
   (t, _) -> fail $ "checkNormEval: unknown type " ++ t
-checkNormEval _ tm | Just tm <- E $? tm =
-  -- TODO : perform eta expansions
-  fst <$> evalSynth tm
+checkNormEval wantTy tm | Just tm <- E $? tm = do
+  (tm, gotTy) <- evalSynth tm
+  transport tm gotTy wantTy
 checkNormEval _ _ = fail "checkNormEval: no"
 
 checkEval
@@ -237,7 +245,9 @@ typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
 typeEval ty | Just ty <- E $? ty = fst <$> evalSynth ty
 typeEval ty = fail "typeEval: no"
 
-evalSynth :: Term Syn ^ n -> TC n (Norm Chk ^ n, Type ^ n)
+-- there is no guarantee that the returned term is the canonical
+-- representative of its eq. class because it is not eta-long.
+evalSynth :: Term Syn ^ n -> TC n (Term Chk ^ n, Type ^ n)
 evalSynth tm = withScope $ case tm of
   V :^ i -> (E $^ tm,) <$> typeOf i
   tm | Just tm <- R $? tm, (tm, ty) <- split tm -> do
@@ -270,6 +280,12 @@ evalSynth tm = withScope $ case tm of
             | otherwise -> error "evalSynth: funny pair"
       _ -> fail "evalSynth: eliminator for an unknown type"
   _ -> fail "evalSynthEh: no"
+
+evalSynthNmTy :: Term Syn ^ n -> TC n (Term Chk ^ n, NmTy ^ n)
+evalSynthNmTy tm = do
+  (tm, ty) <- evalSynth tm
+  ty <- typeEval ty
+  pure (tm, ty)
 
 -- TODO : handle neutral x
 findInEnum :: Term Chk ^ n -> NFList n -> Maybe (Integer, NFList n)
@@ -331,7 +347,7 @@ propEh ty = do
     Atom SOne -> pure True
     _         -> pure False
 
--- TODO : make subtype testing perform eta expansion
+-- TODO : do more subtyping
 subtypeEh :: NmTy ^ n -> NmTy ^ n -> TC n ()
 subtypeEh got want = withScope $
   case (tagEh got, tagEh want) of
@@ -341,6 +357,13 @@ subtypeEh got want = withScope $
       nws <- termToNFList tyA ws
       () <$ must (stripPrefix ngs nws)
     _ -> guard $ got == want
+
+transport
+  :: Term Chk ^ n  -- *evaluated* term, but not eta-long
+  -> NmTy ^ n
+  -> NmTy ^ n
+  -> TC n (Norm Chk ^ n)
+transport tm gotTy wantTy = pure tm -- TODO : FIX ME
 
 ------------ testing -----------------------
 
@@ -389,7 +412,7 @@ test6 = let ty = mk SSig SType (lam "X" (evar 0))
             -- tm = snd (SOne, var 2)
             tm = D $^ (R $^ (T $^ atom SOne <&> evar 2) <&> ty) <&> atom Ssnd
             ctx = VN :# ("x", atom SOne) :# ("y", atom SOne) :# ("z", atom SOne)
-        in  testShowTC (snd <$> evalSynth tm) ctx
+        in  testShowTC (fst <$> evalSynth tm) ctx
 
 test7 = let ty = mk SAbel SOne
             tm = mk Sone (evar 0) + mk Sone (evar 1)
