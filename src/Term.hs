@@ -253,7 +253,7 @@ tmShow :: forall s n
        -> Vec n String -- we know the names of all vars in scope
        -> String
 tmShow b (V :^ th) ctx = barIf b ++ vonly (th ?^ ctx)
-tmShow b (A "" :$ U :^ _) _
+tmShow b Nil _
   | b = ""
   | otherwise = "[]"
 tmShow b (A s :$ U :^ _) _ = barIf b ++ "'" ++ s
@@ -362,18 +362,6 @@ instance (Mk t, NATTY n, Scope t ~ n) => Mk (Term Syn ^ n -> t) where
   from = (\(a, s) -> T $^ (E $^ a) <&> g s, \f a -> k (\s -> f (a, s)))
     where (g, k) = from
 
-class Wk (s :: Nat) (t :: Nat) where
-  weaken :: Term a ^ s ->  Term a ^ t
-
-instance Wk Z Z where
-  weaken t = t
-
-instance (Wk Z t) => Wk Z (S t) where
-  weaken t = wk $ weaken t
-
-instance (Wk s t) => Wk (S s) (S t) where
-  weaken = weaken
-
 foo0 :: Term Chk ^ S (S (S Z))
 foo0 = mk
 
@@ -389,8 +377,8 @@ foo3 = mk "Foo" (var 0) (var 2)
 theTerm :: Term Chk ^ S (S (S Z))
 theTerm = lam "w" $ mk (evar 0) (evar 2) (evar 3)
 
-theCtx :: Vec (S (S (S Z))) String
-theCtx = VN :# "z" :# "y" :# "x"
+theNames :: Vec (S (S (S Z))) String
+theNames = VN :# "z" :# "y" :# "x"
 
 testShow :: Term Chk ^ S (S (S Z)) -> IO ()
-testShow t = putStrLn $ tmShow False t theCtx
+testShow t = putStrLn $ tmShow False t theNames

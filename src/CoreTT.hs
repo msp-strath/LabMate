@@ -2,12 +2,11 @@ module CoreTT where
 
 import Control.Applicative
 import Control.Monad
+import Data.List (stripPrefix)
 import NormalForm
 import Term
-import Data.List (stripPrefix)
 
--- pattern synonyms for the type bikeshedding
-
+-- types
 pattern SType = "Type"
 pattern SOne  = "One"
 pattern SAbel = "Abel"
@@ -16,9 +15,11 @@ pattern SAtom = "Atom"
 pattern SEnum = "Enum"
 pattern SPi   = "Pi"
 pattern SSig  = "Sigma"
+
 -- eliminators
 pattern Sfst  = "fst"
 pattern Ssnd  = "snd"
+
 
 newtype TC n x =
  TC { runTC :: (Natty n, Vec n (Type ^ n)) -> Either String x }
@@ -82,7 +83,7 @@ typeEh ty | Just cts <- tagEh ty = case cts of
   (SSig, [s, t]) | Just t' <- lamEh t -> do
     typeEh s
     under s $ typeEh t'
-  _ -> fail "typeEh: not a type"
+  (ty, _) -> fail $ "typeEh: unknown type " ++ ty
 typeEh ty | Just ty <- E $? ty = withScope $ do
   gotTy <- synthEh ty
   subtypeEh gotTy $ atom SType
@@ -116,15 +117,15 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
   (SList, [genTy]) -> case tupEh tm of
     Nothing | Intg i <- tm ->
       if i >= 0 then checkCanEh genTy nil
-      else fail "checkCanEh: Negative length list."
+      else fail "checkCanEh: negative length list."
     Just []  -> pure True
     Just [Eone, t] -> True <$ checkEh genTy t
     Just [Eplus, s, t] -> True <$ checkEh ty s <* checkEh ty t
     Just [Intg i, t] -> propEh genTy >>= \case
       True | i >= 0 ->  True <$ checkEh ty t
       _ -> fail $ "checkCanEh: " ++
-       (if i < 0 then "Negative length list"
-        else "Scalar multiplication at non-prop type")
+       (if i < 0 then "negative length list"
+        else "scalar multiplication at non-prop type")
     _ -> pure False
   (SEnum, [as]) -> do
     nfs <- termToNFList (atom SAtom) as
@@ -242,12 +243,12 @@ typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
       mk SPi <$> typeEval s <*> (lam x <$> under s (typeEval t'))
   (SSig, [s, t]) | Just (x, t') <- lamNameEh t ->
       mk SSig <$> typeEval s <*> (lam x <$> under s (typeEval t'))
-  _ -> fail "typeEval: unknown type"
+  (ty, _) -> fail $ "typeEval: unknown type " ++ ty
 typeEval ty | Just ty <- E $? ty = fst <$> evalSynth ty
 typeEval ty = fail "typeEval: no"
 
 -- there is no guarantee that the returned term is the canonical
--- representative of its eq. class because it is not eta-long.
+-- representative of its eq. class because it is *not* eta-long.
 evalSynth :: Term Syn ^ n -> TC n (Term Chk ^ n, Type ^ n)
 evalSynth tm = withScope $ case tm of
   V :^ i -> (E $^ tm,) <$> typeOf i
@@ -373,11 +374,12 @@ src ==> (tgt :^ th) = mk SPi src (K tgt :^ th)
 
 testShowTC :: TC n (Term 'Chk ^ n)
            -> Vec n (Name, Type ^ n)
-           -> IO ()
+           -> String
 testShowTC tc ctx =
-  putStrLn $ case runTC tc (vlen ctx, snd <$> ctx) of
+  case runTC tc (vlen ctx, snd <$> ctx) of
     Left err -> err
     Right tm -> tmShow False tm (fst <$> ctx)
+
 {-
 test1 = let ty = mk SPi SType (lam "X" body)
             body = mk SPi (var 0) (lam "x" (E $^ var 1))
@@ -407,31 +409,10 @@ test5 = let ty = mk SPi SType (lam "X" body)
               E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
         in runTC (checkEh ty tm) (natty, VN)
          -- Left "synthEh : no"
--}
 
 test6 = let ty = mk SSig SType (lam "X" (evar 0))
             -- tm = snd (SOne, var 2)
             tm = D $^ (R $^ (T $^ atom SOne <&> evar 2) <&> ty) <&> atom Ssnd
             ctx = VN :# ("x", atom SOne) :# ("y", atom SOne) :# ("z", atom SOne)
         in  testShowTC (fst <$> evalSynth tm) ctx
-
-test7 = let ty = mk SAbel SOne
-            tm = mk Sone (evar 0) + mk Sone (evar 1)
-            vty = atom SOne
-            ctx = VN :# ("x", vty) :# ("y", vty) :# ("z", vty)
-         in testShowTC (checkEval ty tm) ctx
-
-test8 = let ty = mk SAbel SOne
-            tm = evar 0 + evar 1
-            ctx = VN :# ("x", ty) :# ("y", ty) :# ("z", ty)
-         in testShowTC (checkEval ty tm) ctx
-
-test9 = let ty = mk SAbel SOne
-            tm = mk Sone (evar 0) + evar 1
-            ctx = VN :# ("x", ty) :# ("y", ty) :# ("z", atom SOne)
-         in testShowTC (checkEval ty tm) ctx
-
-test10 = let ty = mk SAbel SOne
-             tm = evar 0 + (evar 0 + 3) + mk Sone (evar 1)
-             ctx = VN :# ("x", ty) :# ("y", atom SOne) :# ("z", ty)
-          in testShowTC (checkEval ty tm) ctx
+-}
