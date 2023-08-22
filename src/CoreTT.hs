@@ -358,6 +358,15 @@ subtypeEh got want = withScope $
       ngs <- termToNFList tyA gs
       nws <- termToNFList tyA ws
       () <$ must (stripPrefix ngs nws)
+    (Just (SPi, [gs, gt]), Just (SPi, [ws, wt]))
+      | Just gt' <- lamEh gt, Just wt' <- lamEh wt -> do
+        subtypeEh ws gs
+        under ws $ subtypeEh gt' wt'
+    (Just (SSig, [gs, gt]), Just (SSig, [ws, wt]))
+      | Just gt' <- lamEh gt, Just wt' <- lamEh wt -> do
+        subtypeEh gs ws
+        under gs $ subtypeEh gt' wt'
+    (_, Just (SOne, [])) -> pure ()
     _ -> guard $ got == want
 
 transport
