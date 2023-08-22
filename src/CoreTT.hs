@@ -195,6 +195,9 @@ checkNormEval
   -> Term Chk ^ n {- tm -}
   -- must be Ty \ni tm, i.e. already checked
   -> TC n (Norm Chk ^ n)
+checkNormEval wantTy tm | Just tm <- E $? tm = do
+  (tm, gotTy) <- evalSynth tm
+  transport tm gotTy wantTy
 checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   (SType, []) -> typeEval tm
   (SOne, []) -> pure nil
@@ -219,9 +222,6 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
         d <- checkEval (t' //^ sub0 (R $^ a <&> s)) d
         pure (T $^ a <&> d)
   (t, _) -> fail $ "checkNormEval: unknown type " ++ t
-checkNormEval wantTy tm | Just tm <- E $? tm = do
-  (tm, gotTy) <- evalSynth tm
-  transport tm gotTy wantTy
 checkNormEval _ _ = fail "checkNormEval: no"
 
 checkEval
@@ -362,10 +362,30 @@ subtypeEh got want = withScope $
 
 transport
   :: Term Chk ^ n  -- *evaluated* term, but not eta-long
-  -> NmTy ^ n
-  -> NmTy ^ n
+  -> NmTy ^ n      -- \
+  -> NmTy ^ n      -- allowed to assume these types pass subtype check
   -> TC n (Norm Chk ^ n)
-transport tm gotTy wantTy = pure tm -- TODO : FIX ME
+transport tm gotTy wantTy
+  | Just tm <- E $? tm
+  , Just gotTy <- tagEh gotTy
+  , Just wantTy <- tagEh wantTy =
+    case (gotTy, wantTy) of
+      ((SPi, [gs, gt]), (SPi, [ws, wt]))
+        | Just gt' <- lamEh gt, Just (name, wt') <- lamNameEh wt ->
+          withScope $ (lam name <$>) . under ws $ do
+            arg <- transport (evar 0) (wk ws) (wk gs)
+            transport (E $^ D $^ wk tm <&> arg) gt' wt'
+      ((SSig, [gs, gt]), (SSig, [ws, wt]))
+        | Just gt' <- lamEh gt, Just wt' <- lamEh wt -> withScope $ do
+           let tm0 = D $^ tm <&> atom Sfst
+           a  <- transport (E $^ tm0) gs ws
+           let sig = sub0 tm0
+           gt <- typeEval (gt' //^ sig)
+           wt <- typeEval (wt' //^ sig)
+           d  <- transport (E $^ D $^ tm <&> atom Ssnd) gt wt
+           pure (T $^ a <&> d)
+      _  -> pure (E $^ tm)
+  | otherwise = pure tm
 
 ------------ testing -----------------------
 
@@ -409,10 +429,26 @@ test5 = let ty = mk SPi SType (lam "X" body)
               E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
         in runTC (checkEh ty tm) (natty, VN)
          -- Left "synthEh : no"
+-}
 
 test6 = let ty = mk SSig SType (lam "X" (evar 0))
             -- tm = snd (SOne, var 2)
             tm = D $^ (R $^ (T $^ atom SOne <&> evar 2) <&> ty) <&> atom Ssnd
             ctx = VN :# ("x", atom SOne) :# ("y", atom SOne) :# ("z", atom SOne)
         in  testShowTC (fst <$> evalSynth tm) ctx
--}
+
+test7 = let ty = mk SPi SType (lam "X" $ atom SType)
+            ctx = VN :# ("f", ty)
+            tm = evar 0
+         in testShowTC (checkEval ty tm) ctx
+
+test8 = let ty = mk SSig SType (lam "X" $ atom SType)
+            ctx = VN :# ("x", ty)
+            tm = evar 0
+         in testShowTC (checkEval ty tm) ctx
+
+test9 = let aty = mk SPi SType (lam "X" $ atom SType) :: Type ^ S Z
+            ty = mk SSig aty (lam "X" $ atom SType)
+            ctx = VN :# ("x", ty)
+            tm = evar 0
+         in testShowTC (checkEval ty tm) ctx

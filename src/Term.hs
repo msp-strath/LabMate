@@ -17,7 +17,7 @@ data Sort
   | Chk
   | One
   | Prd Sort Sort
-  | Sub Nat
+  | Sub Nat  -- the source scope of the substitution
   deriving (Eq, Show)
 
 data Ctor (s :: Sort) (t :: Sort) where
@@ -280,6 +280,8 @@ tmShow b (T :$ P tl u tr :^ th) ctx =
   if b then " " ++ s else "[" ++ s ++ "]"
   where
     s = tmShow False (tl :^ covl u -< th) ctx ++ tmShow True (tr :^ covr u -< th) ctx
+tmShow b (D :$ tm :^ th) ctx = let (a, d) = split (tm :^ th)
+  in concat [barIf b, tmShow False a ctx, "(", tmShow False d ctx, ")"]
 -- TODO : add the remaining cases
 
 barIf :: Bool -> String
@@ -366,7 +368,7 @@ foo0 :: Term Chk ^ S (S (S Z))
 foo0 = mk
 
 foo1 :: Term Chk ^ S (S (S Z))
-foo1 = mk "Foo"
+foo1 = mk "Foo"  -- produces `T $^ atom "Foo" <&> nil` , *not* `atom "Foo"`
 
 foo2 :: Term Chk ^ S (S (S Z))
 foo2 = mk "Foo" (var 0)
