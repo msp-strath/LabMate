@@ -197,6 +197,7 @@ checkNormEval
 checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   (SType, []) -> typeEval tm
   (SOne, []) -> pure nil
+  (SAtom, []) -> pure tm
   (SAbel, [genTy]) -> nfAbelToTerm <$> termToNFAbel genTy tm
   (SList, [genTy]) -> propEh genTy >>= \case
       True  -> nfAbelToTerm <$> termToNFAbel genTy tm
