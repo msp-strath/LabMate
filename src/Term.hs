@@ -244,8 +244,14 @@ idSubstEh (SubT sig (NS u) V) | Refl <- allRight (swapCov u) = case idSubstEh si
 idSubstEh (SubT t _ _) = Left (IsSy (substSrc t))
 
 sub0 :: Term Syn ^ n -> Subst (S n) ^ n
-sub0 (tm :^ th) = let n = bigEnd th
-  in (ST :$ P (idSubst n) (leftAll th) tm) :^ io n
+sub0 tm@(_ :^ th) = let n = bigEnd th in
+  subSnoc (idSubst n :^ io n) tm
+{- let n = bigEnd th
+  in (ST :$ P (idSubst n) (leftAll th) tm) :^ io n -
+-}
+
+subSnoc :: Subst k ^ n -> Term Syn ^ n -> Subst (S k) ^ n
+subSnoc sig tm = ST $^ sig <&> tm
 
 tmShow :: forall s n
        .  Bool         -- is the term a cdr

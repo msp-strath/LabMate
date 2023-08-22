@@ -15,11 +15,14 @@ pattern SAtom = "Atom"
 pattern SEnum = "Enum"
 pattern SPi   = "Pi"
 pattern SSig  = "Sigma"
+pattern SMatrix = "Matrix"
 
 -- eliminators
 pattern Sfst  = "fst"
 pattern Ssnd  = "snd"
 
+pattern Shjux = "hjux"
+pattern Svjux = "vjux"
 
 newtype TC n x =
  TC { runTC :: (Natty n, Vec n (Type ^ n)) -> Either String x }
@@ -83,6 +86,14 @@ typeEh ty | Just cts <- tagEh ty = case cts of
   (SSig, [s, t]) | Just t' <- lamEh t -> do
     typeEh s
     under s $ typeEh t'
+  (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+    | Just cellTy <- lamEh cellTy
+    , Just cellTy <- lamEh cellTy -> withScope $ do
+      typeEh rowTy
+      typeEh colTy
+      under rowTy $ under (wk colTy) $ typeEh cellTy
+      checkEh (mk SList rowTy) rs
+      checkEh (mk SList colTy) cs
   (ty, _) -> fail $ "typeEh: unknown type " ++ ty
 typeEh ty | Just ty <- E $? ty = withScope $ do
   gotTy <- synthEh ty
@@ -138,8 +149,64 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
     checkEh s a
     True <$ checkEh (t' //^ sub0 (R $^ a <&> s)) d
   (SType, []) -> True <$ typeEh tm
+  (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+    | Just cellTy <- lamEh cellTy
+    , Just cellTy <- lamEh cellTy -> do
+      ((rs', _), (_, cs')) <- checkCanMatrixEh (rowTy, colTy, cellTy) (rs, cs) tm
+      True <$ unnil rowTy rs' <* unnil colTy cs'
   _ -> pure False
 checkCanEh _ _ = pure False
+
+type Corner n = ( Term 'Chk ^ n -- rowHeaders vertically on the left
+                , Term 'Chk ^ n -- columnHeaders horizontaly on the top
+                )
+
+checkCanMatrixEh
+  :: (NmTy ^ n, NmTy ^ n, NmTy ^ S (S n))  -- \row col. cellTy
+  -> Corner n        -- (rs, cs)
+  -> Term 'Chk ^ n
+  -> TC n ( Corner n -- (rs1, cs0), down the left and below
+          , Corner n -- (rs0, cs1), rightwards and along the top
+          )          -- invariant : rs = rs0 + rs1, cs = cs0 + cs1
+checkCanMatrixEh ty@(rowTy, colTy, cellTy) (rs, cs) tm
+  | Just (Sone, [t]) <- tagEh tm = withScope $ do
+    (r, rs') <- uncons rowTy rs
+    (c, cs') <- uncons colTy cs
+    let sig = subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)
+    checkEh (cellTy //^ sig) t
+    pure ((rs', mk Sone c), (mk Sone r, cs'))
+  | Just (Shjux, [l, r]) <- tagEh tm = withScope $ do
+    ((rs', cs0), (rs0, cs')) <- checkCanMatrixEh ty (rs, cs) l
+    ((rs'', cs1), (_, cs'')) <- checkCanMatrixEh ty (rs0, cs') r
+    unnil rowTy rs''
+    pure ((rs', mk Splus cs0 cs1), (rs0, cs''))
+  | Just (Svjux, [t, b]) <- tagEh tm = withScope $ do
+    ((rs', cs0), (rs0, cs')) <- checkCanMatrixEh ty (rs, cs) t
+    ((rs'', _), (rs1, cs'')) <- checkCanMatrixEh ty (rs', cs0) b
+    unnil colTy cs''
+    pure ((rs'', cs0), (mk Splus rs0 rs1, cs''))
+  | otherwise = undefined
+
+uncons :: Type ^ n -> Term Chk ^ n -> TC n (Term Chk ^ n, Term Chk ^ n)
+uncons elty xs = withScope $ propEh elty >>= \case
+  True  -> termToNFAbel elty xs >>= \case
+    t@NFAbel{..} -> do
+      guard (nfConst > 0)
+      pure  (nil, nfAbelToTerm (t {nfConst = nfConst - 1}))
+  False -> termToNFList elty xs >>= \case
+    (Right t) : ts -> pure (t, nfListToTerm ts)
+    (Left _) : _ -> fail "uncons: stuck head"
+    _ -> fail "uncons: empty list"
+
+unnil :: Type ^ n -> Term Chk ^ n -> TC n ()
+unnil elty xs = withScope $ propEh elty >>= \case
+  True  -> termToNFAbel elty xs >>= \case
+    NFAbel{nfConst = 0, nfStuck = []} -> pure  ()
+    _ -> fail "unnil : non-zero number"
+  False -> termToNFList elty xs >>= \case
+    [] -> pure ()
+    _ -> fail "unnil: non-empty list"
+
 
 checkEnumEh                   -- typechecking op
   :: NFList n                 -- haystack
@@ -243,6 +310,13 @@ typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
       mk SPi <$> typeEval s <*> (lam x <$> under s (typeEval t'))
   (SSig, [s, t]) | Just (x, t') <- lamNameEh t ->
       mk SSig <$> typeEval s <*> (lam x <$> under s (typeEval t'))
+  (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+    | Just (r, cellTy) <- lamNameEh cellTy, Just (c,cellTy) <- lamNameEh cellTy -> do
+      mk SMatrix <$> typeEval rowTy
+                 <*> typeEval colTy
+                 <*> (lam r <$> under rowTy (lam c <$> under (wk colTy) (typeEval cellTy)))
+                 <*> checkEval (mk SList rowTy) rs
+                 <*> checkEval (mk SList colTy) cs
   (ty, _) -> fail $ "typeEval: unknown type " ++ ty
 typeEval ty | Just ty <- E $? ty = fst <$> evalSynth ty
 typeEval ty = fail "typeEval: no"
@@ -449,15 +523,67 @@ test6 = let ty = mk SSig SType (lam "X" (evar 0))
 test7 = let ty = mk SPi SType (lam "X" $ atom SType)
             ctx = VN :# ("f", ty)
             tm = evar 0
-         in testShowTC (checkEval ty tm) ctx
+        in testShowTC (checkEval ty tm) ctx
 
 test8 = let ty = mk SSig SType (lam "X" $ atom SType)
             ctx = VN :# ("x", ty)
             tm = evar 0
-         in testShowTC (checkEval ty tm) ctx
+        in testShowTC (checkEval ty tm) ctx
 
 test9 = let aty = mk SPi SType (lam "X" $ atom SType) :: Type ^ S Z
             ty = mk SSig aty (lam "X" $ atom SType)
             ctx = VN :# ("x", ty)
             tm = evar 0
-         in testShowTC (checkEval ty tm) ctx
+        in testShowTC (checkEval ty tm) ctx
+
+test10 = let rs = mk Sone nil :: Term Chk ^ Z
+             cs = mk Sone nil :: Term Chk ^ Z
+             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+             tm = mk Sone SOne
+         in runTC (checkEh ty tm) (natty, VN)
+
+test11 = let rs = mk Sone nil :: Term Chk ^ Z
+             cs' = mk Sone nil :: Term Chk ^ Z
+             cs = cs' + cs'
+             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+             tm' = mk Sone SOne :: Term Chk ^ Z
+             tm = mk Shjux tm' tm' :: Term Chk ^ Z
+         in runTC (checkEh ty tm) (natty, VN)
+
+test12 = let rs' = mk Sone nil :: Term Chk ^ Z
+             cs = mk Sone nil :: Term Chk ^ Z
+             rs = rs' + rs'
+             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+             tm' = mk Sone SOne :: Term Chk ^ Z
+             tm = mk Svjux tm' tm' :: Term Chk ^ Z
+         in runTC (checkEh ty tm) (natty, VN)
+
+test13 = let rs' = mk Sone nil :: Term Chk ^ Z
+             cs' = mk Sone nil :: Term Chk ^ Z
+             cs = cs' + cs'
+             rs = rs' + rs'
+             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+             cell = mk Sone SOne :: Term Chk ^ Z
+             row = mk Shjux cell cell :: Term Chk ^ Z
+             tm  = mk Svjux row row :: Term Chk ^ Z
+         in runTC (checkEh ty tm) (natty, VN)
+
+test14 = let rs' = mk Sone nil :: Term Chk ^ Z
+             cs' = mk Sone nil :: Term Chk ^ Z
+             cs = cs' + cs'
+             rs = rs' + rs'
+             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+             cell = mk Sone "Foo" :: Term Chk ^ Z
+             row = mk Shjux cell cell :: Term Chk ^ Z
+             tm  = mk Svjux row row :: Term Chk ^ Z
+         in runTC (checkEh ty tm) (natty, VN)
+
+test15 = let rs' = mk Sone nil :: Term Chk ^ Z
+             cs' = mk Sone nil :: Term Chk ^ Z
+             cs = cs' + cs'
+             rs = rs' + rs'
+             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+             cell = mk Sone SOne :: Term Chk ^ Z
+             row = mk Shjux cell cell :: Term Chk ^ Z
+             tm  = mk Svjux row row :: Term Chk ^ Z
+         in runTC (checkEh ty row) (natty, VN)
