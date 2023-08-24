@@ -289,6 +289,9 @@ barIf :: Bool -> String
 barIf True = " | "
 barIf False = ""
 
+instance NATTY n => Show (Term s ^ n) where
+  show t = tmShow False t (names natty)
+
 data Roof :: Nat -> Nat -> Nat -> * where
   Roof :: Subst l l' -> Cov l' r' n -> Subst r r' -> Roof l r n
 
@@ -385,3 +388,8 @@ theNames = VN :# "z" :# "y" :# "x"
 
 testShow :: Term Chk ^ S (S (S Z)) -> IO ()
 testShow t = putStrLn $ tmShow False t theNames
+
+-- computig deBruijn levels
+names :: Natty n  ->  Vec n String
+names Zy = VN
+names (Sy n) = names n :# ("#" ++ show n)

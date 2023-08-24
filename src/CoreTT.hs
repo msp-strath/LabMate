@@ -6,6 +6,9 @@ import Data.List (stripPrefix)
 import NormalForm
 import Term
 
+import Debug.Trace
+
+track = trace
 -- types
 pattern SType = "Type"
 pattern SOne  = "One"
@@ -35,7 +38,7 @@ instance Applicative (TC n) where
   (<*>) = ap
 
 instance Alternative (TC n) where
-  empty = fail ""
+  empty = fail "TC monad"
   TC f <|> TC g = TC $ \ ga -> case f ga of
     Left msg -> case g ga of
       Left msg' -> Left $ msg ++ msg'
@@ -52,7 +55,7 @@ instance MonadFail (TC n) where
 
 must :: MonadFail m => Maybe a -> m a
 must (Just a) = pure a
-must Nothing = fail ""
+must Nothing = fail "must fails"
 
 typeOf :: (S Z <= n) -> TC n (Type ^ n)
 typeOf i = TC $ Right . vonly . (i ?^) . snd
@@ -153,6 +156,7 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
     | Just cellTy <- lamEh cellTy
     , Just cellTy <- lamEh cellTy -> do
       ((rs', _), (_, cs')) <- checkCanMatrixEh (rowTy, colTy, cellTy) (rs, cs) tm
+      True <- track "after checkCanMatrix" $ pure True
       True <$ unnil rowTy rs' <* unnil colTy cs'
   _ -> pure False
 checkCanEh _ _ = pure False
@@ -203,6 +207,19 @@ checkCanMatrixEh ty@(rowTy, colTy, cellTy) (rs, cs) tm
     ((rs'', _), (rs1, cs'')) <- checkCanMatrixEh ty (rs', cs0) b
     unnil colTy cs''
     pure ((rs'', cs0), (mk Splus rs0 rs1, cs''))
+  | Just tm <- E $? tm = withScope $ tagEh <$> synthEhNorm tm >>= \case
+     Just (SMatrix, [rowTy', colTy', cellTy', rs0, cs0]) |
+       Just cellTy' <- lamEh cellTy', Just cellTy' <- lamEh cellTy' -> do
+         subtypeEh rowTy' rowTy
+         subtypeEh colTy' colTy
+         under rowTy' $ under (wk colTy') $ subtypeEh cellTy' cellTy
+         True <- track "after subtyping" $ pure True
+         rs1 <- prefixEh rowTy' rs0 rs
+         True <- track ("row leftovers " ++ show rs1) $ pure True
+         cs1 <- prefixEh colTy' cs0 cs
+         True <- track ("col leftovers " ++ show cs1) $ pure True
+         pure ((rs1, cs0), (rs0, cs1))
+     _ -> fail "checkCanMatrixEh: malformed cell type"
   | otherwise = fail "checkCanMatrixEh: not a valid matrix ctor"
 
 uncons :: Type ^ n -> Term Chk ^ n -> TC n (Term Chk ^ n, Term Chk ^ n)
@@ -225,6 +242,40 @@ unnil elty xs = withScope $ propEh elty >>= \case
     [] -> pure ()
     _ -> fail "unnil: non-empty list"
 
+prefixEh
+  :: Type ^ n
+  -> Term Chk ^ n -- prefix
+  -> Term Chk ^ n -- whole list
+  -> TC n (Term Chk ^ n)
+prefixEh ty pr l = withScope $ propEh ty >>= \case
+  True -> do
+    True <- track ("in prefixEh pr " ++ show pr) $ pure True
+    True <- track ("in prefixEh l  " ++ show l) $ pure True
+    pr@NFAbel{nfConst = n, nfStuck = tns} <- termToNFAbel ty pr
+    l@NFAbel{nfConst = m, nfStuck = tms}  <- termToNFAbel ty l
+    True <- track ("NFAbel pr=" ++ show pr) $ pure True
+    True <- track ("NFAbel  l=" ++ show l) $ pure True
+    guard $ n <= m
+    nfAbelToTerm . NFAbel (m - n) <$> must (sub tns tms)
+  False -> do
+    pr <- termToNFList ty pr
+    l  <- termToNFList ty l
+    nfListToTerm <$> must (stripPrefix pr l)
+  where
+    sub :: [(Norm Chk ^ n, Integer)]
+        -> [(Norm Chk ^ n, Integer)]
+        -> Maybe [(Norm Chk^ n, Integer)]
+    sub [] = pure
+    sub ((t, n) : tns) = go
+      where
+       go [] = Nothing
+       go (sm@(s, m) : tms) = case compare s t of
+        LT -> (sm :) <$> go tms
+        GT -> Nothing
+        EQ -> case compare n m of
+          LT -> ((t, m - n):) <$> sub tns tms
+          GT -> Nothing
+          EQ -> sub tns tms
 
 checkEnumEh                   -- typechecking op
   :: NFList n                 -- haystack
@@ -282,7 +333,7 @@ checkNormEval
   -> TC n (Norm Chk ^ n)
 checkNormEval wantTy tm | Just tm <- E $? tm = do
   (tm, gotTy) <- evalSynth tm
-  transport tm gotTy wantTy
+  etaExpand tm gotTy wantTy
 checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   (SType, []) -> typeEval tm
   (SOne, []) -> pure nil
@@ -440,6 +491,9 @@ propEh ty = typeEval ty >>= \case
   _         -> pure False
 
 -- TODO : do more subtyping
+
+-- subtyping is not coercive, it is subsumptive, i.e.,any terms that
+-- checks at the subtype must check at the supertype unadultered
 subtypeEh :: NmTy ^ n -> NmTy ^ n -> TC n ()
 subtypeEh got want = withScope $
   case (tagEh got, tagEh want) of
@@ -459,12 +513,12 @@ subtypeEh got want = withScope $
     (_, Just (SOne, [])) -> pure ()
     _ -> guard $ got == want
 
-transport
+etaExpand
   :: Term Chk ^ n  -- *evaluated* term, but not eta-long
   -> NmTy ^ n      -- \
   -> NmTy ^ n      -- allowed to assume these types pass subtype check
   -> TC n (Norm Chk ^ n)
-transport tm gotTy wantTy
+etaExpand tm gotTy wantTy
   | Just tm <- E $? tm
   , Just gotTy <- tagEh gotTy
   , Just wantTy <- tagEh wantTy =
@@ -472,16 +526,16 @@ transport tm gotTy wantTy
       ((SPi, [gs, gt]), (SPi, [ws, wt]))
         | Just gt' <- lamEh gt, Just (name, wt') <- lamNameEh wt ->
           withScope $ (lam name <$>) . under ws $ do
-            arg <- transport (evar 0) (wk ws) (wk gs)
-            transport (E $^ D $^ wk tm <&> arg) gt' wt'
+            arg <- etaExpand (evar 0) (wk ws) (wk gs)
+            etaExpand (E $^ D $^ wk tm <&> arg) gt' wt'
       ((SSig, [gs, gt]), (SSig, [ws, wt]))
         | Just gt' <- lamEh gt, Just wt' <- lamEh wt -> withScope $ do
            let tm0 = D $^ tm <&> atom Sfst
-           a  <- transport (E $^ tm0) gs ws
+           a  <- etaExpand (E $^ tm0) gs ws
            let sig = sub0 tm0
            gt <- typeEval (gt' //^ sig)
            wt <- typeEval (wt' //^ sig)
-           d  <- transport (E $^ D $^ tm <&> atom Ssnd) gt wt
+           d  <- etaExpand (E $^ D $^ tm <&> atom Ssnd) gt wt
            pure (T $^ a <&> d)
       _  -> pure (E $^ tm)
   | otherwise = pure tm
@@ -571,3 +625,22 @@ test10 = let rs' = mk Sone nil :: Term Chk ^ Z
              row = mk Shjux cell cell :: Term Chk ^ Z
              tm  = mk Svjux row row :: Term Chk ^ Z
          in runTC (checkEh ty row) (natty, VN)
+
+
+
+type Term4 = Term Chk ^ S (S (S (S Z)))
+
+test11 = let i = evar 3 :: Term4
+             j = evar 1 :: Term4
+             mty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) :: Term4 -> Term4 -> Term4
+             one = mk Sone nil :: Term4
+             two = one + one
+             xty = mty one i
+             yty = mty one j
+             nat = mk SList SOne :: Term4
+             x = evar 2 :: Term4
+             y = evar 0 :: Term4
+             ctx = VN :# nat :# xty :# nat :# yty
+             tm = mk Svjux (mk Shjux x y :: Term4) (mk Shjux y x :: Term4) :: Term4
+             ty = mty two (i + j)
+         in runTC (checkEh ty tm) (natty, ctx)

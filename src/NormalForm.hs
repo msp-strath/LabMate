@@ -22,6 +22,8 @@ data NFAbel'
 -- NFAbel is closed under Plus (via merging)
 type NFAbel n = NFAbel' (Norm Chk ^ n) Integer
 
+deriving instance NATTY n => Show (NFAbel n)
+
 instance (Ord t, Num i, Eq i) => Semigroup (NFAbel' t i) where
   (<>) = mappend
 
