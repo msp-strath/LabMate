@@ -166,9 +166,7 @@ lam _ (t :^ No th) = K t :^ th
 lam x (t :^ Su th) = L (Hide x) t :^ th
 
 lamEh :: Term s ^ n -> Maybe (Term Chk ^ S n)
-lamEh (K t :^ th) = Just (t :^ No th)
-lamEh (L _ t :^ th) = Just (t :^ Su th)
-lamEh _ = Nothing
+lamEh = (snd <$>) . lamNameEh
 
 lamNameEh :: Term s ^ n -> Maybe (Name, Term Chk ^ S n)
 lamNameEh (K t :^ th) = Just ("_", t :^ No th)
@@ -246,9 +244,6 @@ idSubstEh (SubT t _ _) = Left (IsSy (substSrc t))
 sub0 :: Term Syn ^ n -> Subst (S n) ^ n
 sub0 tm@(_ :^ th) = let n = bigEnd th in
   subSnoc (idSubst n :^ io n) tm
-{- let n = bigEnd th
-  in (ST :$ P (idSubst n) (leftAll th) tm) :^ io n -
--}
 
 subSnoc :: Subst k ^ n -> Term Syn ^ n -> Subst (S k) ^ n
 subSnoc sig tm = ST $^ sig <&> tm

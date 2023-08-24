@@ -157,9 +157,10 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
   _ -> pure False
 checkCanEh _ _ = pure False
 
-type Corner n = ( Term 'Chk ^ n -- rowHeaders vertically on the left
-                , Term 'Chk ^ n -- columnHeaders horizontaly on the top
-                )
+type Corner n =
+  ( Term 'Chk ^ n -- rowHeaders vertically on the left
+  , Term 'Chk ^ n -- columnHeaders horizontaly on the top
+  )
 
 checkCanMatrixEh
   :: (NmTy ^ n, NmTy ^ n, NmTy ^ S (S n))  -- \row col. cellTy
@@ -168,6 +169,23 @@ checkCanMatrixEh
   -> TC n ( Corner n -- (rs1, cs0), down the left and below
           , Corner n -- (rs0, cs1), rightwards and along the top
           )          -- invariant : rs = rs0 + rs1, cs = cs0 + cs1
+{-
+     <------------cs------------>
+
+ ^   X------------------cs1----->
+ |   |           |
+ |   |           |
+ |   |          rs0
+ |   |           |
+ rs  |           |
+ |   X----cs0----X
+ |   |
+ |  rs1
+ |   |
+ v   v
+
+-}
+
 checkCanMatrixEh ty@(rowTy, colTy, cellTy) (rs, cs) tm
   | Just (Sone, [t]) <- tagEh tm = withScope $ do
     (r, rs') <- uncons rowTy rs
@@ -185,7 +203,7 @@ checkCanMatrixEh ty@(rowTy, colTy, cellTy) (rs, cs) tm
     ((rs'', _), (rs1, cs'')) <- checkCanMatrixEh ty (rs', cs0) b
     unnil colTy cs''
     pure ((rs'', cs0), (mk Splus rs0 rs1, cs''))
-  | otherwise = undefined
+  | otherwise = fail "checkCanMatrixEh: not a valid matrix ctor"
 
 uncons :: Type ^ n -> Term Chk ^ n -> TC n (Term Chk ^ n, Term Chk ^ n)
 uncons elty xs = withScope $ propEh elty >>= \case
@@ -417,11 +435,9 @@ termToNFAbel ty tm
   | otherwise = error "termToNFAbel: no"
 
 propEh :: Type ^ n -> TC n Bool
-propEh ty = do
-  n <- scope
-  typeEval ty >>= \case
-    Atom SOne -> pure True
-    _         -> pure False
+propEh ty = typeEval ty >>= \case
+  Atom SOne -> pure True
+  _         -> pure False
 
 -- TODO : do more subtyping
 subtypeEh :: NmTy ^ n -> NmTy ^ n -> TC n ()
@@ -483,102 +499,70 @@ testShowTC tc ctx =
     Left err -> err
     Right tm -> tmShow False tm (fst <$> ctx)
 
-{-
-test1 = let ty = mk SPi SType (lam "X" body)
-            body = mk SPi (var 0) (lam "x" (E $^ var 1))
-         in runTC (typeEh ty) (natty, VN)
-
-test2 = let ty = mk SPi SType (lam "X" body)
-            body = mk SPi ( var 0) (lam "x" (E $^ var 1))
-            tm = lam "X" $ lam "x" (E $^ var 0)
-         in runTC (checkEh ty tm) (natty, VN)
-
-test3 = let ty = mk SPi SType (lam "X" body)
-            body = (evar 0 ==> evar 0) ==> (evar 0 ==> evar 0)
-            tm = lam "X" $ lam "f" $ lam "x" $
-              E $^ D $^ var 1 <&> (E $^ D $^ var 1 <&> evar 0)
-        in runTC (checkEh ty tm) (natty, VN)
-
-test4 = let ty = mk SPi SType (lam "X" body)
-            body = (evar 0 ==> evar 0) ==> (evar 0 ==> evar 0)
-            tm = lam "X" $ lam "f" $ lam "x" $
-              E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
-         in runTC (checkEh ty tm) (natty, VN)
-         -- Left "synthEh: no"
-
-test5 = let ty = mk SPi SType (lam "X" body)
-            body = (evar 0 ==> evar 0) ==> (evar 0 ==> evar 0)
-            tm = lam "X" $ lam "f" $ lam "x" $
-              E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
-        in runTC (checkEh ty tm) (natty, VN)
-         -- Left "synthEh : no"
--}
-
-test6 = let ty = mk SSig SType (lam "X" (evar 0))
-            -- tm = snd (SOne, var 2)
+test1 = let ty = mk SSig SType (lam "X" (evar 0))
             tm = D $^ (R $^ (T $^ atom SOne <&> evar 2) <&> ty) <&> atom Ssnd
             ctx = VN :# ("x", atom SOne) :# ("y", atom SOne) :# ("z", atom SOne)
-        in  testShowTC (fst <$> evalSynth tm) ctx
+        in testShowTC (fst <$> evalSynth tm) ctx
 
-test7 = let ty = mk SPi SType (lam "X" $ atom SType)
+test2 = let ty = mk SPi SType (lam "X" $ atom SType)
             ctx = VN :# ("f", ty)
             tm = evar 0
         in testShowTC (checkEval ty tm) ctx
 
-test8 = let ty = mk SSig SType (lam "X" $ atom SType)
+test3 = let ty = mk SSig SType (lam "X" $ atom SType)
             ctx = VN :# ("x", ty)
             tm = evar 0
         in testShowTC (checkEval ty tm) ctx
 
-test9 = let aty = mk SPi SType (lam "X" $ atom SType) :: Type ^ S Z
+test4 = let aty = mk SPi SType (lam "X" $ atom SType) :: Type ^ S Z
             ty = mk SSig aty (lam "X" $ atom SType)
             ctx = VN :# ("x", ty)
             tm = evar 0
         in testShowTC (checkEval ty tm) ctx
 
-test10 = let rs = mk Sone nil :: Term Chk ^ Z
-             cs = mk Sone nil :: Term Chk ^ Z
-             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
-             tm = mk Sone SOne
+test5 = let rs = mk Sone nil :: Term Chk ^ Z
+            cs = mk Sone nil :: Term Chk ^ Z
+            ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+            tm = mk Sone SOne
          in runTC (checkEh ty tm) (natty, VN)
 
-test11 = let rs = mk Sone nil :: Term Chk ^ Z
-             cs' = mk Sone nil :: Term Chk ^ Z
-             cs = cs' + cs'
-             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
-             tm' = mk Sone SOne :: Term Chk ^ Z
-             tm = mk Shjux tm' tm' :: Term Chk ^ Z
+test6 = let rs = mk Sone nil :: Term Chk ^ Z
+            cs' = mk Sone nil :: Term Chk ^ Z
+            cs = cs' + cs'
+            ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+            tm' = mk Sone SOne :: Term Chk ^ Z
+            tm = mk Shjux tm' tm' :: Term Chk ^ Z
          in runTC (checkEh ty tm) (natty, VN)
 
-test12 = let rs' = mk Sone nil :: Term Chk ^ Z
-             cs = mk Sone nil :: Term Chk ^ Z
-             rs = rs' + rs'
-             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
-             tm' = mk Sone SOne :: Term Chk ^ Z
-             tm = mk Svjux tm' tm' :: Term Chk ^ Z
+test7 = let rs' = mk Sone nil :: Term Chk ^ Z
+            cs = mk Sone nil :: Term Chk ^ Z
+            rs = rs' + rs'
+            ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+            tm' = mk Sone SOne :: Term Chk ^ Z
+            tm = mk Svjux tm' tm' :: Term Chk ^ Z
          in runTC (checkEh ty tm) (natty, VN)
 
-test13 = let rs' = mk Sone nil :: Term Chk ^ Z
-             cs' = mk Sone nil :: Term Chk ^ Z
-             cs = cs' + cs'
-             rs = rs' + rs'
-             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
-             cell = mk Sone SOne :: Term Chk ^ Z
-             row = mk Shjux cell cell :: Term Chk ^ Z
-             tm  = mk Svjux row row :: Term Chk ^ Z
+test8 = let rs' = mk Sone nil :: Term Chk ^ Z
+            cs' = mk Sone nil :: Term Chk ^ Z
+            cs = cs' + cs'
+            rs = rs' + rs'
+            ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+            cell = mk Sone SOne :: Term Chk ^ Z
+            row = mk Shjux cell cell :: Term Chk ^ Z
+            tm  = mk Svjux row row :: Term Chk ^ Z
          in runTC (checkEh ty tm) (natty, VN)
 
-test14 = let rs' = mk Sone nil :: Term Chk ^ Z
-             cs' = mk Sone nil :: Term Chk ^ Z
-             cs = cs' + cs'
-             rs = rs' + rs'
-             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
-             cell = mk Sone "Foo" :: Term Chk ^ Z
-             row = mk Shjux cell cell :: Term Chk ^ Z
-             tm  = mk Svjux row row :: Term Chk ^ Z
+test9 = let rs' = mk Sone nil :: Term Chk ^ Z
+            cs' = mk Sone nil :: Term Chk ^ Z
+            cs = cs' + cs'
+            rs = rs' + rs'
+            ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+            cell = mk Sone "Foo" :: Term Chk ^ Z
+            row = mk Shjux cell cell :: Term Chk ^ Z
+            tm  = mk Svjux row row :: Term Chk ^ Z
          in runTC (checkEh ty tm) (natty, VN)
 
-test15 = let rs' = mk Sone nil :: Term Chk ^ Z
+test10 = let rs' = mk Sone nil :: Term Chk ^ Z
              cs' = mk Sone nil :: Term Chk ^ Z
              cs = cs' + cs'
              rs = rs' + rs'
