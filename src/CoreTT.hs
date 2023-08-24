@@ -382,7 +382,6 @@ checkEval ty tm = do
   ty <- typeEval ty
   checkNormEval ty tm
 
-
 typeEval :: Type ^ n -> TC n (NmTy ^ n)
 typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
   (x, []) | x `elem` [SAtom, SOne, SType] -> pure $ atom x
@@ -509,7 +508,7 @@ checkEvalMatrixNF
           , ( Corner n -- (rs1, cs0), down the left and below
             , Corner n -- (rs0, cs1), rightwards and along the top
           ) )          -- invariant : rs = rs0 + rs1, cs = cs0 + cs1
-checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) (rs, cs) tm
+checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
   | Just (Sone, [t]) <- tagEh tm = withScope $ do
     (r, rs') <- uncons rowTy rs
     (c, cs') <- uncons colTy cs
@@ -518,17 +517,17 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) (rs, cs) tm
     h <- nf rowTy $ mk Sone r
     pure ([(h, [NFCell v])] , ((rs', mk Sone c), (mk Sone r, cs')))
   | Just (Shjux, [l, r]) <- tagEh tm = withScope $ do
-    (lm, ((rs', cs0), (rs0, cs'))) <- checkEvalMatrixNF nf ty (rs, cs) l
-    (rm, ((rs'', cs1), (_, cs''))) <- checkEvalMatrixNF nf ty (rs0, cs') r
+    (lm, ((rs', cs0), rt@(rs0, _))) <- checkEvalMatrixNF nf ty mx l
+    (rm, ((_, cs1), (_, cs''))) <- checkEvalMatrixNF nf ty rt r
     pure (lm `hjux` rm,  ((rs', mk Splus cs0 cs1), (rs0, cs'')))
   | Just (Svjux, [t, b]) <- tagEh tm = withScope $ do
-    (tm, ((rs', cs0), (rs0, cs'))) <- checkEvalMatrixNF nf ty (rs, cs) t
-    (bm, ((rs'', _), (rs1, cs''))) <- checkEvalMatrixNF nf ty (rs', cs0) b
-    pure (tm `vjux` bm, ((rs'', cs0), (mk Splus rs0 rs1, cs'')))
+    (tm, (lb@(_, cs0), (rs0, cs'))) <- checkEvalMatrixNF nf ty mx t
+    (bm, ((rs'', _), (rs1, _))) <- checkEvalMatrixNF nf ty lb b
+    pure (tm `vjux` bm, ((rs'', cs0), (mk Splus rs0 rs1, cs')))
   | Just tm <- E $? tm = withScope $ do
      (tm, ty') <- evalSynthNmTy tm
      case E $? tm of
-       Nothing -> checkEvalMatrixNF nf ty (rs, cs) tm
+       Nothing -> checkEvalMatrixNF nf ty mx tm
        Just tm -> case tagEh ty' of
          Just (SMatrix, [_, _, _,  rs0, cs0]) -> do
            rs1 <- prefixEh rowTy rs0 rs
@@ -697,8 +696,6 @@ test11 = let i = evar 3 :: Term4
              ty = mty two (i + j)
          in runTC (checkEh ty tm) (natty, ctx)
 
-
-
 test12 = let rs' = mk Sone nil :: Term Chk ^ Z
              cs' = mk Sone nil :: Term Chk ^ Z
              cs = cs' + cs'
@@ -707,4 +704,4 @@ test12 = let rs' = mk Sone nil :: Term Chk ^ Z
              cell = mk Sone SOne :: Term Chk ^ Z
              col = mk Svjux cell cell :: Term Chk ^ Z
              tm  = mk Shjux col col :: Term Chk ^ Z
-         in  testShowTC (checkEval ty tm) VN
+         in  track ("test12 matrix: " ++ show tm) $ testShowTC (checkEval ty tm) VN
