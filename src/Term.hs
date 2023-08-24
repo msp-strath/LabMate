@@ -390,6 +390,6 @@ testShow :: Term Chk ^ S (S (S Z)) -> IO ()
 testShow t = putStrLn $ tmShow False t theNames
 
 -- computig deBruijn levels
-names :: Natty n  ->  Vec n String
+names :: Natty n -> Vec n String
 names Zy = VN
 names (Sy n) = names n :# ("#" ++ show n)

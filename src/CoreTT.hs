@@ -1,4 +1,4 @@
-module CoreTT where
+module CoreTT() where
 
 import Control.Applicative
 import Control.Monad
@@ -23,9 +23,6 @@ pattern SMatrix = "Matrix"
 -- eliminators
 pattern Sfst  = "fst"
 pattern Ssnd  = "snd"
-
-pattern Shjux = "hjux"
-pattern Svjux = "vjux"
 
 newtype TC n x =
  TC { runTC :: (Natty n, Vec n (Type ^ n)) -> Either String x }
@@ -214,13 +211,20 @@ checkCanMatrixEh ty@(rowTy, colTy, cellTy) (rs, cs) tm
          subtypeEh colTy' colTy
          under rowTy' $ under (wk colTy') $ subtypeEh cellTy' cellTy
          True <- track "after subtyping" $ pure True
-         rs1 <- prefixEh rowTy' rs0 rs
+         rs1 <- prefixEh rowTy rs0 rs
          True <- track ("row leftovers " ++ show rs1) $ pure True
-         cs1 <- prefixEh colTy' cs0 cs
+         cs1 <- prefixEh colTy cs0 cs
          True <- track ("col leftovers " ++ show cs1) $ pure True
          pure ((rs1, cs0), (rs0, cs1))
      _ -> fail "checkCanMatrixEh: malformed cell type"
   | otherwise = fail "checkCanMatrixEh: not a valid matrix ctor"
+
+{-
+withListAs :: Type ^ n -> [Term Chk ^ n] -> TC n (Either [NFAbel n] [NFList n])
+withListAs ty tms = propEh ty >>= \case
+  True  -> Left <$> traverse (termToNFAbel ty) tms
+  False -> Right <$> traverse (termToNFList ty) tms
+-}
 
 uncons :: Type ^ n -> Term Chk ^ n -> TC n (Term Chk ^ n, Term Chk ^ n)
 uncons elty xs = withScope $ propEh elty >>= \case
@@ -237,7 +241,7 @@ unnil :: Type ^ n -> Term Chk ^ n -> TC n ()
 unnil elty xs = withScope $ propEh elty >>= \case
   True  -> termToNFAbel elty xs >>= \case
     NFAbel{nfConst = 0, nfStuck = []} -> pure  ()
-    _ -> fail "unnil : non-zero number"
+    _ -> fail "unnil: non-zero number"
   False -> termToNFList elty xs >>= \case
     [] -> pure ()
     _ -> fail "unnil: non-empty list"
@@ -247,19 +251,19 @@ prefixEh
   -> Term Chk ^ n -- prefix
   -> Term Chk ^ n -- whole list
   -> TC n (Term Chk ^ n)
-prefixEh ty pr l = withScope $ propEh ty >>= \case
+prefixEh elty pr l = withScope $ propEh elty >>= \case
   True -> do
     True <- track ("in prefixEh pr " ++ show pr) $ pure True
-    True <- track ("in prefixEh l  " ++ show l) $ pure True
-    pr@NFAbel{nfConst = n, nfStuck = tns} <- termToNFAbel ty pr
-    l@NFAbel{nfConst = m, nfStuck = tms}  <- termToNFAbel ty l
+    True <- track ("in prefixEh  l " ++ show l) $ pure True
+    pr@NFAbel{nfConst = n, nfStuck = tns} <- termToNFAbel elty pr
+    l@NFAbel{nfConst = m, nfStuck = tms}  <- termToNFAbel elty l
     True <- track ("NFAbel pr=" ++ show pr) $ pure True
     True <- track ("NFAbel  l=" ++ show l) $ pure True
     guard $ n <= m
     nfAbelToTerm . NFAbel (m - n) <$> must (sub tns tms)
   False -> do
-    pr <- termToNFList ty pr
-    l  <- termToNFList ty l
+    pr <- termToNFList elty pr
+    l  <- termToNFList elty l
     nfListToTerm <$> must (stripPrefix pr l)
   where
     sub :: [(Norm Chk ^ n, Integer)]
@@ -357,6 +361,15 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
         a <- checkNormEval s a
         d <- checkEval (t' //^ sub0 (R $^ a <&> s)) d
         pure (T $^ a <&> d)
+  (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+    | Just cellTy <- lamEh cellTy, Just cellTy <- lamEh cellTy ->
+        withScope $ propEh rowTy >>= \case
+          True -> do
+            (nf, _) <- checkEvalMatrixNF termToNFAbel (rowTy, colTy, cellTy) (rs, cs) tm
+            pure $ nfMatrixToTerm nf
+          False -> do
+            (nf, _) <- checkEvalMatrixNF termToNFList (rowTy, colTy, cellTy) (rs, cs) tm
+            pure $ nfMatrixToTerm nf
   (t, _) -> fail $ "checkNormEval: unknown type " ++ t
 checkNormEval _ _ = fail "checkNormEval: no"
 
@@ -368,6 +381,7 @@ checkEval
 checkEval ty tm = do
   ty <- typeEval ty
   checkNormEval ty tm
+
 
 typeEval :: Type ^ n -> TC n (NmTy ^ n)
 typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
@@ -485,6 +499,46 @@ termToNFAbel ty tm
       if i == 0 then pure mempty else fmap (i *) <$> termToNFAbel ty t
   | otherwise = error "termToNFAbel: no"
 
+checkEvalMatrixNF
+  :: (Eq h, Monoid h, Show h)
+  => (Type ^ n -> Term Chk ^ n -> TC n h)
+  -> (NmTy ^ n, NmTy ^ n, NmTy ^ S (S n))  -- \row col. cellTy
+  -> Corner n        -- (rs, cs)
+  -> Term 'Chk ^ n
+  -> TC n ( NFMatrix h (Norm Chk ^ n) (Norm Syn ^ n)
+          , ( Corner n -- (rs1, cs0), down the left and below
+            , Corner n -- (rs0, cs1), rightwards and along the top
+          ) )          -- invariant : rs = rs0 + rs1, cs = cs0 + cs1
+checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) (rs, cs) tm
+  | Just (Sone, [t]) <- tagEh tm = withScope $ do
+    (r, rs') <- uncons rowTy rs
+    (c, cs') <- uncons colTy cs
+    let sig = subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)
+    v <- checkEval (cellTy //^ sig) t
+    h <- nf rowTy $ mk Sone r
+    pure ([(h, [NFCell v])] , ((rs', mk Sone c), (mk Sone r, cs')))
+  | Just (Shjux, [l, r]) <- tagEh tm = withScope $ do
+    (lm, ((rs', cs0), (rs0, cs'))) <- checkEvalMatrixNF nf ty (rs, cs) l
+    (rm, ((rs'', cs1), (_, cs''))) <- checkEvalMatrixNF nf ty (rs0, cs') r
+    pure (lm `hjux` rm,  ((rs', mk Splus cs0 cs1), (rs0, cs'')))
+  | Just (Svjux, [t, b]) <- tagEh tm = withScope $ do
+    (tm, ((rs', cs0), (rs0, cs'))) <- checkEvalMatrixNF nf ty (rs, cs) t
+    (bm, ((rs'', _), (rs1, cs''))) <- checkEvalMatrixNF nf ty (rs', cs0) b
+    pure (tm `vjux` bm, ((rs'', cs0), (mk Splus rs0 rs1, cs'')))
+  | Just tm <- E $? tm = withScope $ do
+     (tm, ty') <- evalSynthNmTy tm
+     case E $? tm of
+       Nothing -> checkEvalMatrixNF nf ty (rs, cs) tm
+       Just tm -> case tagEh ty' of
+         Just (SMatrix, [_, _, _,  rs0, cs0]) -> do
+           rs1 <- prefixEh rowTy rs0 rs
+           cs1 <- prefixEh colTy cs0 cs
+           h   <- nf rowTy rs0
+           pure ([(h, [NFNeutral tm])], ((rs1, cs0), (rs0, cs1)))
+         _ -> fail "checkEvalMatrixAbel:"
+  | otherwise = fail "checkEvalMatrixAbel: not a valid matrix ctor"
+
+
 propEh :: Type ^ n -> TC n Bool
 propEh ty = typeEval ty >>= \case
   Atom SOne -> pure True
@@ -493,7 +547,7 @@ propEh ty = typeEval ty >>= \case
 -- TODO : do more subtyping
 
 -- subtyping is not coercive, it is subsumptive, i.e.,any terms that
--- checks at the subtype must check at the supertype unadultered
+-- checks at the subtype must also check at the supertype unadulterated
 subtypeEh :: NmTy ^ n -> NmTy ^ n -> TC n ()
 subtypeEh got want = withScope $
   case (tagEh got, tagEh want) of
@@ -516,7 +570,7 @@ subtypeEh got want = withScope $
 etaExpand
   :: Term Chk ^ n  -- *evaluated* term, but not eta-long
   -> NmTy ^ n      -- \
-  -> NmTy ^ n      -- allowed to assume these types pass subtype check
+  -> NmTy ^ n      --- allowed to assume these types pass subtype check
   -> TC n (Norm Chk ^ n)
 etaExpand tm gotTy wantTy
   | Just tm <- E $? tm
@@ -626,8 +680,6 @@ test10 = let rs' = mk Sone nil :: Term Chk ^ Z
              tm  = mk Svjux row row :: Term Chk ^ Z
          in runTC (checkEh ty row) (natty, VN)
 
-
-
 type Term4 = Term Chk ^ S (S (S (S Z)))
 
 test11 = let i = evar 3 :: Term4
@@ -644,3 +696,15 @@ test11 = let i = evar 3 :: Term4
              tm = mk Svjux (mk Shjux x y :: Term4) (mk Shjux y x :: Term4) :: Term4
              ty = mty two (i + j)
          in runTC (checkEh ty tm) (natty, ctx)
+
+
+
+test12 = let rs' = mk Sone nil :: Term Chk ^ Z
+             cs' = mk Sone nil :: Term Chk ^ Z
+             cs = cs' + cs'
+             rs = rs' + rs'
+             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+             cell = mk Sone SOne :: Term Chk ^ Z
+             col = mk Svjux cell cell :: Term Chk ^ Z
+             tm  = mk Shjux col col :: Term Chk ^ Z
+         in  testShowTC (checkEval ty tm) VN
