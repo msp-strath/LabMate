@@ -1,4 +1,4 @@
-module CoreTT() where
+module CoreTT where
 
 import Control.Applicative
 import Control.Monad
@@ -9,6 +9,7 @@ import Term
 import Debug.Trace
 
 track = trace
+
 -- types
 pattern SType = "Type"
 pattern SOne  = "One"
@@ -187,7 +188,7 @@ checkCanMatrixEh
 
 -}
 
-checkCanMatrixEh ty@(rowTy, colTy, cellTy) (rs, cs) tm
+checkCanMatrixEh ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
   | Just (Sone, [t]) <- tagEh tm = withScope $ do
     (r, rs') <- uncons rowTy rs
     (c, cs') <- uncons colTy cs
@@ -195,15 +196,15 @@ checkCanMatrixEh ty@(rowTy, colTy, cellTy) (rs, cs) tm
     checkEh (cellTy //^ sig) t
     pure ((rs', mk Sone c), (mk Sone r, cs'))
   | Just (Shjux, [l, r]) <- tagEh tm = withScope $ do
-    ((rs', cs0), (rs0, cs')) <- checkCanMatrixEh ty (rs, cs) l
-    ((rs'', cs1), (_, cs'')) <- checkCanMatrixEh ty (rs0, cs') r
+    ((rs', cs0), rt@(rs0, _)) <- checkCanMatrixEh ty mx l
+    ((rs'', cs1), (_, cs''))  <- checkCanMatrixEh ty rt r
     unnil rowTy rs''
     pure ((rs', mk Splus cs0 cs1), (rs0, cs''))
   | Just (Svjux, [t, b]) <- tagEh tm = withScope $ do
-    ((rs', cs0), (rs0, cs')) <- checkCanMatrixEh ty (rs, cs) t
-    ((rs'', _), (rs1, cs'')) <- checkCanMatrixEh ty (rs', cs0) b
+    (lb@(_, cs0), (rs0, cs')) <- checkCanMatrixEh ty mx t
+    ((rs'', _), (rs1, cs'')) <- checkCanMatrixEh ty lb b
     unnil colTy cs''
-    pure ((rs'', cs0), (mk Splus rs0 rs1, cs''))
+    pure ((rs'', cs0), (mk Splus rs0 rs1, cs'))
   | Just tm <- E $? tm = withScope $ tagEh <$> synthEhNorm tm >>= \case
      Just (SMatrix, [rowTy', colTy', cellTy', rs0, cs0]) |
        Just cellTy' <- lamEh cellTy', Just cellTy' <- lamEh cellTy' -> do
