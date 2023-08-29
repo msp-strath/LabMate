@@ -60,6 +60,7 @@ library
                       Syntax,
                       Machine,
                       Machine.Reassemble,
+                      MagicStrings,
                       Term,
                       Term.Indexed,
                       Term.Natty,

@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Parse.Matlab where
 
 import Control.Monad

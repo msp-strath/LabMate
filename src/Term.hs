@@ -9,8 +9,7 @@ import Term.Natty
 import Term.Thinning
 import Term.Vec
 import Hide
-
-type Name = String
+import Bwd
 
 data Sort
   = Syn
@@ -25,6 +24,10 @@ data Ctor (s :: Sort) (t :: Sort) where
   A :: String -> Ctor One Chk
   -- integers
   I :: Integer -> Ctor One Chk
+  -- string literals
+  SL :: String -> Ctor One Chk
+  -- double literals
+  DL :: Double -> Ctor One Chk
   -- embedding
   E :: Ctor Syn Chk
   -- radicals
@@ -38,6 +41,15 @@ data Ctor (s :: Sort) (t :: Sort) where
   -- subst
   S0 :: Ctor One (Sub Z)
   ST :: Ctor (Prd (Sub n) Syn) (Sub (S n))
+
+
+
+type Root = Bwd (String, Int)
+type Name = [(String, Int)]
+
+name :: (Root, Int) -> String -> Name
+name (r, n) s = r <>> [(s, n)]
+
 
 data Term (s :: Sort)
           (n :: Nat)     -- object variable support
@@ -62,10 +74,15 @@ type Type = Term Chk
 type NmTy = Type
 type Norm = Term
 
+
+type Context n = (Natty n, Vec n (Type ^ n))
+
 ----------------------------------------------
 cmpCtor :: Ctor s t -> Ctor s' t -> Ordering' (s == s')
 cmpCtor (A s) (A s') = fromOrd Refl $ compare s s'
 cmpCtor (I i) (I i') = fromOrd Refl $ compare i i'
+cmpCtor (SL s) (SL s') = fromOrd Refl $ compare s s'
+cmpCtor (DL d) (DL d') = fromOrd Refl $ compare d d'
 cmpCtor E E = EQ' Refl
 cmpCtor R R = EQ' Refl
 cmpCtor T T = EQ' Refl
@@ -85,7 +102,7 @@ cmpCtor t t' = case compare (helper t) (helper t') of
     helper = \case
       { A{} -> 1; I{} -> 2; E -> 3; R -> 4
       ; T -> 5; D -> 6; M{} -> 7; S0 -> 8
-      ; ST{} -> 9 }
+      ; ST{} -> 9; SL{} -> 10; DL{} -> 11 }
 
 
 -- these instances should only be used for Norm
@@ -135,8 +152,16 @@ nilEh :: Term s ^ n -> Maybe ()
 nilEh (A "" :$ U :^ _) = Just ()
 nilEh _ = Nothing
 
-int :: NATTY n => Integer -> Term Chk ^ n
-int i = (I i :$ U) :^ no natty
+class Literal t where
+  ctor :: t -> Ctor One Chk
+
+lit :: (Literal t, NATTY n) => t -> Term Chk ^ n
+lit t = (ctor t :$ U) :^ no natty
+
+instance Literal Integer where ctor = I
+instance Literal Int     where ctor = I . toInteger
+instance Literal Double  where ctor = DL
+instance Literal String  where ctor = SL
 
 pattern Intg :: () => (s ~ Chk) => Integer -> Term s ^ n
 pattern Intg i <- I i :$ U :^ _
@@ -168,7 +193,7 @@ lam x (t :^ Su th) = L (Hide x) t :^ th
 lamEh :: Term s ^ n -> Maybe (Term Chk ^ S n)
 lamEh = (snd <$>) . lamNameEh
 
-lamNameEh :: Term s ^ n -> Maybe (Name, Term Chk ^ S n)
+lamNameEh :: Term s ^ n -> Maybe (String, Term Chk ^ S n)
 lamNameEh (K t :^ th) = Just ("_", t :^ No th)
 lamNameEh (L (Hide x) t :^ th) = Just (x, t :^ Su th)
 lamNameEh _ = Nothing
@@ -182,6 +207,9 @@ subst (tz :# (t :^ ph))
 
 meta :: NATTY n => (Name, Natty k) -> Vec k (Term Syn ^ n) -> Term Syn ^ n
 meta m tz | sig :^ th <- subst tz = M m :$ sig :^ th
+
+pattern FreeVar :: (s ~ Chk, n ~ Z) => Name -> Term s ^ n
+pattern FreeVar s = E :$ (M (s, Zy) :$ Sub0) :^ Ze
 
 tup :: NATTY n => [Term Chk ^ n] -> Term Chk ^ n
 tup = foldr (\x y -> T $^ x <&> y) nil

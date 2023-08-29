@@ -49,16 +49,16 @@ instance (Ord t, Num i, Eq i) => Monoid (NFAbel' t i) where
 
 nfAbelToTerm :: NATTY n => NFAbel n -> Norm Chk ^ n
 nfAbelToTerm NFAbel{..} = case (nfConst, nfStuck) of
-  (i, [])  -> int i
+  (i, [])  -> lit i
   (0, tis) -> go tis
-  (i, tis) -> mk Splus (int i) (go tis)
+  (i, tis) -> mk Splus (lit i) (go tis)
   where
     go [(tm, i)] = mu i tm
     go ((tm, i) : tis) = mk Splus (mu i tm) (go tis)
     go [] = error "impossible"
 
     mu 1 = id
-    mu i = mk (int i)
+    mu i = mk (lit i)
 
 -- termToNFAbel has to be in CoreTT
 
@@ -69,8 +69,8 @@ instance NATTY n => Num (Term Chk ^ n) where
    Intg _ -> mk s t
   abs = undefined
   signum = undefined
-  fromInteger = int
-  negate = mk (int (-1))
+  fromInteger = lit
+  negate = mk (lit (-1 :: Integer))
 
 type NFList n =
   [ Either

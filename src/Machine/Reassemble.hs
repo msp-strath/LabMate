@@ -7,6 +7,7 @@ import Lex
 import Parse
 import Parse.Matlab
 import Syntax
+import Term
 import Hide
 
 import Data.Map (Map)
@@ -79,7 +80,7 @@ renamePass ms = inbound ms
     renamer B0 n b = error "ScriptLocale disappeared in renamer!"
     renamer (fz :< Locale FunctionLocale) n b = renamer fz n True
     renamer (fz :< Locale ScriptLocale) n True = error "Declaration disappeared in renamer!"
-    renamer (fz :< Declaration n' d) n b = do
+    renamer (fz :< Declaration n' _ d) n b = do
       s <- newName d
       if n == n' then case d of
         UserDecl _ _ _ capturable -> do
@@ -102,7 +103,7 @@ renamePass ms = inbound ms
     captured B0 b s = pure False
     captured (fz :< Locale FunctionLocale) b s = captured fz True s
     captured (fz :< Locale ScriptLocale) True s = pure False
-    captured (fz :< Declaration _ d) b s = do
+    captured (fz :< Declaration _ _ d) b s = do
       s' <- newName d
       if s == s'
         then do

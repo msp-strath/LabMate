@@ -4,29 +4,15 @@ import Control.Applicative
 import Control.Monad
 import Data.List (stripPrefix)
 import NormalForm
+import MagicStrings
 import Term
 
 import Debug.Trace
 
 track = trace
 
--- types
-pattern SType = "Type"
-pattern SOne  = "One"
-pattern SAbel = "Abel"
-pattern SList = "List"
-pattern SAtom = "Atom"
-pattern SEnum = "Enum"
-pattern SPi   = "Pi"
-pattern SSig  = "Sigma"
-pattern SMatrix = "Matrix"
-
--- eliminators
-pattern Sfst  = "fst"
-pattern Ssnd  = "snd"
-
 newtype TC n x =
- TC { runTC :: (Natty n, Vec n (Type ^ n)) -> Either String x }
+ TC { runTC :: Context n -> Either String x }
 
 instance Functor (TC n) where
   fmap k (TC f) = TC $ fmap (fmap k) f
@@ -349,7 +335,7 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
       False -> nfListToTerm <$> termToNFList genTy tm
   (SEnum, [as]) -> termToNFList (atom SAtom) as >>= \x ->
       pure $ case findInEnum tm x of
-        Just (i, _)  -> int i
+        Just (i, _)  -> lit i
         -- TODO : handle neutrals, reduce further
         _ -> tm
   (SPi, [s, t])
@@ -600,7 +586,7 @@ etaExpand tm gotTy wantTy
 src ==> (tgt :^ th) = mk SPi src (K tgt :^ th)
 
 testShowTC :: TC n (Term 'Chk ^ n)
-           -> Vec n (Name, Type ^ n)
+           -> Vec n (String, Type ^ n)
            -> String
 testShowTC tc ctx =
   case runTC tc (vlen ctx, snd <$> ctx) of
@@ -705,4 +691,4 @@ test12 = let rs' = mk Sone nil :: Term Chk ^ Z
              cell = mk Sone SOne :: Term Chk ^ Z
              col = mk Svjux cell cell :: Term Chk ^ Z
              tm  = mk Shjux col col :: Term Chk ^ Z
-         in  track ("test12 matrix: " ++ show tm) $ testShowTC (checkEval ty tm) VN
+         in  track ("test12 matrix:\n" ++ show tm) $ testShowTC (checkEval ty tm) VN

@@ -18,6 +18,8 @@ import Parse
 import Parse.Matlab
 import Syntax
 import Hide
+import Term
+import MagicStrings
 
 data MachineState = MS
   { position :: Cursor Frame
@@ -25,12 +27,6 @@ data MachineState = MS
   , nameSupply :: (Root, Int)
   , nonceTable :: Map Nonce String
   } deriving Show
-
-type Root = Bwd (String, Int)
-type Name = [(String, Int)]
-
-name :: (Root, Int) -> String -> Name
-name (r, n) s = r <>> [(s, n)]
 
 fresh :: String -> MachineState -> (Name, MachineState)
 fresh s ms = let (r, n) = nameSupply ms in (name (r, n) s, ms { nameSupply = (r, n+1) })
@@ -41,20 +37,25 @@ freshNames (s:ss) st = case fresh s st of
    (n, st) -> case freshNames ss st of
      (ns, st) -> (n:ns, st)
 
-data Frame
-  = Source Source
-  | BlockRest [Command]
-  | Declaration Name DeclarationType
-  | Locale LocaleType
-  | Expressions [Expr]
-  | TargetLHS LHS
-  | Conditionals [(Expr, [Command])]
-  | MatrixRows [[Expr]]
-  | RenameFrame String String
-  | FunctionLeft Name LHS
-  | FormalParams [WithSource String]
-  | Fork (Either Fork Fork) [Frame] Problem
-  deriving Show
+type TERM = Term Chk ^ Z
+type TYPE = Type ^ Z
+
+data Frame where
+  Source :: Source -> Frame
+  BlockRest :: [Command] -> Frame
+  Declaration :: Name -> TYPE -> DeclarationType -> Frame
+  Definition :: NATTY n => Name -> Context n -> Maybe (Term Chk ^ n) -> Type ^ n -> Frame
+  Locale :: LocaleType -> Frame
+  Expressions :: [Expr] -> Frame
+  TargetLHS :: LHS -> Frame
+  Conditionals :: [(Expr, [Command])] -> Frame
+  MatrixRows :: [[Expr]] -> Frame
+  RenameFrame :: String -> String -> Frame
+  FunctionLeft :: Name -> LHS -> Frame
+  FormalParams :: [WithSource String] -> Frame
+  Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
+
+deriving instance Show Frame
 
 data Fork = Solved | FunctionName Name
   deriving Show
@@ -78,19 +79,12 @@ data Problem
   | Command Command'
   | LHS LHS'
   | FormalParam String
-  | Done Term
+  | Done TERM
   | Expression Expr'
   | Row [Expr]
   | RenameAction String String ResponseLocation
   | InputFormatAction String [String] ResponseLocation
   | FunCalled Expr'
-  deriving Show
-
-data Term
-  = FreeVar Name
-  | Atom String
-  | P Term Term
-  | Lit Lit
   deriving Show
 
 data Lit
@@ -103,11 +97,8 @@ data Gripe =
   RenameFail Nonce String
   deriving Show
 
-nil :: Term
-nil = Atom ""
-
-yikes :: Term -> Term
-yikes t = P (Atom "yikes") t
+yikes :: TERM  -> TERM
+yikes t = T $^ atom "yikes" <&> t
 
 initMachine :: File -> Map Nonce String -> MachineState
 initMachine f t = MS
@@ -123,19 +114,21 @@ findDeclaration (UserDecl old seen news _) fz = go fz False where
   go B0 _ = Nothing
   go (fz :< Locale ScriptLocale) True = Nothing
   go (fz :< f@(Locale FunctionLocale)) _ = fmap (:< f) <$> go fz True
-  go (fz :< f@(Declaration n (UserDecl old' seen' news' capturable'))) b | old == old' =
-    Just (n , fz :< Declaration n (UserDecl old' (seen' || seen) (news' ++ news) capturable'))
+  go (fz :< f@(Declaration n ty (UserDecl old' seen' news' capturable'))) b | old == old' =
+    Just (n , fz :< Declaration n ty (UserDecl old' (seen' || seen) (news' ++ news) capturable'))
   go (fz :< f) b = fmap (:< f) <$> go fz b
 
 makeDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
 makeDeclaration LabmateDecl ms = error "making labmatedecl declaration"
-makeDeclaration d@(UserDecl s seen news capturable) ms = case fresh s ms of
-  (n, ms) -> case position ms of
-    fz :<+>: fs -> (n, ms { position = findLocale fz (Declaration n d) :<+>: fs })
+makeDeclaration d@(UserDecl s seen news capturable) ms = case freshNames [s ++ "Type", s] ms of
+  ([ty, n], ms) -> case position ms of
+    fz :<+>: fs ->
+      let frz = B0 :< Definition ty (Zy, VN) Nothing (atom SType) :< Declaration n (FreeVar ty) d
+      in (n, ms { position = findLocale fz frz :<+>: fs })
   where
-    findLocale B0 fr = error "Locale disappeared!"
-    findLocale (fz :< l@(Locale _)) fr = fz :< fr :< l
-    findLocale (fz :< f) fr = findLocale fz fr :< f
+    findLocale B0 frz = error "Locale disappeared!"
+    findLocale (fz :< l@(Locale _)) frz = (fz <> frz) :< l
+    findLocale (fz :< f) frz = findLocale fz frz :< f
 
 ensureDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
 ensureDeclaration s ms@(MS { position = fz :<+>: fs}) = case findDeclaration s fz of
@@ -163,11 +156,11 @@ run ms@(MS { position = fz :<+>: [], problem = p })
   | BlockTop ((c :<=: src):cs) <- p = run $ ms { position = fz :< BlockRest cs :< Source src :<+>: [] , problem = Command c }
   | LHS (LVar x) <- p = case ensureDeclaration (UserDecl x True [] True) ms of
       (n, ms) -> move $ ms { problem = Done (FreeVar n) }
-  | LHS (LMat []) <- p = move $ ms { problem = Done (Atom "") }
+  | LHS (LMat []) <- p = move $ ms { problem = Done nil }
   | FormalParam x <- p = case makeDeclaration (UserDecl x True [] False) ms of
       (n, ms) -> move $ ms { problem = Done (FreeVar n) }
   | Expression (Var x) <- p = case findDeclaration (UserDecl x True [] False) fz of
-      Nothing -> move $ ms { problem = Done (yikes (P (Atom "OutOfScope") (Atom x))) }
+      Nothing -> move $ ms { problem = Done (yikes (T $^ atom "OutOfScope" <&> atom x)) }
       Just (n, fz)  -> move $ ms { position = fz :<+>: [], problem = Done (FreeVar n) }
   | Expression (App (f :<=: src) args) <- p = run $ ms { position = fz :< Expressions args :< Source src :<+>: [], problem = FunCalled f }
   | Expression (Brp (e :<=: src) args) <- p = run $ ms { position = fz :< Expressions args :< Source src :<+>: [], problem = Expression e }
@@ -178,13 +171,13 @@ run ms@(MS { position = fz :<+>: [], problem = p })
   | Expression (Cell es) <- p = case es of
       [] -> move $ ms { problem = Done nil }
       (r:rs) -> run $ ms { position = fz :< MatrixRows rs :<+>: [], problem = Row r }
-  | Expression (IntLiteral i) <- p = move $ ms { problem = Done (Lit (IntLit i)) }
-  | Expression (DoubleLiteral d) <- p = move $ ms { problem = Done (Lit (DoubleLit d)) }
-  | Expression (StringLiteral s) <- p = move $ ms { problem = Done (Lit (StringLit s)) }
+  | Expression (IntLiteral i) <- p = move $ ms { problem = Done (lit i) }
+  | Expression (DoubleLiteral d) <- p = move $ ms { problem = Done (lit d) }
+  | Expression (StringLiteral s) <- p = move $ ms { problem = Done (lit s) }
   | Expression (UnaryOp op (e :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [], problem = Expression e }
   | Expression (BinaryOp op (e0 :<=: src0) e1) <- p = run $ ms { position = fz :< Expressions [e1] :< Source src0 :<+>: [], problem = Expression e0 }
-  | Expression ColonAlone <- p = move $ ms { problem = Done (Atom ":") }
-  | Expression (Handle f) <- p = move $ ms { problem = Done (P (Atom "handle") (Atom f)) }
+  | Expression ColonAlone <- p = move $ ms { problem = Done (atom ":") }
+  | Expression (Handle f) <- p = move $ ms { problem = Done (T $^ atom "handle" <&> atom f) }
   | FunCalled f <- p = run $ ms { problem = Expression f }
 --  | Expression (Lambda xs t) <- p = _
   | Row rs <- p = case rs of
@@ -253,6 +246,8 @@ generateInputReader name body = case translateString Matlab name (concat (init b
 
 fundecls :: MachineState -> Bwd Frame -> [Command] -> (MachineState, Bwd Frame)
 fundecls ms fz [] = (ms, fz)
-fundecls ms fz (Function (_, fname :<=: _ , _) _ :<=: src:cs) = case fresh fname ms of
-  (n, ms) -> fundecls ms (fz :< Declaration n (UserDecl fname False [] False)) cs
+fundecls ms fz (Function (_, fname :<=: _ , _) _ :<=: src:cs) = case freshNames [fname ++ "Type", fname] ms of
+  ([ty, n], ms) -> let def = Definition ty (Zy, VN) Nothing (atom SType)
+                       decl = Declaration n (FreeVar ty) (UserDecl fname False [] False)
+                       in fundecls ms (fz :< def :< decl) cs
 fundecls ms fz (c:cs) = fundecls ms fz cs
