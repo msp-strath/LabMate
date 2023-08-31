@@ -18,6 +18,7 @@ import Parse
 import Parse.Matlab
 import Syntax
 import Hide
+import CoreTT
 import Term
 import MagicStrings
 
@@ -26,6 +27,7 @@ data MachineState = MS
   , problem :: Problem
   , nameSupply :: (Root, Int)
   , nonceTable :: Map Nonce String
+  , metaStore :: Store
   } deriving Show
 
 fresh :: String -> MachineState -> (Name, MachineState)
@@ -44,7 +46,7 @@ data Frame where
   Source :: Source -> Frame
   BlockRest :: [Command] -> Frame
   Declaration :: Name -> TYPE -> DeclarationType -> Frame
-  Definition :: NATTY n => Name -> Context n -> Status  -> Type ^ n -> Frame
+  Definition :: Name -> Status -> Frame
   Locale :: LocaleType -> Frame
   Expressions :: [Expr] -> Frame
   TargetLHS :: LHS -> Frame
@@ -54,8 +56,7 @@ data Frame where
   FunctionLeft :: Name -> LHS -> Frame
   FormalParams :: [WithSource String] -> Frame
   Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
-
-deriving instance Show Frame
+  deriving Show
 
 data Status = Crying | Waiting | Hoping | Defined
   deriving Show
@@ -109,6 +110,7 @@ initMachine f t = MS
   , problem = File f
   , nameSupply = (B0 :< ("labmate", 0), 0)
   , nonceTable = t
+  , metaStore = Map.empty
   }
 
 findDeclaration :: DeclarationType -> Bwd Frame -> Maybe (Name, Bwd Frame)
@@ -126,7 +128,7 @@ makeDeclaration LabmateDecl ms = error "making labmatedecl declaration"
 makeDeclaration d@(UserDecl s seen news capturable) ms = case freshNames [s ++ "Type", s] ms of
   ([ty, n], ms) -> case position ms of
     fz :<+>: fs ->
-      let frz = B0 :< Definition ty emptyContext Hoping (atom SType) :< Declaration n (FreeVar ty) d
+      let frz = B0 :< Definition ty Hoping :< Declaration n (FreeVar ty) d
       in (n, ms { position = findLocale fz frz :<+>: fs })
   where
     findLocale B0 frz = error "Locale disappeared!"
@@ -151,6 +153,21 @@ onNearestSource f ms@(MS { position = fz :<+>: fs}) = ms{ position = go fz :<+>:
     go B0 = error "Impossible : no enclosing Source frame"
     go (fz :< Source (n, Hide ts)) = fz :< Source (n, Hide $ f ts)
     go (fz :< f) = go fz :< f
+
+metaDecl :: Status -> String -> Context n -> Type ^ n -> MachineState -> (Name, MachineState)
+metaDecl s x ctx ty ms@MS {position = fz :<+>: fs, metaStore = mstore} = case fresh x ms of
+  (x, ms) -> (x, ms{ position = fz :< Definition x s :<+>: fs
+                   , metaStore = Map.insert x (Meta ctx ty Nothing) mstore
+                   }
+             )
+
+metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> MachineState -> (Term Chk ^ n, MachineState)
+metaDeclTerm s x ctx@(n, c) ty ms = case metaDecl s x ctx ty ms of
+  (x, ms) -> (E $^ M (x, n) $^ (idSubst n :^ io n), ms)
+
+
+push :: Frame -> MachineState -> MachineState
+push f ms@MS{ position = fz :<+>: fs } = ms { position = fz :< f :<+>: fs}
 
 run :: MachineState -> MachineState
 run ms@(MS { position = fz :<+>: [], problem = p })
@@ -191,8 +208,8 @@ run ms@(MS { position = fz :<+>: [], problem = p })
   | Command (Direct rl ((InputFormat name :<=: src, Just (InputFormatBody body)) :<=: src')) <- p = run $ ms { position = fz :< Source src' :< Source src :<+>: [] , problem = InputFormatAction name body rl}
   | Command (Function (lhs, fname :<=: _, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) fz of
       Nothing -> error "function should have been declared already"
-      Just (fname, fz) -> case fundecls ms B0 cs of
-            (ms, fz') -> move $ ms { position = (fz <> fz') :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :< FormalParams args :<+>: [] , problem = Done nil }
+      Just (fname, fz) -> case fundecls cs (ms {position =  of
+        ms@MS{ position =  -> move $ ms { position = fz :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :< FormalParams args :<+>: [] , problem = Done nil }
   | Command (Respond ts) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
   | Command (GeneratedCode cs) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
   | Command (If brs els) <- p = let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
@@ -247,10 +264,10 @@ generateInputReader name body = case translateString Matlab name (concat (init b
   Left err -> "% Error: " ++ show err
   Right s -> s
 
-fundecls :: MachineState -> Bwd Frame -> [Command] -> (MachineState, Bwd Frame)
-fundecls ms fz [] = (ms, fz)
-fundecls ms fz (Function (_, fname :<=: _ , _) _ :<=: src:cs) = case freshNames [fname ++ "Type", fname] ms of
-  ([ty, n], ms) -> let def = Definition ty emptyContext Hoping (atom SType)
-                       decl = Declaration n (FreeVar ty) (UserDecl fname False [] False)
-                       in fundecls ms (fz :< def :< decl) cs
-fundecls ms fz (c:cs) = fundecls ms fz cs
+fundecls :: [Command] -> MachineState -> MachineState
+fundecls [] ms = ms
+fundecls (Function (_, fname :<=: _ , _) _ :<=: src:cs) ms =
+  case metaDeclTerm Hoping (fname++"Type") emptyContext (atom SType) ms of
+    (ty, ms) -> case metaDecl Hoping fname emptyContext ty ms of
+      (fname', ms) -> fundecls cs $ push (Declaration fname' ty (UserDecl fname False [] False)) ms
+fundecls (_:cs) ms = fundecls cs ms

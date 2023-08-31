@@ -20,6 +20,11 @@ data Meta = forall n. Meta
   , mdefn :: Maybe (Term Chk ^ n)
   }
 
+instance Show Meta where
+  show = \case
+    Meta{..} -> nattily (fst mctxt) $
+      concat ["Meta{", show mctxt, " , ", show mtype, " , ", show mdefn, "}"]
+
 type Store = Map Name Meta
 
 newtype TC n x =
