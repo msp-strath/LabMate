@@ -3,6 +3,7 @@ module Term.Vec where
 import Term.Natty
 import Term.Thinning
 import Data.Traversable
+import GHC.Exts
 
 -- snoc vectors
 data Vec :: Nat -> * -> * where

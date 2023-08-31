@@ -44,7 +44,7 @@ data Frame where
   Source :: Source -> Frame
   BlockRest :: [Command] -> Frame
   Declaration :: Name -> TYPE -> DeclarationType -> Frame
-  Definition :: NATTY n => Name -> Context n -> Maybe (Term Chk ^ n) -> Type ^ n -> Frame
+  Definition :: NATTY n => Name -> Context n -> Status  -> Type ^ n -> Frame
   Locale :: LocaleType -> Frame
   Expressions :: [Expr] -> Frame
   TargetLHS :: LHS -> Frame
@@ -56,6 +56,9 @@ data Frame where
   Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
 
 deriving instance Show Frame
+
+data Status = Crying | Waiting | Hoping | Defined
+  deriving Show
 
 data Fork = Solved | FunctionName Name
   deriving Show
@@ -123,7 +126,7 @@ makeDeclaration LabmateDecl ms = error "making labmatedecl declaration"
 makeDeclaration d@(UserDecl s seen news capturable) ms = case freshNames [s ++ "Type", s] ms of
   ([ty, n], ms) -> case position ms of
     fz :<+>: fs ->
-      let frz = B0 :< Definition ty (Zy, VN) Nothing (atom SType) :< Declaration n (FreeVar ty) d
+      let frz = B0 :< Definition ty emptyContext Hoping (atom SType) :< Declaration n (FreeVar ty) d
       in (n, ms { position = findLocale fz frz :<+>: fs })
   where
     findLocale B0 frz = error "Locale disappeared!"
@@ -204,7 +207,7 @@ run ms@(MS { position = fz :<+>: [], problem = p })
 --  | Command (GeneratedCode cs) <- p = _wY
   | RenameAction old new rl <- p = case ensureDeclaration (UserDecl old False [(new, rl)] True) ms of
       (n, ms) -> move $ ms { problem = Done nil}
-  | InputFormatAction name body (n, c) <- p = move $ ms { nonceTable = Map.insertWith (++) n (concat ["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) (nonceTable ms)
+  | InputFormatAction name body (n, c) <- p = move $ ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) (nonceTable ms)
                                                    , problem = Done nil}
 -- run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
 run ms = move ms
@@ -247,7 +250,7 @@ generateInputReader name body = case translateString Matlab name (concat (init b
 fundecls :: MachineState -> Bwd Frame -> [Command] -> (MachineState, Bwd Frame)
 fundecls ms fz [] = (ms, fz)
 fundecls ms fz (Function (_, fname :<=: _ , _) _ :<=: src:cs) = case freshNames [fname ++ "Type", fname] ms of
-  ([ty, n], ms) -> let def = Definition ty (Zy, VN) Nothing (atom SType)
+  ([ty, n], ms) -> let def = Definition ty emptyContext Hoping (atom SType)
                        decl = Declaration n (FreeVar ty) (UserDecl fname False [] False)
                        in fundecls ms (fz :< def :< decl) cs
 fundecls ms fz (c:cs) = fundecls ms fz cs

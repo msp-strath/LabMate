@@ -1,5 +1,8 @@
 module CoreTT where
 
+import Data.Map(Map)
+import qualified Data.Map as Map
+
 import Control.Applicative
 import Control.Monad
 import Data.List (stripPrefix)
@@ -11,11 +14,19 @@ import Debug.Trace
 
 track = trace
 
+data Meta = forall n. Meta
+  { mctxt :: Context n
+  , mtype :: Type ^ n
+  , mdefn :: Maybe (Term Chk ^ n)
+  }
+
+type Store = Map Name Meta
+
 newtype TC n x =
- TC { runTC :: Context n -> Either String x }
+ TC { runTC :: Store -> Context n -> Either String x }
 
 instance Functor (TC n) where
-  fmap k (TC f) = TC $ fmap (fmap k) f
+  fmap = (<*>) . pure
 
 instance Applicative (TC n) where
   pure = return
@@ -23,29 +34,29 @@ instance Applicative (TC n) where
 
 instance Alternative (TC n) where
   empty = fail "TC monad"
-  TC f <|> TC g = TC $ \ ga -> case f ga of
-    Left msg -> case g ga of
+  TC f <|> TC g = TC $ \st ga -> case f st ga of
+    Left msg -> case g st ga of
       Left msg' -> Left $ msg ++ msg'
       r -> r
     r -> r
 
 instance Monad (TC n) where
-  return = TC . pure . pure
-  (TC f) >>= k = TC $ \ga ->
-    f ga >>= ($ ga) . runTC . k
+  return a = TC $ \st ctx -> pure a
+  (TC f) >>= k = TC $ \st ga ->
+    f st ga >>= \a -> runTC (k a) st ga
 
 instance MonadFail (TC n) where
-  fail  = TC . const . Left
+  fail  = TC . const . const . Left
 
 must :: MonadFail m => Maybe a -> m a
 must (Just a) = pure a
 must Nothing = fail "must fails"
 
 typeOf :: (S Z <= n) -> TC n (Type ^ n)
-typeOf i = TC $ Right . vonly . (i ?^) . snd
+typeOf i = TC $ \_ -> Right . vonly . (i ?^) . snd
 
 scope :: TC n (Natty n)
-scope = TC $ Right . fst
+scope = TC $ \_ -> Right . fst
 
 withScope :: (NATTY n => TC n t) -> TC n t
 withScope c = do
@@ -56,7 +67,12 @@ under
   :: Type ^ n
   -> TC (S n) a
   -> TC n a -- discharging the bound variable is the caller's problem
-under ty (TC f) = TC $ \(n, ctx) -> f (Sy n, wk <$> (ctx :# ty))
+under ty (TC f) = TC $ \st (n, ctx) -> f st (Sy n, wk <$> (ctx :# ty))
+
+metaLookup :: Name -> TC n Meta
+metaLookup s = TC $ \ st _ -> case s `Map.lookup` st of
+  Nothing -> error $ "Meta \"" ++ show s ++ "\" not found."
+  Just m -> pure m
 
 typeEh :: Term Chk ^ n -> TC n ()
 typeEh ty | Just cts <- tagEh ty = case cts of
@@ -424,7 +440,26 @@ evalSynth tm = withScope $ case tm of
                                       , t' //^ sub0 (D $^ tgt <&> atom Sfst))
             | otherwise -> error "evalSynth: funny pair"
       _ -> fail "evalSynth: eliminator for an unknown type"
+  M (x, n) :$ sig :^ th -> metaLookup x >>= \case
+    Meta {..}
+      | Just Refl <- nattyEqEh (fst mctxt) n ->
+        let ty = mtype //^ (sig :^ th)
+        in case mdefn of
+          Nothing -> do
+            sig <- evalSubst ((//^ (sig :^ th)) <$> snd mctxt) (sig :^ th)
+            pure (E $^ M (x, n) $^ sig, ty)
+          Just defn -> evalSynth (R $^ (defn //^ (sig :^ th)) <&> ty)
+      | otherwise -> fail "evalSynth: usage of a metavariable at wrong arity"
   _ -> fail "evalSynthEh: no"
+
+evalSubst :: Vec k (Type ^ n) -> Subst k ^ n -> TC n (Subst k ^ n)
+evalSubst VN _ = (Sub0 :^) <$> (no <$> scope)
+evalSubst (ctx :# ty) sig | Just sig <- ST $? sig = case split sig of
+  (sig, tm) -> do
+    sig <- evalSubst ctx sig
+    ty  <- typeEval ty
+    tm  <- checkNormEval ty (E $^ tm)
+    pure (ST $^ sig <&> (R $^ tm <&> ty))
 
 evalSynthNmTy :: Term Syn ^ n -> TC n (Term Chk ^ n, NmTy ^ n)
 evalSynthNmTy tm = do
@@ -589,7 +624,7 @@ testShowTC :: TC n (Term 'Chk ^ n)
            -> Vec n (String, Type ^ n)
            -> String
 testShowTC tc ctx =
-  case runTC tc (vlen ctx, snd <$> ctx) of
+  case runTC tc Map.empty (vlen ctx, snd <$> ctx) of
     Left err -> err
     Right tm -> tmShow False tm (fst <$> ctx)
 
@@ -618,7 +653,7 @@ test5 = let rs = mk Sone nil :: Term Chk ^ Z
             cs = mk Sone nil :: Term Chk ^ Z
             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
             tm = mk Sone SOne
-         in runTC (checkEh ty tm) (natty, VN)
+         in runTC (checkEh ty tm) Map.empty (natty, VN)
 
 test6 = let rs = mk Sone nil :: Term Chk ^ Z
             cs' = mk Sone nil :: Term Chk ^ Z
@@ -626,7 +661,7 @@ test6 = let rs = mk Sone nil :: Term Chk ^ Z
             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
             tm' = mk Sone SOne :: Term Chk ^ Z
             tm = mk Shjux tm' tm' :: Term Chk ^ Z
-         in runTC (checkEh ty tm) (natty, VN)
+         in runTC (checkEh ty tm) Map.empty (natty, VN)
 
 test7 = let rs' = mk Sone nil :: Term Chk ^ Z
             cs = mk Sone nil :: Term Chk ^ Z
@@ -634,7 +669,7 @@ test7 = let rs' = mk Sone nil :: Term Chk ^ Z
             ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
             tm' = mk Sone SOne :: Term Chk ^ Z
             tm = mk Svjux tm' tm' :: Term Chk ^ Z
-         in runTC (checkEh ty tm) (natty, VN)
+         in runTC (checkEh ty tm) Map.empty (natty, VN)
 
 test8 = let rs' = mk Sone nil :: Term Chk ^ Z
             cs' = mk Sone nil :: Term Chk ^ Z
@@ -644,7 +679,7 @@ test8 = let rs' = mk Sone nil :: Term Chk ^ Z
             cell = mk Sone SOne :: Term Chk ^ Z
             row = mk Shjux cell cell :: Term Chk ^ Z
             tm  = mk Svjux row row :: Term Chk ^ Z
-         in runTC (checkEh ty tm) (natty, VN)
+         in runTC (checkEh ty tm) Map.empty (natty, VN)
 
 test9 = let rs' = mk Sone nil :: Term Chk ^ Z
             cs' = mk Sone nil :: Term Chk ^ Z
@@ -654,7 +689,7 @@ test9 = let rs' = mk Sone nil :: Term Chk ^ Z
             cell = mk Sone "Foo" :: Term Chk ^ Z
             row = mk Shjux cell cell :: Term Chk ^ Z
             tm  = mk Svjux row row :: Term Chk ^ Z
-         in runTC (checkEh ty tm) (natty, VN)
+         in runTC (checkEh ty tm) Map.empty (natty, VN)
 
 test10 = let rs' = mk Sone nil :: Term Chk ^ Z
              cs' = mk Sone nil :: Term Chk ^ Z
@@ -664,7 +699,7 @@ test10 = let rs' = mk Sone nil :: Term Chk ^ Z
              cell = mk Sone SOne :: Term Chk ^ Z
              row = mk Shjux cell cell :: Term Chk ^ Z
              tm  = mk Svjux row row :: Term Chk ^ Z
-         in runTC (checkEh ty row) (natty, VN)
+         in runTC (checkEh ty row) Map.empty (natty, VN)
 
 type Term4 = Term Chk ^ S (S (S (S Z)))
 
@@ -681,7 +716,7 @@ test11 = let i = evar 3 :: Term4
              ctx = VN :# nat :# xty :# nat :# yty
              tm = mk Svjux (mk Shjux x y :: Term4) (mk Shjux y x :: Term4) :: Term4
              ty = mty two (i + j)
-         in runTC (checkEh ty tm) (natty, ctx)
+         in runTC (checkEh ty tm) Map.empty (natty, ctx)
 
 test12 = let rs' = mk Sone nil :: Term Chk ^ Z
              cs' = mk Sone nil :: Term Chk ^ Z

@@ -74,8 +74,10 @@ type Type = Term Chk
 type NmTy = Type
 type Norm = Term
 
-
 type Context n = (Natty n, Vec n (Type ^ n))
+
+emptyContext :: Context Z
+emptyContext = (Zy, VN)
 
 ----------------------------------------------
 cmpCtor :: Ctor s t -> Ctor s' t -> Ordering' (s == s')
