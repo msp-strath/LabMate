@@ -21,6 +21,7 @@ import Hide
 import CoreTT
 import Term
 import MagicStrings
+import Data.Maybe (fromMaybe)
 
 data MachineState = MS
   { position :: Cursor Frame
@@ -48,6 +49,7 @@ data Frame where
   Declaration :: Name -> TYPE -> DeclarationType -> Frame
   Definition :: Name -> Status -> Frame
   Locale :: LocaleType -> Frame
+  ExcursionReturnMarker :: Frame
   Expressions :: [Expr] -> Frame
   TargetLHS :: LHS -> Frame
   Conditionals :: [(Expr, [Command])] -> Frame
@@ -113,9 +115,10 @@ initMachine f t = MS
   , metaStore = Map.empty
   }
 
-findDeclaration :: DeclarationType -> Bwd Frame -> Maybe (Name, Bwd Frame)
-findDeclaration LabmateDecl fz = Nothing
-findDeclaration (UserDecl old seen news _) fz = go fz False where
+findDeclaration :: DeclarationType -> MachineState -> Maybe (Name, MachineState)
+findDeclaration LabmateDecl ms = Nothing
+findDeclaration (UserDecl old seen news _) ms@MS{position = fz :<+>: fs} =
+  fmap (\fz -> ms{position = fz :<+>: fs}) <$> go fz False where
   go B0 _ = Nothing
   go (fz :< Locale ScriptLocale) True = Nothing
   go (fz :< f@(Locale FunctionLocale)) _ = fmap (:< f) <$> go fz True
@@ -124,33 +127,32 @@ findDeclaration (UserDecl old seen news _) fz = go fz False where
   go (fz :< f) b = fmap (:< f) <$> go fz b
 
 makeDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
-makeDeclaration LabmateDecl ms = error "making labmatedecl declaration"
-makeDeclaration d@(UserDecl s seen news capturable) ms = case freshNames [s ++ "Type", s] ms of
-  ([ty, n], ms) -> case position ms of
-    fz :<+>: fs ->
-      let frz = B0 :< Definition ty Hoping :< Declaration n (FreeVar ty) d
-      in (n, ms { position = findLocale fz frz :<+>: fs })
+makeDeclaration LabmateDecl = error "making labmatedecl declaration"
+makeDeclaration d@(UserDecl x seen news capturable) = excursion $ \ms ->
+  case metaDeclTerm Hoping (x++"Type") emptyContext (atom SType) (findLocale ms) of
+    (ty, ms) -> case fresh x ms of
+      (x, ms) -> (x, push (Declaration x ty d) ms)
   where
-    findLocale B0 frz = error "Locale disappeared!"
-    findLocale (fz :< l@(Locale _)) frz = (fz <> frz) :< l
-    findLocale (fz :< f) frz = findLocale fz frz :< f
+    findLocale ms@MS{ position = B0 :<+>: _ } = error "Locale disappeared!"
+    findLocale ms@MS{ position = fz :< f :<+>: fs } =
+      ($ ms{ position = fz :<+>: f : fs }) $ case f of
+        Locale{} -> id
+        _ -> findLocale
 
 ensureDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
-ensureDeclaration s ms@(MS { position = fz :<+>: fs}) = case findDeclaration s fz of
-  Nothing -> makeDeclaration s ms
-  Just (n, fz) -> (n, ms { position = fz :<+>: fs})
+ensureDeclaration s ms = fromMaybe (makeDeclaration s ms) (findDeclaration s ms)
 
 nearestSource :: MachineState -> Source
 nearestSource ms@(MS { position = fz :<+>: _}) = go fz
   where
-    go B0 = error "Impossible : no enclosing Source frame"
+    go B0 = error "Impossible: no enclosing Source frame"
     go (fz :< Source src) = src
     go (fz :< _) = go fz
 
 onNearestSource :: ([Tok] -> [Tok]) -> MachineState -> MachineState
 onNearestSource f ms@(MS { position = fz :<+>: fs}) = ms{ position = go fz :<+>: fs }
   where
-    go B0 = error "Impossible : no enclosing Source frame"
+    go B0 = error "Impossible: no enclosing Source frame"
     go (fz :< Source (n, Hide ts)) = fz :< Source (n, Hide $ f ts)
     go (fz :< f) = go fz :< f
 
@@ -165,23 +167,36 @@ metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> MachineState -> (Te
 metaDeclTerm s x ctx@(n, c) ty ms = case metaDecl s x ctx ty ms of
   (x, ms) -> (E $^ M (x, n) $^ (idSubst n :^ io n), ms)
 
-
 push :: Frame -> MachineState -> MachineState
-push f ms@MS{ position = fz :<+>: fs } = ms { position = fz :< f :<+>: fs}
+push f ms@MS{ position = fz :<+>: fs } = ms { position = fz :< f :<+>: fs }
+
+pushes :: [Frame] -> MachineState -> MachineState
+pushes = flip $ foldl (flip push)
+
+excursion
+  :: (MachineState -> (v, MachineState)) -- the operation should leave the cursor to the left of where it started
+  -> MachineState
+  -> (v, MachineState)
+excursion op ms@MS{ position = fz :<+>: fs } = case op ms{ position = fz :<+>: (ExcursionReturnMarker : fs) } of
+  (v, ms@MS{..}) -> (v, ms{position = go position}) where
+    go :: Cursor Frame -> Cursor Frame
+    go (fz :<+>: ExcursionReturnMarker : fs) = fz :<+>: fs
+    go (fz :<+>: f : fs) = go (fz :< f :<+>: fs)
+    go (fz :<+>: []) = error "excursion got lost"
 
 run :: MachineState -> MachineState
 run ms@(MS { position = fz :<+>: [], problem = p })
-  | File (cs :<=: src) <- p = case fundecls ms B0 cs of
-      (ms, fz') -> run $ ms { position = fz <> fz' :< Locale ScriptLocale :< Source src :<+>: [] , problem = BlockTop cs }
+  | File (cs :<=: src) <- p = case fundecls cs ms of
+      ms -> run $ (pushes [Locale ScriptLocale, Source src] ms) { problem = BlockTop cs }
   | BlockTop ((c :<=: src):cs) <- p = run $ ms { position = fz :< BlockRest cs :< Source src :<+>: [] , problem = Command c }
   | LHS (LVar x) <- p = case ensureDeclaration (UserDecl x True [] True) ms of
-      (n, ms) -> move $ ms { problem = Done (FreeVar n) }
+      (x, ms) -> move $ ms { problem = Done (FreeVar x) }
   | LHS (LMat []) <- p = move $ ms { problem = Done nil }
   | FormalParam x <- p = case makeDeclaration (UserDecl x True [] False) ms of
-      (n, ms) -> move $ ms { problem = Done (FreeVar n) }
-  | Expression (Var x) <- p = case findDeclaration (UserDecl x True [] False) fz of
+      (x, ms) -> move $ ms { problem = Done (FreeVar x) }
+  | Expression (Var x) <- p = case findDeclaration (UserDecl x True [] False) ms of
       Nothing -> move $ ms { problem = Done (yikes (T $^ atom "OutOfScope" <&> atom x)) }
-      Just (n, fz)  -> move $ ms { position = fz :<+>: [], problem = Done (FreeVar n) }
+      Just (x, ms)  -> move $ ms { problem = Done (FreeVar x) }
   | Expression (App (f :<=: src) args) <- p = run $ ms { position = fz :< Expressions args :< Source src :<+>: [], problem = FunCalled f }
   | Expression (Brp (e :<=: src) args) <- p = run $ ms { position = fz :< Expressions args :< Source src :<+>: [], problem = Expression e }
   | Expression (Dot (e :<=: src) fld) <- p = run $ ms { position = fz :< Source src :<+>: [], problem = Expression e }
@@ -206,10 +221,10 @@ run ms@(MS { position = fz :<+>: [], problem = p })
   | Command (Assign lhs (e :<=: src)) <- p = run $ ms { position = fz :< TargetLHS lhs :< Source src :<+>: [] , problem = Expression e }
   | Command (Direct rl ((Rename old new :<=: src, _) :<=: src')) <- p = run $ ms { position = fz :< Source src' :< Source src :<+>: [] , problem = RenameAction old new rl}
   | Command (Direct rl ((InputFormat name :<=: src, Just (InputFormatBody body)) :<=: src')) <- p = run $ ms { position = fz :< Source src' :< Source src :<+>: [] , problem = InputFormatAction name body rl}
-  | Command (Function (lhs, fname :<=: _, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) fz of
+  | Command (Function (lhs, fname :<=: _, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) ms of
       Nothing -> error "function should have been declared already"
-      Just (fname, fz) -> case fundecls cs (ms {position =  of
-        ms@MS{ position =  -> move $ ms { position = fz :< Locale FunctionLocale :< FunctionLeft fname lhs :< BlockRest cs :< FormalParams args :<+>: [] , problem = Done nil }
+      Just (fname, ms) -> case fundecls cs ms of
+        ms -> move $ (pushes [Locale FunctionLocale, FunctionLeft fname lhs, BlockRest cs, FormalParams args] ms) { problem = Done nil }
   | Command (Respond ts) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
   | Command (GeneratedCode cs) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
   | Command (If brs els) <- p = let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
@@ -224,8 +239,7 @@ run ms@(MS { position = fz :<+>: [], problem = p })
 --  | Command (GeneratedCode cs) <- p = _wY
   | RenameAction old new rl <- p = case ensureDeclaration (UserDecl old False [(new, rl)] True) ms of
       (n, ms) -> move $ ms { problem = Done nil}
-  | InputFormatAction name body (n, c) <- p = move $ ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) (nonceTable ms)
-                                                   , problem = Done nil}
+  | InputFormatAction name body (n, c) <- p = move $ ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) (nonceTable ms), problem = Done nil}
 -- run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
 run ms = move ms
 
