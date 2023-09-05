@@ -1,10 +1,14 @@
 module Test.CoreTT where
 
-import CoreTT
+import qualified Data.Map as Map
+
+import CoreTT (testShowTC, checkEh, checkEval, typeEh, evalSynth, (==>))
+import qualified CoreTT as TT
 import Term hiding (testShow)
 import Term.Natty
 import Term.Vec
 import NormalForm
+import MagicStrings
 
 import Test.Tasty(TestTree)
 import Test.Tasty.HUnit
@@ -19,11 +23,13 @@ coreTests = [ test0,  test1, test2, test3, test4, test5, test5', test6, test7
             , test23, test24
             ]
 
+runTC tc = TT.runTC tc Map.empty
+
 test0 = mkTest
         ( "Eval Abel (prop): x + y"
         , let ty = mk SAbel SOne
               tm = evar 0 + evar 1
-          in testShowTC (checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
+          in TT.testShowTC (checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
         , "['plus y x]"
         )
 
@@ -54,7 +60,7 @@ test3 = mkTest
 test4 = mkTest
         ( "Eval Abel (prop): (int 5) :: Abel One"
         , let ty = mk SAbel SOne
-              tm = mk Sone (int 5)
+              tm = mk Sone $ lit (5 :: Int)
           in testShowTC (checkEval ty tm) VN
         , "1"
         )
@@ -71,7 +77,7 @@ test5' = mkTest
          ( "Eval List (non-prop): x + y"
          , let ty = mk SList SType
                tm = evar 0 + evar 1
-           in testShowTC (checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
+           in testShowTC (TT.checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
          , "['plus x y]"
          )
 
@@ -87,7 +93,7 @@ test7 = mkTest
         ( "Eval List (prop): x + 3 + x"
         , let ty = mk SList SOne
               tm = (evar 0 + 3) + evar 0
-          in testShowTC (checkEval ty tm) (VN :# ("x", ty))
+          in testShowTC (TT.checkEval ty tm) (VN :# ("x", ty))
         , "['plus 3 [2 x]]"
         )
 
@@ -95,7 +101,7 @@ test8 = mkTest
         ( "Chk List (prop): x + 3 + x"
         , let ty = mk SList SOne
               tm = (evar 0 + 3) + evar 0
-          in runTC (checkEh ty tm) (natty, VN :# ty)
+          in runTC (TT.checkEh ty tm) (natty, VN :# ty)
         , Right ()
         )
 
@@ -131,7 +137,7 @@ test12 = mkTest
          ( "Chk Enum('a, 'b, 'c): 2"
          , let ty = mk SEnum atoms
                atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-               tm = int 2
+               tm = lit (2 :: Int)
                f s = mk Sone (atom s)
            in runTC (checkEh ty tm) (natty, VN)
          , Right ()
@@ -141,7 +147,7 @@ test13 = mkTest
          ( "Chk Enum('a, 'b, 'c): 5"
          , let ty = mk SEnum atoms
                atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-               tm = int 5
+               tm = lit (5 :: Int)
                f s = mk Sone (atom s)
            in runTC (checkEh ty tm) (natty, VN)
          , Left "checkEnumEh: tag at index not determined."
@@ -184,7 +190,7 @@ test16 = mkTest
                tm = evar 0
                f s = mk Sone (atom s)
            in runTC (checkEh ty tm) (natty, VN :# atom SAtom)
-        , Left ""
+        , Left "TC monad"
         )
 
 test17 = mkTest
@@ -261,10 +267,10 @@ test23 = mkTest
          )
 
 test24 = mkTest
-         ( "EvalSyn Sig: (One, z)"
+         ( "EvalSyn Sig: (One, x)"
          , let ty = mk SSig SType (lam "X" (evar 0))
-               tm = D $^ (R $^ (T $^ atom SOne <&> evar 2) <&> ty) <&> atom Ssnd
-               ctx = VN :# ("x", atom SOne) :# ("y", atom SOne) :# ("z", atom SOne)
+               tm = D $^ (R $^ (T $^ atom SOne <&> evar 0) <&> ty) <&> atom Ssnd
+               ctx = VN :# ("x", atom SOne)
            in  testShowTC (fst <$> evalSynth tm) ctx
          , "[]"
          )

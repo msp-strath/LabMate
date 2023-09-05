@@ -314,7 +314,7 @@ checkEnumEh ts tm = withScope $ case tagEh tm of
   _ | Just tm <- E $? tm -> synthEh tm >>= \ty -> do
     subtypeEh ty (tag SEnum [nfListToTerm ts])
     pure Nothing
-  _ -> fail "checkEnumEh: "
+  _ -> fail "checkEnumEh:"
 
 synthEh
   :: Term Syn ^ n    {- t -}
@@ -620,7 +620,7 @@ etaExpand tm gotTy wantTy
       _  -> pure (E $^ tm)
   | otherwise = pure tm
 
------------- testing -----------------------
+------------------ testing -----------------------
 
 (==>) :: Type ^ S Z -> Type ^ S Z -> Type ^ S Z
 src ==> (tgt :^ th) = mk SPi src (K tgt :^ th)
@@ -632,6 +632,7 @@ testShowTC tc ctx =
   case runTC tc Map.empty (vlen ctx, snd <$> ctx) of
     Left err -> err
     Right tm -> tmShow False tm (fst <$> ctx)
+
 
 test1 = let ty = mk SSig SType (lam "X" (evar 0))
             tm = D $^ (R $^ (T $^ atom SOne <&> evar 2) <&> ty) <&> atom Ssnd
