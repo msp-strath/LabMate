@@ -345,6 +345,7 @@ checkNormEval
   -> TC n (Norm Chk ^ n)
 checkNormEval wantTy tm | Just tm <- E $? tm = do
   (tm, gotTy) <- evalSynth tm
+  gotTy <- typeEval gotTy
   etaExpand tm gotTy wantTy
 checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   (SType, []) -> typeEval tm
@@ -601,15 +602,15 @@ etaExpand
 etaExpand tm gotTy wantTy
   | Just tm <- E $? tm
   , Just gotTy <- tagEh gotTy
-  , Just wantTy <- tagEh wantTy =
+  , Just wantTy <- tagEh wantTy = withScope $
     case (gotTy, wantTy) of
       ((SPi, [gs, gt]), (SPi, [ws, wt]))
         | Just gt' <- lamEh gt, Just (name, wt') <- lamNameEh wt ->
-          withScope $ (lam name <$>) . under ws $ do
+            (lam name <$>) . under ws $ do
             arg <- etaExpand (evar 0) (wk ws) (wk gs)
             etaExpand (E $^ D $^ wk tm <&> arg) gt' wt'
       ((SSig, [gs, gt]), (SSig, [ws, wt]))
-        | Just gt' <- lamEh gt, Just wt' <- lamEh wt -> withScope $ do
+        | Just gt' <- lamEh gt, Just wt' <- lamEh wt -> do
            let tm0 = D $^ tm <&> atom Sfst
            a  <- etaExpand (E $^ tm0) gs ws
            let sig = sub0 tm0
@@ -617,6 +618,7 @@ etaExpand tm gotTy wantTy
            wt <- typeEval (wt' //^ sig)
            d  <- etaExpand (E $^ D $^ tm <&> atom Ssnd) gt wt
            pure (T $^ a <&> d)
+      (_, (SOne, [])) -> pure nil
       _  -> pure (E $^ tm)
   | otherwise = pure tm
 
