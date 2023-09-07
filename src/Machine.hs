@@ -156,6 +156,7 @@ data Problem
   | Expression Expr'
   | Row [Expr]
   | RenameAction String String ResponseLocation
+  | DeclareAction String
   | InputFormatAction String [String] ResponseLocation
   | FunCalled Expr'
   | Sourced (WithSource Problem)
@@ -317,7 +318,7 @@ run = prob >>= \case
     run
   Command (Direct rl ((Declare xs ty :<=: src, _) :<=: src')) -> do
     traverse_ push [Source src', Source src]
-    push $ Problems (Sourced . fmap (Expression . Var) <$> xs)
+    push $ Problems (Sourced . fmap DeclareAction <$> xs)
     newProb $ Done nil -- FIXME
     move
   Command (Function (lhs, fname :<=: _, args) cs) ->
@@ -364,6 +365,10 @@ run = prob >>= \case
   RenameAction old new rl -> do
     ensureDeclaration (UserDecl old False [(new, rl)] True)
     newProb $ Done nil
+    move
+  DeclareAction name -> do
+    name <- ensureDeclaration (UserDecl name False [] True)
+    newProb $ Done (FreeVar name)
     move
   InputFormatAction name body (n, c) -> do
     modify $ \ms@MS{..} -> ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) nonceTable }
