@@ -63,7 +63,9 @@ renamePass ms = inbound ms
               position = fz :<+>:
                 [ Source (l, Hide (s{kin = Grp Response dss} : ss))
                 , Source (n, Hide (respond ts))
-                ,Source (m, Hide (t'{raw = "renamed"} : ts'))]}
+                , Source (m, Hide (t'{raw = "renamed"} : ts'))
+                ]
+              }
         (fz, p) -> outbound ms{ position = fz :<+>: [] }
 
     outbound :: MachineState -> Writer RenameProblems MachineState

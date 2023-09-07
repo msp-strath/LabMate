@@ -3,6 +3,7 @@ module Machine where
 import Control.Monad
 import Control.Newtype
 import Control.Monad.State
+import Data.Char
 import Data.List
 import Data.Maybe (fromMaybe)
 import Data.Monoid
@@ -82,11 +83,33 @@ switchFwrd (fs', p') = do
 prob :: Elab Problem
 prob = llup >>= \case
   Nothing -> gets problem
+  Just (LocalNamespace ns) -> do
+    oldNs <- swapNameSupply ns
+    push $ LocalNamespace oldNs
+    prob
   Just f  -> push f >> prob
 
 newProb :: Problem -> Elab () -- TODO: consider checking if we are at
                               -- the problem
 newProb p = modify (\ms -> ms{ problem = p })
+
+swapNameSupply :: NameSupply -> Elab NameSupply
+swapNameSupply ns = do
+  ns' <- gets nameSupply
+  modify $ \ms -> ms { nameSupply = ns }
+  pure ns'
+
+newNamespace :: String -> Elab NameSupply
+newNamespace s = do
+  (root, n) <- gets nameSupply
+  modify $ \ms -> ms { nameSupply = (root, n + 1) }
+  pure (root :< (s, n), 0)
+
+localNamespace :: String -> Elab ()
+localNamespace s = do
+  ns <- newNamespace s
+  ns <- swapNameSupply ns
+  push $ LocalNamespace ns
 
 type TERM = Term Chk ^ Z
 type TYPE = Type ^ Z
@@ -101,6 +124,7 @@ data Frame where
   FunctionLeft :: Name -> LHS -> Frame
   Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
   Problems :: [Problem] -> Frame
+  LocalNamespace :: NameSupply -> Frame
   deriving Show
 
 data Status = Crying | Waiting | Hoping | Defined
@@ -212,6 +236,7 @@ metaDeclTerm s x ctx@(n, c) ty = wrap <$> metaDecl s x ctx ty
   where
   wrap x = E $^ M (x, n) $^ (idSubst n :^ io n)
 
+
 run :: Elab ()
 run = prob >>= \case
   File (cs :<=: src) -> do
@@ -295,7 +320,11 @@ run = prob >>= \case
       Nothing -> error "function should have been declared already"
       Just fname -> do
         traverse_ fundecl cs
-        traverse_ push [Locale FunctionLocale, FunctionLeft fname lhs, Problems (Sourced. fmap Command <$> cs), Problems (Sourced . fmap FormalParam <$> args)]
+        traverse_ push [ Locale FunctionLocale
+                       , FunctionLeft fname lhs
+                       , Problems (Sourced . fmap Command <$> cs)
+                       , Problems (Sourced . fmap FormalParam <$> args)
+                       ]
         newProb $ Done nil
         move
   Command (Respond ts) -> do
@@ -308,9 +337,7 @@ run = prob >>= \case
     move
   Command (If brs els) -> do
     let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
-    push . Problems $ do
-      (e, cs) <- conds
-      Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
+    push . Problems $ conds >>= \(e, cs) -> Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
     newProb $ Done nil
     move
   Command (For (x, e :<=: src) cs) -> do
@@ -326,9 +353,7 @@ run = prob >>= \case
   Command Return -> newProb (Done nil) >> move
   Command (Switch exp brs els) -> do
     let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els -- TODO: handle `otherwise` responsibly
-    push . Problems $ do
-      (e, cs) <- conds
-      Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
+    push . Problems $ conds >>= \(e, cs) ->  Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
     newProb $ Sourced (Expression <$> exp)
     run
   RenameAction old new rl -> do
@@ -340,13 +365,12 @@ run = prob >>= \case
     newProb $ Done nil
     move
   Sourced (p :<=: src) -> do
+    localNamespace . take 10 . filter isAlpha $ show p
     push $ Source src
     newProb p
     run
   -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
   _ -> move
-
-
 
 -- if move sees a Left fork, it should switch to Right and run
 -- if move sees a Right fork, switch to Left and keep moving
@@ -370,6 +394,10 @@ move = pull >>= \case
       (fs, p) <- switchFwrd ([], p)
       traverse_ push [Fork (Right Solved) fs p, Problems ps]
       run
+    LocalNamespace ns -> do
+      ns <- swapNameSupply ns
+      shup $ LocalNamespace ns
+      move
     _ -> shup fr >> move
 
 generateInputReader :: String -> [String] -> String

@@ -42,14 +42,12 @@ data Ctor (s :: Sort) (t :: Sort) where
   S0 :: Ctor One (Sub Z)
   ST :: Ctor (Prd (Sub n) Syn) (Sub (S n))
 
-
-
 type Root = Bwd (String, Int)
+type NameSupply = (Root, Int)
 type Name = [(String, Int)]
 
-name :: (Root, Int) -> String -> Name
+name :: NameSupply -> String -> Name
 name (r, n) s = r <>> [(s, n)]
-
 
 data Term (s :: Sort)
           (n :: Nat)     -- object variable support
