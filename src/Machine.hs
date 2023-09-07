@@ -2,8 +2,10 @@ module Machine where
 
 import Control.Monad
 import Control.Newtype
-import Data.Monoid
+import Control.Monad.State
 import Data.List
+import Data.Maybe (fromMaybe)
+import Data.Monoid
 import Data.Map (Map)
 import qualified Data.Map as Map
 
@@ -21,7 +23,9 @@ import Hide
 import CoreTT
 import Term
 import MagicStrings
-import Data.Maybe (fromMaybe)
+import Data.Foldable (traverse_)
+
+type Elab = State MachineState
 
 data MachineState = MS
   { position :: Cursor Frame
@@ -31,14 +35,58 @@ data MachineState = MS
   , metaStore :: Store
   } deriving Show
 
-fresh :: String -> MachineState -> (Name, MachineState)
-fresh s ms = let (r, n) = nameSupply ms in (name (r, n) s, ms { nameSupply = (r, n+1) })
+fresh :: String -> Elab Name
+fresh s = do
+  (r, n) <- gets nameSupply
+  modify $ \ms -> ms { nameSupply = (r, n + 1) }
+  pure $ name (r, n) s
 
-freshNames :: [String] -> MachineState -> ([Name], MachineState)
-freshNames [] st = ([], st)
-freshNames (s:ss) st = case fresh s st of
-   (n, st) -> case freshNames ss st of
-     (ns, st) -> (n:ns, st)
+pull :: Elab (Maybe Frame)
+pull = gets position >>= \case
+  B0 :<+>: _ -> pure Nothing
+  fz :< fr :<+>: fs -> Just fr <$ modify (\ms -> ms { position = fz :<+>: fs })
+
+push :: Frame -> Elab ()
+push f = do
+  modify $ \ms@MS{ position = fz :<+>: fs } -> ms { position = fz :< f :<+>: fs }
+
+llup :: Elab (Maybe Frame)
+llup = gets position >>= \case
+  _ :<+>: [] -> pure Nothing
+  fz :<+>: fr : fs -> Just fr <$ modify (\ms -> ms { position = fz :<+>: fs })
+
+shup :: Frame -> Elab ()
+shup f = do
+  modify $ \ms@MS{ position = fz :<+>: fs } -> ms { position = fz :<+>: f : fs }
+
+excursion
+  :: Elab v -- the operation should leave the cursor to the left of where it started
+  -> Elab v
+excursion op = do
+  shup ExcursionReturnMarker
+  v <- op
+  v <$ go
+  where
+    go = llup >>= \case
+      Just ExcursionReturnMarker -> pure ()
+      Just fr -> push fr >> go
+      Nothing -> error "excursion got lost"
+
+switchFwrd :: ([Frame], Problem) -> Elab ([Frame], Problem)
+switchFwrd (fs', p') = do
+  ms@MS{..} <- get
+  let fz :<+>: fs = position
+  put $ ms { position = fz :<+>: fs', problem = p' }
+  pure (fs, problem)
+
+prob :: Elab Problem
+prob = llup >>= \case
+  Nothing -> gets problem
+  Just f  -> push f >> prob
+
+newProb :: Problem -> Elab () -- TODO: consider checking if we are at
+                              -- the problem
+newProb p = modify (\ms -> ms{ problem = p })
 
 type TERM = Term Chk ^ Z
 type TYPE = Type ^ Z
@@ -115,173 +163,264 @@ initMachine f t = MS
   , metaStore = Map.empty
   }
 
-findDeclaration :: DeclarationType -> MachineState -> Maybe (Name, MachineState)
-findDeclaration LabmateDecl ms = Nothing
-findDeclaration (UserDecl old seen news _) ms@MS{position = fz :<+>: fs} =
-  fmap (\fz -> ms{position = fz :<+>: fs}) <$> go fz False where
-  go B0 _ = Nothing
-  go (fz :< Locale ScriptLocale) True = Nothing
-  go (fz :< f@(Locale FunctionLocale)) _ = fmap (:< f) <$> go fz True
-  go (fz :< f@(Declaration n ty (UserDecl old' seen' news' capturable'))) b | old == old' =
-    Just (n , fz :< Declaration n ty (UserDecl old' (seen' || seen) (news' ++ news) capturable'))
-  go (fz :< f) b = fmap (:< f) <$> go fz b
-
-makeDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
-makeDeclaration LabmateDecl = error "making labmatedecl declaration"
-makeDeclaration d@(UserDecl x seen news capturable) = excursion $ \ms ->
-  case metaDeclTerm Hoping (x++"Type") emptyContext (atom SType) (findLocale ms) of
-    (ty, ms) -> case fresh x ms of
-      (x, ms) -> (x, push (Declaration x ty d) ms)
+findDeclaration :: DeclarationType -> Elab (Maybe Name)
+findDeclaration LabmateDecl = pure Nothing
+findDeclaration (UserDecl old seen news _)  = excursion (go False)
   where
-    findLocale ms@MS{ position = B0 :<+>: _ } = error "Locale disappeared!"
-    findLocale ms@MS{ position = fz :< f :<+>: fs } =
-      ($ ms{ position = fz :<+>: f : fs }) $ case f of
-        Locale{} -> id
+  go :: Bool {- we think we are in a function -} -> Elab (Maybe Name)
+  go b = pull >>= \case
+    Nothing -> pure Nothing
+    Just f -> case f of
+      Locale ScriptLocale | b -> -- if we are in a function, script
+        Nothing <$ push f        -- variables are out of scope
+      Locale FunctionLocale -> shup f >> go True -- we know we are in a function
+      Declaration n ty (UserDecl old' seen' news' capturable') | old == old' ->
+        Just n <$ push (Declaration n ty (UserDecl old' (seen' || seen) (news' ++ news) capturable'))
+      _ -> shup f >> go b
+
+makeDeclaration :: DeclarationType -> Elab Name
+makeDeclaration LabmateDecl = error "making labmatedecl declaration"
+makeDeclaration d@(UserDecl x seen news capturable) = excursion $ do
+  findLocale
+  ty <- metaDeclTerm Hoping (x++"Type") emptyContext (atom SType)
+  x <- fresh x
+  x <$ push (Declaration x ty d)
+  where
+    findLocale = pull >>= \case
+      Nothing -> error "Locale disappeared!"
+      Just f  -> shup f >> case f of
+        Locale{} -> pure ()
         _ -> findLocale
 
-ensureDeclaration :: DeclarationType -> MachineState -> (Name, MachineState)
-ensureDeclaration s ms = fromMaybe (makeDeclaration s ms) (findDeclaration s ms)
+ensureDeclaration :: DeclarationType -> Elab Name
+ensureDeclaration s = findDeclaration s >>= \case
+  Nothing -> makeDeclaration s
+  Just x -> pure x
 
-nearestSource :: MachineState -> Source
-nearestSource ms@(MS { position = fz :<+>: _}) = go fz
+onNearestSource :: ([Tok] -> [Tok]) -> Elab ()
+onNearestSource f = excursion go
   where
-    go B0 = error "Impossible: no enclosing Source frame"
-    go (fz :< Source src) = src
-    go (fz :< _) = go fz
+    go = pull >>= \case
+      Nothing -> error "Impossible: no enclosing Source frame"
+      Just (Source (n, Hide ts)) -> push $ Source (n, Hide $ f ts)
+      Just f -> shup f >> go
 
-onNearestSource :: ([Tok] -> [Tok]) -> MachineState -> MachineState
-onNearestSource f ms@(MS { position = fz :<+>: fs}) = ms{ position = go fz :<+>: fs }
+metaDecl :: Status -> String -> Context n -> Type ^ n -> Elab Name
+metaDecl s x ctx ty = do
+   x <- fresh x
+   push $ Definition x s
+   x <$ modify (\ms@MS{..} -> ms { metaStore = Map.insert x (Meta ctx ty Nothing) metaStore})
+
+metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
+metaDeclTerm s x ctx@(n, c) ty = wrap <$> metaDecl s x ctx ty
   where
-    go B0 = error "Impossible: no enclosing Source frame"
-    go (fz :< Source (n, Hide ts)) = fz :< Source (n, Hide $ f ts)
-    go (fz :< f) = go fz :< f
+  wrap x = E $^ M (x, n) $^ (idSubst n :^ io n)
 
-metaDecl :: Status -> String -> Context n -> Type ^ n -> MachineState -> (Name, MachineState)
-metaDecl s x ctx ty ms@MS {position = fz :<+>: fs, metaStore = mstore} = case fresh x ms of
-  (x, ms) -> (x, ms{ position = fz :< Definition x s :<+>: fs
-                   , metaStore = Map.insert x (Meta ctx ty Nothing) mstore
-                   }
-             )
-
-metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> MachineState -> (Term Chk ^ n, MachineState)
-metaDeclTerm s x ctx@(n, c) ty ms = case metaDecl s x ctx ty ms of
-  (x, ms) -> (E $^ M (x, n) $^ (idSubst n :^ io n), ms)
-
-push :: Frame -> MachineState -> MachineState
-push f ms@MS{ position = fz :<+>: fs } = ms { position = fz :< f :<+>: fs }
-
-pushes :: [Frame] -> MachineState -> MachineState
-pushes = flip $ foldl (flip push)
-
-excursion
-  :: (MachineState -> (v, MachineState)) -- the operation should leave the cursor to the left of where it started
-  -> MachineState
-  -> (v, MachineState)
-excursion op ms@MS{ position = fz :<+>: fs } = case op ms{ position = fz :<+>: (ExcursionReturnMarker : fs) } of
-  (v, ms@MS{..}) -> (v, ms{position = go position}) where
-    go :: Cursor Frame -> Cursor Frame
-    go (fz :<+>: ExcursionReturnMarker : fs) = fz :<+>: fs
-    go (fz :<+>: f : fs) = go (fz :< f :<+>: fs)
-    go (fz :<+>: []) = error "excursion got lost"
-
-run :: MachineState -> MachineState
-run ms@(MS { position = fz :<+>: [], problem = p })
-  | File (cs :<=: src) <- p = case fundecls cs ms of
-      ms -> run $ (pushes [Locale ScriptLocale, Source src] ms) { problem = BlockTop cs }
-  | BlockTop ((c :<=: src):cs) <- p = run $ ms { position = fz :< BlockRest cs :< Source src :<+>: [] , problem = Command c }
-  | LHS (LVar x) <- p = case ensureDeclaration (UserDecl x True [] True) ms of
-      (x, ms) -> move $ ms { problem = Done (FreeVar x) }
-  | LHS (LMat []) <- p = move $ ms { problem = Done nil }
-  | FormalParam x <- p = case makeDeclaration (UserDecl x True [] False) ms of
-      (x, ms) -> move $ ms { problem = Done (FreeVar x) }
-  | Expression (Var x) <- p = case findDeclaration (UserDecl x True [] False) ms of
-      Nothing -> move $ ms { problem = Done (yikes (T $^ atom "OutOfScope" <&> atom x)) }
-      Just (x, ms)  -> move $ ms { problem = Done (FreeVar x) }
-  | Expression (App (f :<=: src) args) <- p = run $ ms { position = fz :< Expressions args :< Source src :<+>: [], problem = FunCalled f }
-  | Expression (Brp (e :<=: src) args) <- p = run $ ms { position = fz :< Expressions args :< Source src :<+>: [], problem = Expression e }
-  | Expression (Dot (e :<=: src) fld) <- p = run $ ms { position = fz :< Source src :<+>: [], problem = Expression e }
-  | Expression (Mat es) <- p = case es of
-      [] -> move $ ms { problem = Done nil }
-      (r:rs) -> run $ ms { position = fz :< MatrixRows rs :<+>: [], problem = Row r }
-  | Expression (Cell es) <- p = case es of
-      [] -> move $ ms { problem = Done nil }
-      (r:rs) -> run $ ms { position = fz :< MatrixRows rs :<+>: [], problem = Row r }
-  | Expression (IntLiteral i) <- p = move $ ms { problem = Done (lit i) }
-  | Expression (DoubleLiteral d) <- p = move $ ms { problem = Done (lit d) }
-  | Expression (StringLiteral s) <- p = move $ ms { problem = Done (lit s) }
-  | Expression (UnaryOp op (e :<=: src)) <- p = run $ ms { position = fz :< Source src :<+>: [], problem = Expression e }
-  | Expression (BinaryOp op (e0 :<=: src0) e1) <- p = run $ ms { position = fz :< Expressions [e1] :< Source src0 :<+>: [], problem = Expression e0 }
-  | Expression ColonAlone <- p = move $ ms { problem = Done (atom ":") }
-  | Expression (Handle f) <- p = move $ ms { problem = Done (T $^ atom "handle" <&> atom f) }
-  | FunCalled f <- p = run $ ms { problem = Expression f }
+run :: Elab ()
+run = prob >>= \case
+  File (cs :<=: src) -> do
+    traverse_ fundecl cs
+    traverse_ push [Locale ScriptLocale, Source src]
+    newProb $ BlockTop cs
+    run
+  BlockTop ((c :<=: src):cs) -> do
+    traverse_ push [BlockRest cs, Source src]
+    newProb $ Command c
+    run
+  LHS (LVar x) -> do
+    x <- ensureDeclaration (UserDecl x True [] True)
+    newProb . Done $ FreeVar x
+    move
+  LHS (LMat []) -> do
+    newProb $ Done nil
+    move
+  FormalParam x -> do
+    x <- makeDeclaration (UserDecl x True [] False)
+    newProb . Done $ FreeVar x
+    move
+  Expression (Var x) ->
+    findDeclaration (UserDecl x True [] False) >>= \case
+    Nothing -> do
+      newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
+      move
+    Just x -> do
+      newProb . Done $ FreeVar x
+      move
+  Expression (App (f :<=: src) args) -> do
+    traverse_ push [Expressions args, Source src]
+    newProb $ FunCalled f
+    run
+  Expression (Brp (e :<=: src) args) -> do
+    traverse_ push [Expressions args, Source src]
+    newProb $ Expression e
+    run
+  Expression (Dot (e :<=: src) fld) -> do
+    push $ Source src
+    newProb $ Expression e
+    run
+  Expression (Mat es) -> case es of
+    [] -> newProb (Done nil) >> run
+    (r:rs) -> do
+      push $ MatrixRows rs
+      newProb $ Row r
+      run
+  Expression (Cell es) -> case es of
+    [] -> newProb (Done nil) >> run
+    (r:rs) -> do
+      push $ MatrixRows rs
+      newProb $ Row r
+      run
+  Expression (IntLiteral i) -> newProb (Done $ lit i) >> move
+  Expression (DoubleLiteral d) -> newProb (Done $ lit d) >> move
+  Expression (StringLiteral s) -> newProb (Done $ lit s) >> move
+  Expression (UnaryOp op (e :<=: src)) -> do
+    push $ Source src
+    newProb $ Expression e
+    run
+  Expression (BinaryOp op (e0 :<=: src0) e1) -> do
+    traverse_ push [Expressions [e1], Source src0]
+    newProb $ Expression e0
+    run
+  Expression ColonAlone -> newProb (Done $ atom ":") >> move
+  Expression (Handle f) -> newProb ( Done $ T $^ atom "handle" <&> atom f) >> move
+  FunCalled f -> newProb (Expression f) >> run
 --  | Expression (Lambda xs t) <- p = _
-  | Row rs <- p = case rs of
-      [] -> move $ ms { problem = Done nil }
-      ((r :<=: src):rs) -> run $ ms { position = fz :< Expressions rs :< Source src :<+>: [], problem = Expression r }
-  | Command (Assign lhs (e :<=: src)) <- p = run $ ms { position = fz :< TargetLHS lhs :< Source src :<+>: [] , problem = Expression e }
-  | Command (Direct rl ((Rename old new :<=: src, _) :<=: src')) <- p = run $ ms { position = fz :< Source src' :< Source src :<+>: [] , problem = RenameAction old new rl}
-  | Command (Direct rl ((InputFormat name :<=: src, Just (InputFormatBody body)) :<=: src')) <- p = run $ ms { position = fz :< Source src' :< Source src :<+>: [] , problem = InputFormatAction name body rl}
-  | Command (Function (lhs, fname :<=: _, args) cs) <- p = case findDeclaration (UserDecl fname True [] False) ms of
+  Row rs -> case rs of
+    [] -> newProb (Done nil) >> move
+    (r :<=: src):rs -> do
+      traverse_ push [Expressions rs, Source src]
+      newProb $ Expression r
+      run
+  Command (Assign lhs (e :<=: src)) -> do
+    traverse_ push [TargetLHS lhs, Source src]
+    newProb $ Expression e
+    run
+  Command (Direct rl ((Rename old new :<=: src, _) :<=: src')) -> do
+    traverse_ push [Source src', Source src]
+    newProb $ RenameAction old new rl
+    run
+  Command (Direct rl ((InputFormat name :<=: src, Just (InputFormatBody body)) :<=: src')) -> do
+    traverse_ push [Source src', Source src]
+    newProb $ InputFormatAction name body rl
+    run
+  Command (Function (lhs, fname :<=: _, args) cs) ->
+    findDeclaration (UserDecl fname True [] False)  >>= \case
       Nothing -> error "function should have been declared already"
-      Just (fname, ms) -> case fundecls cs ms of
-        ms -> move $ (pushes [Locale FunctionLocale, FunctionLeft fname lhs, BlockRest cs, FormalParams args] ms) { problem = Done nil }
-  | Command (Respond ts) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
-  | Command (GeneratedCode cs) <- p = move $ onNearestSource (const []) (ms { problem = Done nil })
-  | Command (If brs els) <- p = let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
-      in move $ ms { position = fz :< Conditionals conds :<+>: [], problem = Done nil }
-  | Command (For (x, e :<=: src) cs) <- p = run $ ms { position = fz :< BlockRest cs :< TargetLHS (LVar <$> x) :< Source src :<+>: [], problem = Expression e }
-  | Command (While e cs) <- p = move $ ms { position = fz :< Conditionals [(e, cs)] :<+>: [], problem = Done nil }
-  | Command Break <- p =  move $ ms { problem = Done nil}
-  | Command Continue <- p =  move $ ms { problem = Done nil}
-  | Command Return <- p = move $ ms { problem = Done nil}
-  | Command (Switch (exp :<=: src) brs els) <- p = let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els -- TODO: handle `otherwise` responsibly
-      in run $ ms { position = fz :< Conditionals conds :< Source src :<+>: [], problem = Expression exp }
---  | Command (GeneratedCode cs) <- p = _wY
-  | RenameAction old new rl <- p = case ensureDeclaration (UserDecl old False [(new, rl)] True) ms of
-      (n, ms) -> move $ ms { problem = Done nil}
-  | InputFormatAction name body (n, c) <- p = move $ ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) (nonceTable ms), problem = Done nil}
--- run ms = trace ("Falling through. Problem = " ++ show (problem ms)) $ move ms
-run ms = move ms
+      Just fname -> do
+        traverse_ fundecl cs
+        traverse_ push [Locale FunctionLocale, FunctionLeft fname lhs, BlockRest cs, FormalParams args]
+        newProb $ Done nil
+        move
+  Command (Respond ts) -> do
+    onNearestSource $ const []
+    newProb $ Done nil
+    move
+  Command (GeneratedCode cs) -> do
+    onNearestSource $ const []
+    newProb $ Done nil
+    move
+  Command (If brs els) -> do
+    let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
+    push $ Conditionals conds
+    newProb $ Done nil
+    move
+  Command (For (x, e :<=: src) cs) -> do
+    traverse_ push [BlockRest cs, TargetLHS (LVar <$> x), Source src]
+    newProb $ Expression e
+    run
+  Command (While e cs) -> do
+    push $ Conditionals [(e, cs)]
+    newProb $ Done nil
+    move
+  Command Break -> newProb (Done nil) >> move
+  Command Continue -> newProb (Done nil) >> move
+  Command Return -> newProb (Done nil) >> move
+  Command (Switch (exp :<=: src) brs els) -> do
+    let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els -- TODO: handle `otherwise` responsibly
+    traverse_ push [Conditionals conds, Source src]
+    newProb $ Expression exp
+    run
+  RenameAction old new rl -> do
+    ensureDeclaration (UserDecl old False [(new, rl)] True)
+    newProb $ Done nil
+    move
+  InputFormatAction name body (n, c) -> do
+    modify $ \ms@MS{..} -> ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) nonceTable }
+    newProb $ Done nil
+    move
+  -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
+  _ -> move
+
+
 
 -- if move sees a Left fork, it should switch to Right and run
 -- if move sees a Right fork, switch to Left and keep moving
-move :: MachineState -> MachineState
-move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t })
-  | Fork (Right frk) fs' p' <- fr = move $ ms{ position = fz :<+>: Fork (Left frk) fs (Done t) : fs', problem = p'}
-  | BlockRest cs <- fr = case cs of
-      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
-      ((c :<=: src):cs) -> run $ ms { position = fz :< Fork (Right Solved) fs (Done t) :< BlockRest cs :< Source src :<+>: [], problem = Command c }
---  | AssignLeft (e :<=: src) <- fr = run $ ms { position = fz :< Solved fs t :< Source src :<+>: [], problem = Expression e }
-  | Expressions as <- fr = case as of
-      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
-      ((e :<=: src):as) -> run $ ms { position = fz :< Fork (Right Solved) fs (Done t) :< Expressions as :< Source src :<+>: [], problem = Expression e }
-  | MatrixRows rs <- fr = case rs of
-      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
-      (r:rs) -> run $ ms { position = fz :< Fork (Right Solved) fs (Done t) :< MatrixRows rs :<+>: [], problem = Row r }
-  | FunctionLeft fname (lhs :<=: src) <- fr = run $
-    ms { position = fz :< Fork (Right $ FunctionName fname) fs (Done t) :< Source src :<+>: [], problem = LHS lhs }
-  | TargetLHS (lhs :<=: src) <- fr = run $
-    ms { position = fz :< Fork (Right Solved) fs (Done t) :< Source src :<+>: [], problem = LHS lhs }
-  | Conditionals conds <- fr = case conds of
-      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
-      ((e :<=: src, cs) : conds) -> run $
-        ms { position = fz :< Fork (Right Solved) fs (Done t) :< Conditionals conds :< BlockRest cs :< Source src :<+>: [], problem = Expression e }
-  | FormalParams params <- fr = case params of
-      [] -> move $ ms { position = fz :< Fork (Right Solved) fs (Done t) :<+>: [], problem = Done nil }
-      (p :<=: src) : ps -> run $
-        ms { position = fz :< Fork (Right Solved) fs (Done t) :< FormalParams ps :< Source src :<+>: [], problem = FormalParam p}
-move ms@(MS { position = fz :< fr :<+>: fs, problem = Done t }) = move $ ms { position = fz :<+>: fr : fs }
-move ms = ms
+move :: Elab ()
+move = pull >>= \case
+  Nothing -> pure ()
+  Just fr -> case fr of
+    Fork (Right frk) fs' p' -> do
+     (fs, p) <- switchFwrd (fs', p')
+     shup $ Fork (Left frk) fs p
+     move
+    BlockRest [] -> do
+      (fs, p) <- switchFwrd ([], Done nil)
+      push $ Fork (Right Solved) fs p
+      move
+    BlockRest ((c :<=: src): cs) -> do
+      (fs, p) <- switchFwrd ([], Command c)
+      traverse_ push [Fork (Right Solved) fs p, BlockRest cs, Source src]
+      run
+    Expressions [] -> do
+      (fs, p) <- switchFwrd ([], Done nil)
+      push $ Fork (Right Solved) fs p
+      move
+    Expressions ((e :<=: src):es) -> do
+      (fs, p) <- switchFwrd ([], Expression e)
+      traverse_ push [Fork (Right Solved) fs p, Expressions es, Source src]
+      run
+    MatrixRows [] -> do
+      (fs, p) <- switchFwrd ([], Done nil)
+      push $ Fork (Right Solved) fs p
+      move
+    MatrixRows (r : rs) -> do
+      (fs, p) <- switchFwrd ([], Row r)
+      traverse_ push [Fork (Right Solved) fs p, MatrixRows rs]
+      run
+    FunctionLeft fname (lhs :<=: src) -> do
+      (fs, p) <- switchFwrd ([], LHS lhs)
+      traverse_ push [Fork (Right $ FunctionName fname) fs p, Source src]
+      run
+    TargetLHS (lhs :<=: src) -> do
+      (fs, p) <- switchFwrd ([], LHS lhs)
+      traverse_ push [Fork (Right Solved) fs p, Source src]
+      run
+    Conditionals [] -> do
+      (fs, p) <- switchFwrd ([], Done nil)
+      push $ Fork (Right Solved) fs p
+      move
+    Conditionals ((e :<=: src, cs) : conds) -> do
+      (fs, p) <- switchFwrd ([], Expression e)
+      traverse_ push [Fork (Right Solved) fs p, Conditionals conds, BlockRest cs, Source src]
+      run
+    FormalParams [] -> do
+      (fs, p) <- switchFwrd ([], Done nil)
+      push $ Fork (Right Solved) fs p
+      move
+    FormalParams ((p :<=: src) : ps) -> do
+      (fs, p) <- switchFwrd ([], FormalParam p)
+      traverse_ push [Fork (Right Solved) fs p, FormalParams ps, Source src]
+      run
+    _ -> shup fr >> move
 
 generateInputReader :: String -> [String] -> String
 generateInputReader name body = case translateString Matlab name (concat (init body)) of
   Left err -> "% Error: " ++ show err
   Right s -> s
 
-fundecls :: [Command] -> MachineState -> MachineState
-fundecls [] ms = ms
-fundecls (Function (_, fname :<=: _ , _) _ :<=: src:cs) ms =
-  case metaDeclTerm Hoping (fname++"Type") emptyContext (atom SType) ms of
-    (ty, ms) -> case metaDecl Hoping fname emptyContext ty ms of
-      (fname', ms) -> fundecls cs $ push (Declaration fname' ty (UserDecl fname False [] False)) ms
-fundecls (_:cs) ms = fundecls cs ms
+fundecl :: Command -> Elab ()
+fundecl (Function (_, fname :<=: _ , _) _ :<=: src) = do
+  ty <- metaDeclTerm Hoping (fname++"Type") emptyContext (atom SType)
+  fname' <- metaDecl Hoping fname emptyContext ty
+  push (Declaration fname' ty (UserDecl fname False [] False))
+fundecl _ = pure ()

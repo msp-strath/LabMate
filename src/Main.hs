@@ -15,6 +15,7 @@ import qualified Data.Map as Map
 
 import Data.Bifunctor (first)
 import Control.Monad (unless)
+import Control.Monad.State
 import Data.List
 
 import Bwd
@@ -50,7 +51,7 @@ main = do
  where
    stdin = T.getContents >>= actInput
    go hideVersion (Right (tab, cs@(_ :<=: (n,src)))) = do
-      let out = run (initMachine cs tab)
+      let out = execState run (initMachine cs tab)
       -- print out
       unless hideVersion $
         putStrLn ("%< LabMate " ++ showVersion version)
