@@ -93,19 +93,14 @@ type TYPE = Type ^ Z
 
 data Frame where
   Source :: Source -> Frame
-  BlockRest :: [Command] -> Frame
   Declaration :: Name -> TYPE -> DeclarationType -> Frame
   Definition :: Name -> Status -> Frame
   Locale :: LocaleType -> Frame
   ExcursionReturnMarker :: Frame
-  Expressions :: [Expr] -> Frame
-  TargetLHS :: LHS -> Frame
-  Conditionals :: [(Expr, [Command])] -> Frame
-  MatrixRows :: [[Expr]] -> Frame
   RenameFrame :: String -> String -> Frame
   FunctionLeft :: Name -> LHS -> Frame
-  FormalParams :: [WithSource String] -> Frame
   Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
+  Problems :: [Problem] -> Frame
   deriving Show
 
 data Status = Crying | Waiting | Hoping | Defined
@@ -139,6 +134,7 @@ data Problem
   | RenameAction String String ResponseLocation
   | InputFormatAction String [String] ResponseLocation
   | FunCalled Expr'
+  | Sourced (WithSource Problem)
   deriving Show
 
 data Lit
@@ -223,10 +219,10 @@ run = prob >>= \case
     traverse_ push [Locale ScriptLocale, Source src]
     newProb $ BlockTop cs
     run
-  BlockTop ((c :<=: src):cs) -> do
-    traverse_ push [BlockRest cs, Source src]
-    newProb $ Command c
-    run
+  BlockTop cs -> do
+    push $ Problems (Sourced . fmap Command <$> cs)
+    newProb $ Done nil
+    move
   LHS (LVar x) -> do
     x <- ensureDeclaration (UserDecl x True [] True)
     newProb . Done $ FreeVar x
@@ -247,29 +243,21 @@ run = prob >>= \case
       newProb . Done $ FreeVar x
       move
   Expression (App (f :<=: src) args) -> do
-    traverse_ push [Expressions args, Source src]
+    traverse_ push [Problems (Sourced . fmap Expression <$> args), Source src]
     newProb $ FunCalled f
     run
   Expression (Brp (e :<=: src) args) -> do
-    traverse_ push [Expressions args, Source src]
+    traverse_ push [Problems (Sourced . fmap Expression <$> args), Source src]
     newProb $ Expression e
     run
   Expression (Dot (e :<=: src) fld) -> do
     push $ Source src
     newProb $ Expression e
     run
-  Expression (Mat es) -> case es of
-    [] -> newProb (Done nil) >> run
-    (r:rs) -> do
-      push $ MatrixRows rs
-      newProb $ Row r
-      run
-  Expression (Cell es) -> case es of
-    [] -> newProb (Done nil) >> run
-    (r:rs) -> do
-      push $ MatrixRows rs
-      newProb $ Row r
-      run
+  Expression (Mat es) -> do
+    push $ Problems (Row <$> es)
+    newProb $ Done nil
+    move
   Expression (IntLiteral i) -> newProb (Done $ lit i) >> move
   Expression (DoubleLiteral d) -> newProb (Done $ lit d) >> move
   Expression (StringLiteral s) -> newProb (Done $ lit s) >> move
@@ -278,21 +266,20 @@ run = prob >>= \case
     newProb $ Expression e
     run
   Expression (BinaryOp op (e0 :<=: src0) e1) -> do
-    traverse_ push [Expressions [e1], Source src0]
+    traverse_ push [Problems [Sourced (Expression <$> e1)], Source src0]
     newProb $ Expression e0
     run
   Expression ColonAlone -> newProb (Done $ atom ":") >> move
   Expression (Handle f) -> newProb ( Done $ T $^ atom "handle" <&> atom f) >> move
   FunCalled f -> newProb (Expression f) >> run
---  | Expression (Lambda xs t) <- p = _
   Row rs -> case rs of
     [] -> newProb (Done nil) >> move
     (r :<=: src):rs -> do
-      traverse_ push [Expressions rs, Source src]
+      traverse_ push [Problems (Sourced . fmap Expression <$> rs), Source src]
       newProb $ Expression r
       run
   Command (Assign lhs (e :<=: src)) -> do
-    traverse_ push [TargetLHS lhs, Source src]
+    traverse_ push [Problems [Sourced (LHS <$> lhs)], Source src]
     newProb $ Expression e
     run
   Command (Direct rl ((Rename old new :<=: src, _) :<=: src')) -> do
@@ -308,7 +295,7 @@ run = prob >>= \case
       Nothing -> error "function should have been declared already"
       Just fname -> do
         traverse_ fundecl cs
-        traverse_ push [Locale FunctionLocale, FunctionLeft fname lhs, BlockRest cs, FormalParams args]
+        traverse_ push [Locale FunctionLocale, FunctionLeft fname lhs, Problems (Sourced. fmap Command <$> cs), Problems (Sourced . fmap FormalParam <$> args)]
         newProb $ Done nil
         move
   Command (Respond ts) -> do
@@ -321,24 +308,28 @@ run = prob >>= \case
     move
   Command (If brs els) -> do
     let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
-    push $ Conditionals conds
+    push . Problems $ do
+      (e, cs) <- conds
+      Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
     newProb $ Done nil
     move
   Command (For (x, e :<=: src) cs) -> do
-    traverse_ push [BlockRest cs, TargetLHS (LVar <$> x), Source src]
+    traverse_ push [Problems (Sourced. fmap Command <$> cs), Problems [Sourced (LHS . LVar <$> x)], Source src]
     newProb $ Expression e
     run
   Command (While e cs) -> do
-    push $ Conditionals [(e, cs)]
+    push . Problems $ Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
     newProb $ Done nil
     move
   Command Break -> newProb (Done nil) >> move
   Command Continue -> newProb (Done nil) >> move
   Command Return -> newProb (Done nil) >> move
-  Command (Switch (exp :<=: src) brs els) -> do
+  Command (Switch exp brs els) -> do
     let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els -- TODO: handle `otherwise` responsibly
-    traverse_ push [Conditionals conds, Source src]
-    newProb $ Expression exp
+    push . Problems $ do
+      (e, cs) <- conds
+      Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
+    newProb $ Sourced (Expression <$> exp)
     run
   RenameAction old new rl -> do
     ensureDeclaration (UserDecl old False [(new, rl)] True)
@@ -348,6 +339,10 @@ run = prob >>= \case
     modify $ \ms@MS{..} -> ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) nonceTable }
     newProb $ Done nil
     move
+  Sourced (p :<=: src) -> do
+    push $ Source src
+    newProb p
+    run
   -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
   _ -> move
 
@@ -363,53 +358,17 @@ move = pull >>= \case
      (fs, p) <- switchFwrd (fs', p')
      shup $ Fork (Left frk) fs p
      move
-    BlockRest [] -> do
-      (fs, p) <- switchFwrd ([], Done nil)
-      push $ Fork (Right Solved) fs p
-      move
-    BlockRest ((c :<=: src): cs) -> do
-      (fs, p) <- switchFwrd ([], Command c)
-      traverse_ push [Fork (Right Solved) fs p, BlockRest cs, Source src]
-      run
-    Expressions [] -> do
-      (fs, p) <- switchFwrd ([], Done nil)
-      push $ Fork (Right Solved) fs p
-      move
-    Expressions ((e :<=: src):es) -> do
-      (fs, p) <- switchFwrd ([], Expression e)
-      traverse_ push [Fork (Right Solved) fs p, Expressions es, Source src]
-      run
-    MatrixRows [] -> do
-      (fs, p) <- switchFwrd ([], Done nil)
-      push $ Fork (Right Solved) fs p
-      move
-    MatrixRows (r : rs) -> do
-      (fs, p) <- switchFwrd ([], Row r)
-      traverse_ push [Fork (Right Solved) fs p, MatrixRows rs]
-      run
     FunctionLeft fname (lhs :<=: src) -> do
       (fs, p) <- switchFwrd ([], LHS lhs)
       traverse_ push [Fork (Right $ FunctionName fname) fs p, Source src]
       run
-    TargetLHS (lhs :<=: src) -> do
-      (fs, p) <- switchFwrd ([], LHS lhs)
-      traverse_ push [Fork (Right Solved) fs p, Source src]
-      run
-    Conditionals [] -> do
+    Problems [] -> do
       (fs, p) <- switchFwrd ([], Done nil)
       push $ Fork (Right Solved) fs p
       move
-    Conditionals ((e :<=: src, cs) : conds) -> do
-      (fs, p) <- switchFwrd ([], Expression e)
-      traverse_ push [Fork (Right Solved) fs p, Conditionals conds, BlockRest cs, Source src]
-      run
-    FormalParams [] -> do
-      (fs, p) <- switchFwrd ([], Done nil)
-      push $ Fork (Right Solved) fs p
-      move
-    FormalParams ((p :<=: src) : ps) -> do
-      (fs, p) <- switchFwrd ([], FormalParam p)
-      traverse_ push [Fork (Right Solved) fs p, FormalParams ps, Source src]
+    Problems (p : ps) -> do
+      (fs, p) <- switchFwrd ([], p)
+      traverse_ push [Fork (Right Solved) fs p, Problems ps]
       run
     _ -> shup fr >> move
 
