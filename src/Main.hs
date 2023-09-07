@@ -74,7 +74,8 @@ actInput c = do
   -- putStrLn $ pretty w l
   case parser pfile (Map.empty, 0) l of
     (_, [(_,cs,(tab,_),_)]) -> do
-      pure (Right (tab, cs))
+      track ("Nonces = " ++ show tab ++ "\n Commands = " ++ show cs) $
+        pure (Right (tab, cs))
     (r, xs) -> pure (Left (Nothing, r, length xs))
     -- putStrLn $ pretty w (tokenStreamToLisp l)
 

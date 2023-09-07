@@ -110,12 +110,11 @@ pdir' = pvspcaround $
     isLine (Line _) = True
     isLine _ = False
 
-
 pprejunk :: Parser ()
 pprejunk = () <$ pospc <* (psym "%" <|> pure ())  <* psym ">"  <* pospc
 
 pdirhead :: Parser DirHeader
-pdirhead = Declare <$> psep1 (pspc <|> punc ",") pnom <* pospc <* psym "::" <* pospc <*> ptensortype
+pdirhead = Declare <$> psep1 (pspc <|> punc ",") (pws pnom) <* pospc <* psym "::" <* pospc <*> ptensortype
     <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
     <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom
     <|> Typecheck <$ pkin Nom "typecheck" <* pospc <*> ptensortype <* pspc <*> pexpr topCI

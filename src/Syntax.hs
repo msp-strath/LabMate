@@ -29,7 +29,7 @@ type Dir = WithSource Dir'
 type Dir' = (WithSource DirHeader, Maybe DirBody)
 
 data DirHeader
-  = Declare [String] ConcreteType
+  = Declare [WithSource String] ConcreteType
   | Rename String String
   | InputFormat String {- name of function -}
   | Typecheck ConcreteType Expr

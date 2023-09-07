@@ -315,6 +315,11 @@ run = prob >>= \case
     traverse_ push [Source src', Source src]
     newProb $ InputFormatAction name body rl
     run
+  Command (Direct rl ((Declare xs ty :<=: src, _) :<=: src')) -> do
+    traverse_ push [Source src', Source src]
+    push $ Problems (Sourced . fmap (Expression . Var) <$> xs)
+    newProb $ Done nil -- FIXME
+    move
   Command (Function (lhs, fname :<=: _, args) cs) ->
     findDeclaration (UserDecl fname True [] False)  >>= \case
       Nothing -> error "function should have been declared already"
@@ -406,7 +411,7 @@ generateInputReader name body = case translateString Matlab name (concat (init b
   Right s -> s
 
 fundecl :: Command -> Elab ()
-fundecl (Function (_, fname :<=: _ , _) _ :<=: src) = do
+fundecl (Function (_, fname :<=: _ , _) _ :<=: _) = do
   ty <- metaDeclTerm Hoping (fname++"Type") emptyContext (atom SType)
   fname' <- metaDecl Hoping fname emptyContext ty
   push (Declaration fname' ty (UserDecl fname False [] False))

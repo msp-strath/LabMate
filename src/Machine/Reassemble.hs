@@ -19,6 +19,10 @@ import qualified Data.Set as Set
 import Control.Monad.Writer
 import Data.Foldable (traverse_)
 
+import Debug.Trace
+
+track = const id
+
 data RenameGripe
   = Captured  -- the new name is already in scope
   | Capturing -- the new name prevents a subsequent declaration
@@ -45,7 +49,9 @@ updateNonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
 updateNonceTable table (fz :<+>: []) = table
 updateNonceTable table (fz :<+>: Fork _ fs' e : fs) = updateNonceTable (updateNonceTable table (fz :<+>: fs)) (fz :<+>: fs')
 updateNonceTable table (fz :<+>: Source (n, Hide ts) : fs) =
-  let m = updateNonceTable table (fz :<+>: fs) in Map.insert n (ts >>= nonceExpand m) m
+  let m = updateNonceTable table (fz :<+>: fs)
+      ts' = ts >>= nonceExpand m
+  in Map.insert (track ("UNT " ++ show n ++ " " ++ ts') $ n) ts' m
 updateNonceTable table (fz :<+>: f : fs) = updateNonceTable table (fz :< f :<+>: fs)
 
 renamePass :: MachineState -> Writer RenameProblems MachineState
@@ -55,6 +61,9 @@ renamePass ms = inbound ms
     inbound ms@(MS { position = fz :<+>: fs, problem = p }) =
       case (fz <>< fs, p) of
         (fz :< Source (n, Hide [t]), Done (FreeVar x)) | kin t == Nom -> do
+          oo <- track ("HIT" ++ show  (fz , x, n)) $ pure True
+          case oo of
+            True -> pure ()
           x' <- renamer fz x False
           outbound ms{ position = fz :<+>: [Source (n, Hide [t{ raw = x' }])] }
         (fz :< Source (l, Hide (s:ss)) :< Source (n, Hide ts) :< Source (m, Hide (t':ts')), Done (Atom ""))
