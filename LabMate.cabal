@@ -44,6 +44,7 @@ common haskell
                        terminal-size,
                        directory,
                        filepath,
+                       optparse-applicative,
                        mgen
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances

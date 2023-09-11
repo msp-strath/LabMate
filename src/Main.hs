@@ -10,13 +10,16 @@ import System.Exit
 import qualified Data.Text.IO as T
 import Data.Text (Text)
 
+import Data.Bifunctor (first)
+import Data.Foldable (traverse_)
+import Data.List
 import Data.Map (Map)
 import qualified Data.Map as Map
 
-import Data.Bifunctor (first)
 import Control.Monad (unless)
 import Control.Monad.State
-import Data.List
+
+import Options.Applicative hiding (ParseError)
 
 import Bwd
 
@@ -33,31 +36,44 @@ import Machine.Reassemble
 import Data.Version
 import Paths_LabMate
 
+
 type ParseError = (Maybe FilePath, Reach, Int)
+
+
+data Conf = Conf
+  { src :: String
+  , hideVersion :: Bool
+  , verbose :: Bool
+  }
+
+pconf = info
+  (Conf <$> argument str (value "-" <> help "Matlab source file")
+        <*> switch (long "no-version"
+                    <> help "Surpress printing out labmate version in the output")
+        <*> switch (long "verbose"
+                    <> help "Print out the machine state after execution")
+  <**> helper)
+  (fullDesc <> progDesc "Labmate - an interactive assistent for Matlab")
 
 main :: IO ()
 main = do
-  getArgs >>= noVersionEh >>= \(hideVersion, args) ->
-    case args of
-    [] -> stdin >>= go hideVersion
-    ["-"] -> stdin >>= go hideVersion
-    [f] -> do
+  conf@Conf{src} <- execParser pconf
+  case src of
+    "-" -> stdin >>= go conf
+    f -> do
       doesDirectoryExist f >>= \case
-        True -> actDir f
-        False -> actFile f >>= go hideVersion
-    x -> do
-      putStrLn $ "Unrecognised arguments: " ++ show x
-      exitWith fatalExitCode
+        True  -> actDir f
+        False -> actFile f >>= go conf
  where
    stdin = T.getContents >>= actInput
-   go hideVersion (Right (tab, cs@(_ :<=: (n,src)))) = do
+   go Conf{hideVersion, verbose} (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = execState run (initMachine cs tab)
-      print out
+      when verbose $
+        print out
       unless hideVersion $
         putStrLn ("%< LabMate " ++ showVersion version)
       putStrLn $ reassemble n out
    go _ (Left e) = do printError e; exitWith fatalExitCode
-   noVersionEh args = pure $ first (not . null) . partition (== "--no-version") $ args
 
 printError :: ParseError -> IO ()
 printError (f, r, n) = do
@@ -94,7 +110,7 @@ actDir f = do
   let nothings = length [ () | Right _ <- done ]
   let total = length done
   let msg = "Parsed " ++ show nothings ++ "/" ++ show total ++ " files.\n"
-  traverse printError [ x | Left x <- done ]
+  traverse_ printError [ x | Left x <- done ]
   putStr msg
 
 fatalExitCode :: ExitCode
