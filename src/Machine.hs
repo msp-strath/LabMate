@@ -36,6 +36,71 @@ data MachineState = MS
   , metaStore :: Store
   } deriving Show
 
+
+type TERM = Term Chk ^ Z
+type TYPE = Type ^ Z
+
+data Frame where
+  Source :: Source -> Frame
+  Declaration :: Name -> DeclarationType TYPE -> Frame
+  Definition :: Name -> Status -> Frame
+  Locale :: LocaleType -> Frame
+  ExcursionReturnMarker :: Frame
+  RenameFrame :: String -> String -> Frame
+  FunctionLeft :: Name -> LHS -> Frame
+  Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
+  Problems :: [Problem] -> Frame
+  LocalNamespace :: NameSupply -> Frame
+  deriving Show
+
+data Status = Crying | Waiting | Hoping | Defined
+  deriving Show
+
+data Fork = Solved | FunctionName Name
+  deriving Show
+
+data LocaleType = ScriptLocale | FunctionLocale
+  deriving (Show, Eq)
+
+data DeclarationType a
+  = UserDecl
+  { varTy :: a                -- (eventual) type
+  , currentName :: String  -- current name
+  , seen ::  Bool          -- have we seen it in user code?
+  -- requested name and how to reply (we hope of length at most 1)
+  , newNames ::  [(String, ResponseLocation)]
+  , capturable ::  Bool    -- is it capturable?
+  }
+  | LabmateDecl
+  deriving (Functor, Show)
+
+data Problem
+  = File File
+  | BlockTop [Command]
+  | Command Command'
+  | LHS LHS'
+  | FormalParam String
+  | Done TERM
+  | Expression Expr'
+  | Row [Expr]
+  | RenameAction String String ResponseLocation
+  | DeclareAction TERM String
+  | InputFormatAction String [String] ResponseLocation
+  | FunCalled Expr'
+  | ElabConcreteType Name ConcreteType
+  | Sourced (WithSource Problem)
+  deriving Show
+
+data Lit
+  = IntLit Int
+  | DoubleLit Double
+  | StringLit String
+  deriving Show
+
+data Gripe =
+  RenameFail Nonce String
+  deriving Show
+
 fresh :: String -> Elab Name
 fresh s = do
   (r, n) <- gets nameSupply
@@ -111,74 +176,8 @@ localNamespace s = do
   ns <- swapNameSupply ns
   push $ LocalNamespace ns
 
-type TERM = Term Chk ^ Z
-type TYPE = Type ^ Z
-
-data Frame where
-  Source :: Source -> Frame
-  Declaration :: Name -> DeclarationType TYPE -> Frame
-  Definition :: Name -> Status -> Frame
-  Locale :: LocaleType -> Frame
-  ExcursionReturnMarker :: Frame
-  RenameFrame :: String -> String -> Frame
-  FunctionLeft :: Name -> LHS -> Frame
-  Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
-  Problems :: [Problem] -> Frame
-  LocalNamespace :: NameSupply -> Frame
-  deriving Show
-
-data Status = Crying | Waiting | Hoping | Defined
-  deriving Show
-
-data Fork = Solved | FunctionName Name
-  deriving Show
-
-data LocaleType = ScriptLocale | FunctionLocale
-  deriving (Show, Eq)
-
-data DeclarationType a
-  = UserDecl
-      a
-      String   -- current name
-      Bool     -- have we seen it in user code?
-      [(String, ResponseLocation)] -- requested name and how to reply
-                                   -- (we hope of length at most 1)
-      Bool     -- is it capturable?
-  | LabmateDecl
-  deriving (Functor, Show)
-
-data Problem
-  = File File
-  | BlockTop [Command]
-  | Command Command'
-  | LHS LHS'
-  | FormalParam String
-  | Done TERM
-  | Expression Expr'
-  | Row [Expr]
-  | RenameAction String String ResponseLocation
-  | DeclareAction TERM String
-  | InputFormatAction String [String] ResponseLocation
-  | FunCalled Expr'
-  | ElabConcreteType Name ConcreteType
-  | Sourced (WithSource Problem)
-  deriving Show
-
-data Lit
-  = IntLit Int
-  | DoubleLit Double
-  | StringLit String
-  deriving Show
-
-data Gripe =
-  RenameFail Nonce String
-  deriving Show
-
 yikes :: TERM  -> TERM
 yikes t = T $^ atom "yikes" <&> t
-
-constrainEqual :: TYPE -> TYPE -> Elab ()
-constrainEqual got want = pure ()  -- FIX: make a constraint
 
 initMachine :: File -> Map Nonce String -> MachineState
 initMachine f t = MS
@@ -189,9 +188,14 @@ initMachine f t = MS
   , metaStore = Map.empty
   }
 
+
+constrainEqual :: TYPE -> TYPE -> Elab ()
+constrainEqual got want = pure ()  -- FIX: make a constraint
+
+
 findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe Name)
 findDeclaration LabmateDecl = pure Nothing
-findDeclaration (UserDecl ty old seen news _)  = excursion (go False)
+findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news}  = excursion (go False)
   where
   go :: Bool {- we think we are in a function -} -> Elab (Maybe Name)
   go b = pull >>= \case
@@ -200,18 +204,18 @@ findDeclaration (UserDecl ty old seen news _)  = excursion (go False)
       Locale ScriptLocale | b -> -- if we are in a function, script
         Nothing <$ push f        -- variables are out of scope
       Locale FunctionLocale -> shup f >> go True -- we know we are in a function
-      Declaration n (UserDecl ty' old' seen' news' capturable') | old == old' -> do
+      Declaration n u'@UserDecl{varTy = ty', currentName = old', seen = seen', newNames = news'} | old == old' -> do
         case ty of
           Just ty -> constrainEqual ty ty'
           Nothing -> pure ()
-        Just n <$ push (Declaration n (UserDecl ty' old' (seen' || seen) (news' ++ news) capturable'))
+        Just n <$ push (Declaration n u'{seen = seen' || seen, newNames = news' ++ news})
       _ -> shup f >> go b
 
 makeDeclaration :: DeclarationType TYPE -> Elab Name
 makeDeclaration LabmateDecl = error "making labmatedecl declaration"
-makeDeclaration d@(UserDecl ty x seen news capturable) = excursion $ do
+makeDeclaration d@UserDecl{currentName} = excursion $ do
   findLocale
-  x <- fresh x
+  x <- fresh currentName
   x <$ push (Declaration x d)
   where
     findLocale = pull >>= \case
@@ -222,10 +226,8 @@ makeDeclaration d@(UserDecl ty x seen news capturable) = excursion $ do
 
 ensureDeclaration :: DeclarationType (Maybe TYPE) -> Elab Name
 ensureDeclaration s = findDeclaration s >>= \case
-  Nothing -> do
-   s <- ensureType s
-   makeDeclaration s
-  Just x -> pure x
+  Nothing -> ensureType s >>= makeDeclaration
+  Just x  -> pure x
 
 onNearestSource :: ([Tok] -> [Tok]) -> Elab ()
 onNearestSource f = excursion go
@@ -249,11 +251,11 @@ inventType x = wrapMeta <$> metaDecl Hoping x emptyContext (atom SType)
 
 ensureType :: DeclarationType (Maybe TYPE) -> Elab (DeclarationType TYPE)
 ensureType LabmateDecl = error "ensureType: cannot invent type for labmate decl."
-ensureType dt@(UserDecl ty a b c d) = case ty of
-  Just ty  -> pure $ UserDecl ty a b c d
-  Nothing  -> do
-    ty <- inventType $ a ++ "Type"
-    pure $ UserDecl ty a b c d
+ensureType dt@UserDecl{varTy, currentName} = do
+  ty <- case varTy of
+    Nothing  -> inventType $ currentName ++ "Type"
+    Just ty  -> pure ty
+  pure $ dt {varTy = ty}
 
 run :: Elab ()
 run = prob >>= \case
@@ -411,9 +413,9 @@ move = pull >>= \case
   Nothing -> pure ()
   Just fr -> case fr of
     Fork (Right frk) fs' p' -> do
-     (fs, p) <- switchFwrd (fs', p')
-     shup $ Fork (Left frk) fs p
-     move
+      (fs, p) <- switchFwrd (fs', p')
+      shup $ Fork (Left frk) fs p
+      move
     FunctionLeft fname (lhs :<=: src) -> do
       (fs, p) <- switchFwrd ([], LHS lhs)
       traverse_ push [Fork (Right $ FunctionName fname) fs p, Source src]
