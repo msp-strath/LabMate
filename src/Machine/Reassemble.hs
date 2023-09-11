@@ -51,7 +51,7 @@ updateNonceTable table (fz :<+>: Fork _ fs' e : fs) = updateNonceTable (updateNo
 updateNonceTable table (fz :<+>: Source (n, Hide ts) : fs) =
   let m = updateNonceTable table (fz :<+>: fs)
       ts' = ts >>= nonceExpand m
-  in Map.insert (track ("UNT " ++ show n ++ " " ++ ts') $ n) ts' m
+  in Map.insert (track ("UNT " ++ show n ++ " " ++ ts') n) ts' m
 updateNonceTable table (fz :<+>: f : fs) = updateNonceTable table (fz :< f :<+>: fs)
 
 renamePass :: MachineState -> Writer RenameProblems MachineState
@@ -59,23 +59,29 @@ renamePass ms = inbound ms
   where
     inbound :: MachineState -> Writer RenameProblems MachineState
     inbound ms@(MS { position = fz :<+>: fs, problem = p }) =
-      case (fz <>< fs, p) of
-        (fz :< Source (n, Hide [t]), Done (FreeVar x)) | kin t == Nom -> do
+      case (outsource (fz <>< fs :<+>: []), p) of
+        (fz :< Source (n, Hide [t]) :<+>: fs, Done (FreeVar x)) | kin t == Nom -> do
           oo <- track ("HIT" ++ show  (fz , x, n)) $ pure True
           case oo of
             True -> pure ()
           x' <- renamer fz x False
-          outbound ms{ position = fz :<+>: [Source (n, Hide [t{ raw = x' }])] }
-        (fz :< Source (l, Hide (s:ss)) :< Source (n, Hide ts) :< Source (m, Hide (t':ts')), Done (Atom ""))
+          outbound ms{ position = fz :<+>: Source (n, Hide [t{ raw = x' }]) : fs }
+        (fz :< Source (l, Hide (s:ss)) :< Source (n, Hide ts) :< Source (m, Hide (t':ts')) :<+>: fs, Done (Atom ""))
           | raw t' == "rename", Grp Directive dss <- kin s ->
             outbound ms{
               position = fz :<+>:
-                [ Source (l, Hide (s{kin = Grp Response dss} : ss))
-                , Source (n, Hide (respond ts))
-                , Source (m, Hide (t'{raw = "renamed"} : ts'))
-                ]
+                  Source (l, Hide (s{kin = Grp Response dss} : ss))
+                : Source (n, Hide (respond ts))
+                : Source (m, Hide (t'{raw = "renamed"} : ts'))
+                : fs
               }
-        (fz, p) -> outbound ms{ position = fz :<+>: [] }
+        (cur, p) -> outbound ms{ position = cur }
+
+    outsource :: Cursor Frame -> Cursor Frame
+    outsource cur@(_ :< Source _ :<+>: _) = cur
+    outsource cur@(_ :< Fork{} :<+>: _) = cur -- do not cross Fork borders
+    outsource (fz :< f :<+>: fs) = outsource (fz :<+>: f : fs)
+    outsource cur@(B0 :<+>: _) = cur
 
     outbound :: MachineState -> Writer RenameProblems MachineState
     outbound ms@(MS { position = B0 :<+>: _ }) = pure ms
@@ -84,10 +90,11 @@ renamePass ms = inbound ms
       Fork (Right frk) fs' p' -> outbound ms{ position = fz :<+>: Fork (Left frk) fs p : fs', problem = p' }
       _ -> outbound ms { position = fz :<+>: f : fs }
 
-    renamer :: Bwd Frame
-            -> Name
-            -> Bool  -- have we found FunctionLocale yet?
-            -> Writer RenameProblems String
+    renamer
+      :: Bwd Frame
+      -> Name
+      -> Bool  -- have we found FunctionLocale yet?
+      -> Writer RenameProblems String
     renamer B0 n b = error "ScriptLocale disappeared in renamer!"
     renamer (fz :< Locale FunctionLocale) n b = renamer fz n True
     renamer (fz :< Locale ScriptLocale) n True = error "Declaration disappeared in renamer!"
@@ -107,10 +114,11 @@ renamePass ms = inbound ms
         pure s
     renamer (fz :< f) n b = renamer fz n b
 
-    captured :: Bwd Frame
-             -> Bool -- have we found a FunctionLocale yet?
-             -> String
-             -> Writer RenameProblems Bool
+    captured
+      :: Bwd Frame
+      -> Bool -- have we found a FunctionLocale yet?
+      -> String
+      -> Writer RenameProblems Bool
     captured B0 b s = pure False
     captured (fz :< Locale FunctionLocale) b s = captured fz True s
     captured (fz :< Locale ScriptLocale) True s = pure False

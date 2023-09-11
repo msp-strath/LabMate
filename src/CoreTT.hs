@@ -14,16 +14,24 @@ import Debug.Trace
 
 track = trace
 
+
+data Status = Crying | Waiting | Hoping | Defined | Abstract
+  deriving Show
+
+
 data Meta = forall n. Meta
   { mctxt :: Context n
   , mtype :: Type ^ n
   , mdefn :: Maybe (Term Chk ^ n)
+  , mstat :: Status
   }
 
 instance Show Meta where
   show = \case
     Meta{..} -> nattily (fst mctxt) $
-      concat ["Meta{", show mctxt, " , ", show mtype, " , ", show mdefn, "}"]
+      concat ["Meta{", show mctxt, " , ", show mtype
+             , " , ", show mdefn, " , ", show mstat
+             , "}"]
 
 type Store = Map Name Meta
 

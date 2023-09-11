@@ -43,7 +43,6 @@ type TYPE = Type ^ Z
 data Frame where
   Source :: Source -> Frame
   Declaration :: Name -> DeclarationType TYPE -> Frame
-  Definition :: Name -> Status -> Frame
   Locale :: LocaleType -> Frame
   ExcursionReturnMarker :: Frame
   RenameFrame :: String -> String -> Frame
@@ -51,9 +50,6 @@ data Frame where
   Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
   Problems :: [Problem] -> Frame
   LocalNamespace :: NameSupply -> Frame
-  deriving Show
-
-data Status = Crying | Waiting | Hoping | Defined
   deriving Show
 
 data Fork = Solved | FunctionName Name
@@ -64,7 +60,7 @@ data LocaleType = ScriptLocale | FunctionLocale
 
 data DeclarationType a
   = UserDecl
-  { varTy :: a                -- (eventual) type
+  { varTy :: a             -- (eventual) type
   , currentName :: String  -- current name
   , seen ::  Bool          -- have we seen it in user code?
   -- requested name and how to reply (we hope of length at most 1)
@@ -188,14 +184,12 @@ initMachine f t = MS
   , metaStore = Map.empty
   }
 
-
-constrainEqual :: TYPE -> TYPE -> Elab ()
-constrainEqual got want = pure ()  -- FIX: make a constraint
-
+constrainEqualType :: TYPE -> TYPE -> Elab ()
+constrainEqualType got want = pure ()  -- FIX: make a constraint
 
 findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe Name)
 findDeclaration LabmateDecl = pure Nothing
-findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news}  = excursion (go False)
+findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} = excursion (go False)
   where
   go :: Bool {- we think we are in a function -} -> Elab (Maybe Name)
   go b = pull >>= \case
@@ -206,7 +200,7 @@ findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news}  
       Locale FunctionLocale -> shup f >> go True -- we know we are in a function
       Declaration n u'@UserDecl{varTy = ty', currentName = old', seen = seen', newNames = news'} | old == old' -> do
         case ty of
-          Just ty -> constrainEqual ty ty'
+          Just ty -> constrainEqualType ty ty'
           Nothing -> pure ()
         Just n <$ push (Declaration n u'{seen = seen' || seen, newNames = news' ++ news})
       _ -> shup f >> go b
@@ -240,8 +234,7 @@ onNearestSource f = excursion go
 metaDecl :: Status -> String -> Context n -> Type ^ n -> Elab Name
 metaDecl s x ctx ty = do
    x <- fresh x
-   push $ Definition x s
-   x <$ modify (\ms@MS{..} -> ms { metaStore = Map.insert x (Meta ctx ty Nothing) metaStore})
+   x <$ modify (\ms@MS{..} -> ms { metaStore = Map.insert x (Meta ctx ty Nothing s) metaStore })
 
 metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
 metaDeclTerm s x ctx@(n, c) ty = nattily n (wrapMeta <$> metaDecl s x ctx ty)

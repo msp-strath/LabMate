@@ -36,10 +36,6 @@ import Machine.Reassemble
 import Data.Version
 import Paths_LabMate
 
-
-type ParseError = (Maybe FilePath, Reach, Int)
-
-
 data Conf = Conf
   { src :: String
   , hideVersion :: Bool
@@ -75,6 +71,11 @@ main = do
       putStrLn $ reassemble n out
    go _ (Left e) = do printError e; exitWith fatalExitCode
 
+
+
+type ParseError = (Maybe FilePath, Reach, Int)
+type ParsedFile = (Map Nonce String, WithSource [Command])
+
 printError :: ParseError -> IO ()
 printError (f, r, n) = do
  putError msg; putError (show r); putError (show n); putError " parses\n"
@@ -82,7 +83,7 @@ printError (f, r, n) = do
     msg = foldMap (++ ": ") f ++ "parser error "
     putError = hPutStr stderr
 
-actInput :: Text -> IO (Either ParseError (Map Nonce String, WithSource [Command]))
+actInput :: Text -> IO (Either ParseError ParsedFile)
 actInput c = do
   let l = lexer $ unix c
   -- termSize <- size
@@ -95,13 +96,12 @@ actInput c = do
     (r, xs) -> pure (Left (Nothing, r, length xs))
     -- putStrLn $ pretty w (tokenStreamToLisp l)
 
-actFile :: FilePath -> IO (Either ParseError (Map Nonce String, WithSource [Command]))
-actFile f =
-  doesFileExist f >>= \case
-    False -> do
-      putStrLn $ "File does not exist: " ++ f
-      exitWith fatalExitCode
-    True -> fmap (first (\(_, r, p) -> (Just f, r, p))) $ T.readFile f >>= actInput
+actFile :: FilePath -> IO (Either ParseError ParsedFile)
+actFile f = doesFileExist f >>= \case
+  False -> do
+    putStrLn $ "File does not exist: " ++ f
+    exitWith fatalExitCode
+  True -> fmap (first (\(_, r, p) -> (Just f, r, p))) $ T.readFile f >>= actInput
 
 actDir :: FilePath -> IO ()
 actDir f = do
