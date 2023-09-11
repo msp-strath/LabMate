@@ -211,6 +211,9 @@ meta m tz | sig :^ th <- subst tz = M m :$ sig :^ th
 pattern FreeVar :: (s ~ Chk, n ~ Z) => Name -> Term s ^ n
 pattern FreeVar s = E :$ (M (s, Zy) :$ Sub0) :^ Ze
 
+wrapMeta :: NATTY n => Name -> Term Chk ^ n
+wrapMeta x = let n = natty in E $^ M (x, n) $^ (idSubst n :^ io n)
+
 tup :: NATTY n => [Term Chk ^ n] -> Term Chk ^ n
 tup = foldr (\x y -> T $^ x <&> y) nil
 

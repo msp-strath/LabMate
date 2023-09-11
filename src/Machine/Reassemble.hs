@@ -91,10 +91,10 @@ renamePass ms = inbound ms
     renamer B0 n b = error "ScriptLocale disappeared in renamer!"
     renamer (fz :< Locale FunctionLocale) n b = renamer fz n True
     renamer (fz :< Locale ScriptLocale) n True = error "Declaration disappeared in renamer!"
-    renamer (fz :< Declaration n' _ d) n b = do
+    renamer (fz :< Declaration n' d) n b = do
       s <- newName d
       if n == n' then case d of
-        UserDecl _ _ _ capturable -> do
+        UserDecl _ _ _ _ capturable -> do
           when capturable $ do
             cap <- captured fz b s
             when cap $ tellGripes Captured d
@@ -114,7 +114,7 @@ renamePass ms = inbound ms
     captured B0 b s = pure False
     captured (fz :< Locale FunctionLocale) b s = captured fz True s
     captured (fz :< Locale ScriptLocale) True s = pure False
-    captured (fz :< Declaration _ _ d) b s = do
+    captured (fz :< Declaration _ d) b s = do
       s' <- newName d
       if s == s'
         then do
@@ -123,11 +123,11 @@ renamePass ms = inbound ms
         else captured fz b s
     captured (fz :< f) b s = captured fz b s
 
-    newName :: DeclarationType -> Writer RenameProblems String
-    newName (UserDecl old seen [] capturable) = pure old
-    newName (UserDecl old seen names capturable)
+    newName :: DeclarationType a -> Writer RenameProblems String
+    newName (UserDecl _ old seen [] capturable) = pure old
+    newName (UserDecl _ old seen names capturable)
       | [new] <- L.nub (map fst names) = pure new
-    newName d@(UserDecl old _ _ _) = old <$ tellGripes TooManyNames d
+    newName d@(UserDecl _ old _ _ _) = old <$ tellGripes TooManyNames d
 
     respond :: [Tok] -> [Tok]
     respond (t : ts) | Grp (Line e) (Hide ss) <- kin t, Just ss <- inner ss =
@@ -142,9 +142,9 @@ renamePass ms = inbound ms
     respond [] = []
 
 
-    tellGripes :: RenameGripe -> DeclarationType -> Writer RenameProblems ()
+    tellGripes :: RenameGripe -> DeclarationType a -> Writer RenameProblems ()
     tellGripes grp = \case
-       UserDecl _ _ newNames _ -> traverse_ (\(_, src) -> tell $ Set.singleton (src, grp)) newNames
+       UserDecl _ _ _ newNames _ -> traverse_ (\(_, src) -> tell $ Set.singleton (src, grp)) newNames
        _ -> pure ()
 
 -- Plan:

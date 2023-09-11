@@ -52,7 +52,7 @@ main = do
    stdin = T.getContents >>= actInput
    go hideVersion (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = execState run (initMachine cs tab)
-      -- print out
+      print out
       unless hideVersion $
         putStrLn ("%< LabMate " ++ showVersion version)
       putStrLn $ reassemble n out

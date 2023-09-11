@@ -116,7 +116,7 @@ type TYPE = Type ^ Z
 
 data Frame where
   Source :: Source -> Frame
-  Declaration :: Name -> TYPE -> DeclarationType -> Frame
+  Declaration :: Name -> DeclarationType TYPE -> Frame
   Definition :: Name -> Status -> Frame
   Locale :: LocaleType -> Frame
   ExcursionReturnMarker :: Frame
@@ -136,15 +136,16 @@ data Fork = Solved | FunctionName Name
 data LocaleType = ScriptLocale | FunctionLocale
   deriving (Show, Eq)
 
-data DeclarationType
+data DeclarationType a
   = UserDecl
+      a
       String   -- current name
       Bool     -- have we seen it in user code?
       [(String, ResponseLocation)] -- requested name and how to reply
                                    -- (we hope of length at most 1)
       Bool     -- is it capturable?
   | LabmateDecl
-  deriving Show
+  deriving (Functor, Show)
 
 data Problem
   = File File
@@ -156,9 +157,10 @@ data Problem
   | Expression Expr'
   | Row [Expr]
   | RenameAction String String ResponseLocation
-  | DeclareAction String
+  | DeclareAction TERM String
   | InputFormatAction String [String] ResponseLocation
   | FunCalled Expr'
+  | ElabConcreteType Name ConcreteType
   | Sourced (WithSource Problem)
   deriving Show
 
@@ -175,6 +177,9 @@ data Gripe =
 yikes :: TERM  -> TERM
 yikes t = T $^ atom "yikes" <&> t
 
+constrainEqual :: TYPE -> TYPE -> Elab ()
+constrainEqual got want = pure ()  -- FIX: make a constraint
+
 initMachine :: File -> Map Nonce String -> MachineState
 initMachine f t = MS
   { position = B0 :<+>: []
@@ -184,9 +189,9 @@ initMachine f t = MS
   , metaStore = Map.empty
   }
 
-findDeclaration :: DeclarationType -> Elab (Maybe Name)
+findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe Name)
 findDeclaration LabmateDecl = pure Nothing
-findDeclaration (UserDecl old seen news _)  = excursion (go False)
+findDeclaration (UserDecl ty old seen news _)  = excursion (go False)
   where
   go :: Bool {- we think we are in a function -} -> Elab (Maybe Name)
   go b = pull >>= \case
@@ -195,17 +200,19 @@ findDeclaration (UserDecl old seen news _)  = excursion (go False)
       Locale ScriptLocale | b -> -- if we are in a function, script
         Nothing <$ push f        -- variables are out of scope
       Locale FunctionLocale -> shup f >> go True -- we know we are in a function
-      Declaration n ty (UserDecl old' seen' news' capturable') | old == old' ->
-        Just n <$ push (Declaration n ty (UserDecl old' (seen' || seen) (news' ++ news) capturable'))
+      Declaration n (UserDecl ty' old' seen' news' capturable') | old == old' -> do
+        case ty of
+          Just ty -> constrainEqual ty ty'
+          Nothing -> pure ()
+        Just n <$ push (Declaration n (UserDecl ty' old' (seen' || seen) (news' ++ news) capturable'))
       _ -> shup f >> go b
 
-makeDeclaration :: DeclarationType -> Elab Name
+makeDeclaration :: DeclarationType TYPE -> Elab Name
 makeDeclaration LabmateDecl = error "making labmatedecl declaration"
-makeDeclaration d@(UserDecl x seen news capturable) = excursion $ do
+makeDeclaration d@(UserDecl ty x seen news capturable) = excursion $ do
   findLocale
-  ty <- metaDeclTerm Hoping (x++"Type") emptyContext (atom SType)
   x <- fresh x
-  x <$ push (Declaration x ty d)
+  x <$ push (Declaration x d)
   where
     findLocale = pull >>= \case
       Nothing -> error "Locale disappeared!"
@@ -213,9 +220,11 @@ makeDeclaration d@(UserDecl x seen news capturable) = excursion $ do
         Locale{} -> pure ()
         _ -> findLocale
 
-ensureDeclaration :: DeclarationType -> Elab Name
+ensureDeclaration :: DeclarationType (Maybe TYPE) -> Elab Name
 ensureDeclaration s = findDeclaration s >>= \case
-  Nothing -> makeDeclaration s
+  Nothing -> do
+   s <- ensureType s
+   makeDeclaration s
   Just x -> pure x
 
 onNearestSource :: ([Tok] -> [Tok]) -> Elab ()
@@ -233,10 +242,18 @@ metaDecl s x ctx ty = do
    x <$ modify (\ms@MS{..} -> ms { metaStore = Map.insert x (Meta ctx ty Nothing) metaStore})
 
 metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
-metaDeclTerm s x ctx@(n, c) ty = wrap <$> metaDecl s x ctx ty
-  where
-  wrap x = E $^ M (x, n) $^ (idSubst n :^ io n)
+metaDeclTerm s x ctx@(n, c) ty = nattily n (wrapMeta <$> metaDecl s x ctx ty)
 
+inventType :: String -> Elab TYPE
+inventType x = wrapMeta <$> metaDecl Hoping x emptyContext (atom SType)
+
+ensureType :: DeclarationType (Maybe TYPE) -> Elab (DeclarationType TYPE)
+ensureType LabmateDecl = error "ensureType: cannot invent type for labmate decl."
+ensureType dt@(UserDecl ty a b c d) = case ty of
+  Just ty  -> pure $ UserDecl ty a b c d
+  Nothing  -> do
+    ty <- inventType $ a ++ "Type"
+    pure $ UserDecl ty a b c d
 
 run :: Elab ()
 run = prob >>= \case
@@ -250,18 +267,19 @@ run = prob >>= \case
     newProb $ Done nil
     move
   LHS (LVar x) -> do
-    x <- ensureDeclaration (UserDecl x True [] True)
+    x <- ensureDeclaration (UserDecl Nothing x True [] True)
     newProb . Done $ FreeVar x
     move
   LHS (LMat []) -> do
     newProb $ Done nil
     move
   FormalParam x -> do
-    x <- makeDeclaration (UserDecl x True [] False)
+    ty <- inventType $ x ++ "Type"
+    x <- makeDeclaration (UserDecl ty x True [] False)
     newProb . Done $ FreeVar x
     move
   Expression (Var x) ->
-    findDeclaration (UserDecl x True [] False) >>= \case
+    findDeclaration (UserDecl Nothing x True [] False) >>= \case
     Nothing -> do
       newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
       move
@@ -318,11 +336,12 @@ run = prob >>= \case
     run
   Command (Direct rl ((Declare xs ty :<=: src, _) :<=: src')) -> do
     traverse_ push [Source src', Source src]
-    push $ Problems (Sourced . fmap DeclareAction <$> xs)
-    newProb $ Done nil -- FIXME
-    move
+    mt <- metaDecl Waiting "declType" emptyContext (atom SType)
+    push $ Problems (Sourced . fmap (DeclareAction (wrapMeta mt)) <$> xs)
+    newProb $ ElabConcreteType mt ty
+    run
   Command (Function (lhs, fname :<=: _, args) cs) ->
-    findDeclaration (UserDecl fname True [] False)  >>= \case
+    findDeclaration (UserDecl Nothing fname True [] False)  >>= \case
       Nothing -> error "function should have been declared already"
       Just fname -> do
         traverse_ fundecl cs
@@ -363,16 +382,19 @@ run = prob >>= \case
     newProb $ Sourced (Expression <$> exp)
     run
   RenameAction old new rl -> do
-    ensureDeclaration (UserDecl old False [(new, rl)] True)
+    ensureDeclaration (UserDecl Nothing old False [(new, rl)] True)
     newProb $ Done nil
     move
-  DeclareAction name -> do
-    name <- ensureDeclaration (UserDecl name False [] True)
+  DeclareAction ty name -> do
+    name <- ensureDeclaration (UserDecl (Just ty) name False [] True)
     newProb $ Done (FreeVar name)
     move
   InputFormatAction name body (n, c) -> do
     modify $ \ms@MS{..} -> ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) nonceTable }
     newProb $ Done nil
+    move
+  ElabConcreteType x ty -> do
+    newProb $ Done nil  -- FIXME
     move
   Sourced (p :<=: src) -> do
     localNamespace . take 10 . filter isAlpha $ show p
@@ -410,14 +432,16 @@ move = pull >>= \case
       move
     _ -> shup fr >> move
 
-generateInputReader :: String -> [String] -> String
+generateInputReader :: String -- ^
+  -> [String] -- ^
+  -> String
 generateInputReader name body = case translateString Matlab name (concat (init body)) of
   Left err -> "% Error: " ++ show err
   Right s -> s
 
 fundecl :: Command -> Elab ()
 fundecl (Function (_, fname :<=: _ , _) _ :<=: _) = do
-  ty <- metaDeclTerm Hoping (fname++"Type") emptyContext (atom SType)
+  ty <- inventType (fname++"Type")
   fname' <- metaDecl Hoping fname emptyContext ty
-  push (Declaration fname' ty (UserDecl fname False [] False))
+  push (Declaration fname' (UserDecl ty fname False [] False))
 fundecl _ = pure ()
