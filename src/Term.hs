@@ -10,6 +10,8 @@ import Term.Thinning
 import Term.Vec
 import Hide
 import Bwd
+import Data.Set (Set)
+import qualified Data.Set as Set
 
 data Sort
   = Syn
@@ -424,3 +426,23 @@ testShow t = putStrLn $ tmShow False t theNames
 names :: Natty n -> Vec n String
 names Zy = VN
 names (Sy n) = names n :# ("#" ++ show n)
+
+class Dependencies t where
+  dependencies :: t -> Set Name
+
+instance Dependencies (Ctor s t) where
+  dependencies (M (x , _)) = Set.singleton x
+  dependencies _           = mempty
+
+instance Dependencies (Term s n) where
+  dependencies (c :$ t) = dependencies c <> dependencies t
+  dependencies (P l _ r) = dependencies l <> dependencies r
+  dependencies (K t) = dependencies t
+  dependencies (L _ t) = dependencies t
+  dependencies _ = mempty
+
+instance Dependencies x => Dependencies (Vec n x) where
+  dependencies = foldMap dependencies
+
+instance (forall n . Dependencies (x n)) => Dependencies (x ^ n) where
+  dependencies (t :^ n) = dependencies t

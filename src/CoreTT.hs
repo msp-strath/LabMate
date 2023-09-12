@@ -18,7 +18,6 @@ track = trace
 data Status = Crying | Waiting | Hoping | Defined | Abstract
   deriving Show
 
-
 data Meta = forall n. Meta
   { mctxt :: Context n
   , mtype :: Type ^ n
@@ -29,7 +28,7 @@ data Meta = forall n. Meta
 instance Show Meta where
   show = \case
     Meta{..} -> nattily (fst mctxt) $
-      concat ["Meta{", show mctxt, " , ", show mtype
+      concat [ "Meta{", show mctxt, " , ", show mtype
              , " , ", show mdefn, " , ", show mstat
              , "}"]
 

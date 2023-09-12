@@ -25,6 +25,7 @@ import CoreTT
 import Term
 import MagicStrings
 import Data.Foldable (traverse_)
+import Data.Set (Set)
 
 type Elab = State MachineState
 
@@ -34,6 +35,7 @@ data MachineState = MS
   , nameSupply :: (Root, Int)
   , nonceTable :: Map Nonce String
   , metaStore :: Store
+  , constraintStore :: Map Name Constraint
   } deriving Show
 
 
@@ -96,6 +98,11 @@ data Lit
 data Gripe =
   RenameFail Nonce String
   deriving Show
+
+elabTC :: Context n -> TC n x -> Elab (Either String x)
+elabTC ctx tc = do
+  store <- gets metaStore
+  pure $ runTC tc store ctx
 
 fresh :: String -> Elab Name
 fresh s = do
@@ -172,7 +179,7 @@ localNamespace s = do
   ns <- swapNameSupply ns
   push $ LocalNamespace ns
 
-yikes :: TERM  -> TERM
+yikes :: TERM -> TERM
 yikes t = T $^ atom "yikes" <&> t
 
 initMachine :: File -> Map Nonce String -> MachineState
@@ -182,10 +189,72 @@ initMachine f t = MS
   , nameSupply = (B0 :< ("labmate", 0), 0)
   , nonceTable = t
   , metaStore = Map.empty
+  , constraintStore = Map.empty
   }
 
+data ConstraintType n
+  = Hom (Type ^ n)
+  -- heterogenous constraint will become homogenous as soon as the
+  -- named constraints have been solved
+  | Het (Type ^ n) [Name] (Type ^ n)
+  deriving Show
+
+lhsType :: ConstraintType n -> Type ^ n
+rhsType :: ConstraintType n -> Type ^ n
+
+lhsType (Hom ty) = ty
+lhsType (Het lty _ _) = lty
+
+rhsType (Hom ty) = ty
+rhsType (Het _ _ rty) = rty
+
+data ConstraintStatus
+  = Impossible
+  | Blocked
+  | Resolved [Name] -- the constraints has been reduced to the
+                    -- conjuction of the named constraints
+  | Unstarted
+  deriving Show
+
+data Constraint = forall n . Constraint
+  { constraintScope :: Natty n
+  , constraintCtx   :: Vec n (ConstraintType n)
+  , constraintType  :: ConstraintType n
+  , constraintStatus :: ConstraintStatus
+  , lhs :: Term Chk ^ n
+  , rhs :: Term Chk ^ n
+  }
+
+instance (Show Constraint) where
+  show Constraint{..} = nattily constraintScope $ concat
+   [ "{ constraintCtx = ", show constraintCtx
+   , ", constraintType = ", show constraintType
+   , ", status = ", show constraintStatus
+   , ", lhs = ", show lhs
+   , ", rhs = ", show rhs
+   , " }"
+   ]
+
+constrain :: String -> Constraint -> Elab (Name, ConstraintStatus)
+constrain s c@Constraint{..} = do
+  s <- fresh s
+  modify $ \ms@MS{..} -> ms{ constraintStore = Map.insert s c constraintStore }
+  pure (s, constraintStatus)
+
 constrainEqualType :: TYPE -> TYPE -> Elab ()
-constrainEqualType got want = pure ()  -- FIX: make a constraint
+constrainEqualType lhs rhs = (() <$) . constrain "Q" $ Constraint
+  { constraintScope = Zy
+  , constraintCtx   = VN
+  , constraintType  = Hom (atom SType)
+  , constraintStatus = Unstarted
+  , lhs = lhs
+  , rhs = rhs
+  }
+
+canonicalDependencies :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Set Name)
+canonicalDependencies ctx ty tm = elabTC ctx (checkEval ty tm) >>= \case
+  Left err -> error $ "canonical dep: typecheck error " ++ err
+  Right tm -> pure $ dependencies tm
 
 findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe Name)
 findDeclaration LabmateDecl = pure Nothing
