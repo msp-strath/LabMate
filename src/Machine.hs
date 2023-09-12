@@ -26,6 +26,7 @@ import Term
 import MagicStrings
 import Data.Foldable (traverse_)
 import Data.Set (Set)
+import qualified Data.Set as Set
 
 type Elab = State MachineState
 
@@ -64,10 +65,10 @@ data DeclarationType a
   = UserDecl
   { varTy :: a             -- (eventual) type
   , currentName :: String  -- current name
-  , seen ::  Bool          -- have we seen it in user code?
+  , seen :: Bool           -- have we seen it in user code?
   -- requested name and how to reply (we hope of length at most 1)
-  , newNames ::  [(String, ResponseLocation)]
-  , capturable ::  Bool    -- is it capturable?
+  , newNames :: [(String, ResponseLocation)]
+  , capturable :: Bool     -- is it capturable?
   }
   | LabmateDecl
   deriving (Functor, Show)
@@ -179,6 +180,13 @@ localNamespace s = do
   ns <- swapNameSupply ns
   push $ LocalNamespace ns
 
+getMeta :: Name -> Elab Meta
+getMeta x = do
+  ms <- gets metaStore
+  case Map.lookup x ms of
+    Just m -> pure m
+    Nothing -> error "getMeta: meta does not exist"
+
 yikes :: TERM -> TERM
 yikes t = T $^ atom "yikes" <&> t
 
@@ -208,10 +216,14 @@ lhsType (Het lty _ _) = lty
 rhsType (Hom ty) = ty
 rhsType (Het _ _ rty) = rty
 
+isHom :: ConstraintType n -> Maybe (Type ^ n)
+isHom (Hom ty) = Just ty
+isHom _ = Nothing
+
 data ConstraintStatus
   = Impossible
   | Blocked
-  | Resolved [Name] -- the constraints has been reduced to the
+  | SolvedIf [Name] -- the constraints has been reduced to the
                     -- conjuction of the named constraints
   | Unstarted
   deriving Show
@@ -227,19 +239,65 @@ data Constraint = forall n . Constraint
 
 instance (Show Constraint) where
   show Constraint{..} = nattily constraintScope $ concat
-   [ "{ constraintCtx = ", show constraintCtx
-   , ", constraintType = ", show constraintType
-   , ", status = ", show constraintStatus
-   , ", lhs = ", show lhs
-   , ", rhs = ", show rhs
-   , " }"
-   ]
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", constraintType = ", show constraintType
+    , ", status = ", show constraintStatus
+    , ", lhs = ", show lhs
+    , ", rhs = ", show rhs
+    , " }"
+    ]
 
-constrain :: String -> Constraint -> Elab (Name, ConstraintStatus)
-constrain s c@Constraint{..} = do
-  s <- fresh s
-  modify $ \ms@MS{..} -> ms{ constraintStore = Map.insert s c constraintStore }
-  pure (s, constraintStatus)
+normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
+normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
+  Left err -> error $ "normalise : TC error" ++ err
+  Right tm -> pure tm
+
+constrain :: String -> Constraint -> Elab ConstraintStatus
+constrain s c@Constraint{..} = case (traverse isHom constraintCtx, constraintType) of
+  (Just ctx, Hom ty) -> nattily constraintScope $ do
+    let gam = (constraintScope, ctx)
+    ty  <- normalise gam (atom SType) ty
+    lhs <- normalise gam ty lhs
+    rhs <- normalise gam ty rhs
+    case (lhs, rhs) of
+      _ | lhs == rhs -> pure $ SolvedIf []
+      (E :$ (M (x, n) :$ sig) :^ th, t :^ ph)
+        | Right Refl <- idSubstEh sig
+        , Just ph <- ph `thicken` th
+        , x `Set.notMember` dependencies t -> getMeta x >>= \case
+              Meta{..} -> case (mstat, nattyEqEh n (fst mctxt)) of
+                (_, Just Refl) -> do
+                  modify $ \ms@MS{..} -> ms{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) metaStore}
+                  pure $ SolvedIf []
+                _ -> error "constrain: different context lengths"
+      (t :^ ph, E :$ (M (x, n) :$ sig) :^ th)
+        | Right Refl <- idSubstEh sig
+        , Just ph <- ph `thicken` th
+        , x `Set.notMember` dependencies t -> getMeta x >>= \case
+              Meta{..} -> case (mstat, nattyEqEh n (fst mctxt)) of
+                (_, Just Refl) -> do
+                  modify $ \ms@MS{..} -> ms{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) metaStore}
+                  pure $ SolvedIf []
+                _ -> error "constrain: different context lengths"
+      _ -> do
+       s <- fresh s
+       modify $ \ms@MS{..} -> ms{ constraintStore = Map.insert s c constraintStore }
+       pure $ case constraintStatus of
+         Blocked   -> SolvedIf [s]
+         Unstarted -> SolvedIf [s]
+         _ -> constraintStatus
+  _ -> do
+    s <- fresh s
+    modify $ \ms@MS{..} -> ms{ constraintStore = Map.insert s c constraintStore }
+    pure $ case constraintStatus of
+      Blocked   -> SolvedIf [s]
+      Unstarted -> SolvedIf [s]
+      _ -> constraintStatus
+
+{-
+canDependencies :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Set Name)
+canDependencies ctx ty tm = dependecies <$> normalise ctx ty tm
+-}
 
 constrainEqualType :: TYPE -> TYPE -> Elab ()
 constrainEqualType lhs rhs = (() <$) . constrain "Q" $ Constraint
@@ -250,11 +308,6 @@ constrainEqualType lhs rhs = (() <$) . constrain "Q" $ Constraint
   , lhs = lhs
   , rhs = rhs
   }
-
-canonicalDependencies :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Set Name)
-canonicalDependencies ctx ty tm = elabTC ctx (checkEval ty tm) >>= \case
-  Left err -> error $ "canonical dep: typecheck error " ++ err
-  Right tm -> pure $ dependencies tm
 
 findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe Name)
 findDeclaration LabmateDecl = pure Nothing
@@ -505,7 +558,7 @@ generateInputReader name body = case translateString Matlab name (concat (init b
 
 fundecl :: Command -> Elab ()
 fundecl (Function (_, fname :<=: _ , _) _ :<=: _) = do
-  ty <- inventType (fname++"Type")
+  ty <- inventType $ fname ++ "Type"
   fname' <- metaDecl Hoping fname emptyContext ty
-  push (Declaration fname' (UserDecl ty fname False [] False))
+  push $ Declaration fname' (UserDecl ty fname False [] False)
 fundecl _ = pure ()

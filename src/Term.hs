@@ -431,8 +431,8 @@ class Dependencies t where
   dependencies :: t -> Set Name
 
 instance Dependencies (Ctor s t) where
-  dependencies (M (x , _)) = Set.singleton x
-  dependencies _           = mempty
+  dependencies (M (x, _)) = Set.singleton x
+  dependencies _          = mempty
 
 instance Dependencies (Term s n) where
   dependencies (c :$ t) = dependencies c <> dependencies t
@@ -445,4 +445,4 @@ instance Dependencies x => Dependencies (Vec n x) where
   dependencies = foldMap dependencies
 
 instance (forall n . Dependencies (x n)) => Dependencies (x ^ n) where
-  dependencies (t :^ n) = dependencies t
+  dependencies (t :^ _) = dependencies t
