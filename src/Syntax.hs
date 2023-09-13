@@ -44,15 +44,8 @@ type TensorType = WithSource TensorType'
 type TypeExpr = WithSource TypeExpr'
 
 data TensorType'
-  = Tensor ((String, TypeExpr), (String, TypeExpr)) EntryType
+  = Tensor ((String, TypeExpr), (String, TypeExpr)) TypeExpr
   deriving Show
-
-type EntryType = WithSource EntryType'
-
-data EntryType'
-  = Ty TypeExpr
---  | Cmhn (String, TypeExpr) Expr -- comprehensions
-  deriving (Show)
 
 -- possibly incomplete list of type level expressions
 data TypeExpr'

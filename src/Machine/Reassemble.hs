@@ -61,9 +61,7 @@ renamePass ms = inbound ms
     inbound ms@(MS { position = fz :<+>: fs, problem = p }) =
       case (outsource (fz <>< fs :<+>: []), p) of
         (fz :< Source (n, Hide [t]) :<+>: fs, Done (FreeVar x)) | kin t == Nom -> do
-          oo <- track ("HIT" ++ show  (fz , x, n)) $ pure True
-          case oo of
-            True -> pure ()
+          ~True <- track ("HIT" ++ show  (fz , x, n)) $ pure True
           x' <- renamer fz x False
           outbound ms{ position = fz :<+>: Source (n, Hide [t{ raw = x' }]) : fs }
         (fz :< Source (l, Hide (s:ss)) :< Source (n, Hide ts) :< Source (m, Hide (t':ts')) :<+>: fs, Done (Atom ""))

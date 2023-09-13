@@ -125,8 +125,8 @@ ptensortype = pws ptensortype'
 
 ptensortype' :: Parser TensorType'
 ptensortype' = Tensor <$> (pgrp (== Bracket Square) (plink psquex) <* pospc
-                         <|> pure (one , one))
-                     <*> pentrytype
+                           <|> pure (one , one))
+                      <*> ptypeexpr topCI
   where
   one = ("", TyNum 1  :<=: (-1, Hide []))
   psquex = (,) <$> (plarrow (ptypeexpr topCI) <* pospc <* pkin Nom "x" <* pospc
@@ -137,12 +137,6 @@ plarrow :: Parser a -> Parser (String, a)
 plarrow p = pcond ((,) <$> pnom <* pospc <* psym "<" <* psym "-" <* pospc ) (<$> p)
             (("",) <$> p)
         <|> pgrp (== Bracket Round) (plarrow p)
-
-pentrytype :: Parser EntryType
-pentrytype = pws pentrytype'
-
-pentrytype' :: Parser EntryType'
-pentrytype' = Ty <$> ptypeexpr topCI
 
 ptypeexpr :: ContextInfo -> Parser TypeExpr
 ptypeexpr ci = go >>= more ci where
