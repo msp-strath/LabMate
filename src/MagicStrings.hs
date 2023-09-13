@@ -1,6 +1,6 @@
 module MagicStrings where
 
--- types
+-- core types
 pattern SType = "Type"
 pattern SOne  = "One"
 pattern SAbel = "Abel"
@@ -14,3 +14,6 @@ pattern SMatrix = "Matrix"
 -- eliminators
 pattern Sfst  = "fst"
 pattern Ssnd  = "snd"
+
+-- Labmate user types
+pattern Lint = "int"

@@ -39,3 +39,6 @@ newtype Konst :: * -> b -> * where
 
 instance Show x => Show (Konst x y) where
   show = show . getKonst
+
+ixKI :: {- forall (f :: s -> *)(g :: s -> *)(a :: s) . -} f a -> g a -> g a
+ixKI = const id

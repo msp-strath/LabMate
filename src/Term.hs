@@ -74,12 +74,18 @@ type Type = Term Chk
 type NmTy = Type
 type Norm = Term
 
-type Context n = (Natty n, Vec n (Type ^ n))
+---------------------------------------------
+type Context n = Vec n (String, Type ^ n)
 
 emptyContext :: Context Z
-emptyContext = (Zy, VN)
+emptyContext = VN
 
-----------------------------------------------
+infixl 5 \\\
+
+(\\\) :: Context n -> (String, Type ^ n) -> Context (S n)
+ctx \\\ x = fmap wk <$> (ctx :# x)
+
+---------------------------------------------
 cmpCtor :: Ctor s t -> Ctor s' t -> Ordering' (s == s')
 cmpCtor (A s) (A s') = fromOrd Refl $ compare s s'
 cmpCtor (I i) (I i') = fromOrd Refl $ compare i i'

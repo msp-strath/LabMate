@@ -27,9 +27,10 @@ data Meta = forall n. Meta
 
 instance Show Meta where
   show = \case
-    Meta{..} -> nattily (fst mctxt) $
-      concat [ "Meta{", show mctxt, " , ", show mtype
-             , " , ", show mdefn, " , ", show mstat
+    Meta{..} -> nattily (vlen mctxt) $
+      concat [ "Meta{", show mctxt
+             , " , ", show mtype , " , ", show mdefn
+             , " , ", show mstat
              , "}"]
 
 type Store = Map Name Meta
@@ -65,10 +66,10 @@ must (Just a) = pure a
 must Nothing = fail "must fails"
 
 typeOf :: (S Z <= n) -> TC n (Type ^ n)
-typeOf i = TC $ \_ -> Right . vonly . (i ?^) . snd
+typeOf i = TC $ \_ -> Right . snd . vonly . (i ?^)
 
 scope :: TC n (Natty n)
-scope = TC $ \_ -> Right . fst
+scope = TC $ \_ -> Right . vlen
 
 withScope :: (NATTY n => TC n t) -> TC n t
 withScope c = do
@@ -76,10 +77,10 @@ withScope c = do
   nattily n c
 
 under
-  :: Type ^ n
+  :: (String, Type ^ n)
   -> TC (S n) a
   -> TC n a -- discharging the bound variable is the caller's problem
-under ty (TC f) = TC $ \st (n, ctx) -> f st (Sy n, wk <$> (ctx :# ty))
+under ty (TC f) = TC $ \st ctx -> f st (fmap wk <$> (ctx :# ty))
 
 metaLookup :: Name -> TC n Meta
 metaLookup s = TC $ \ st _ -> case s `Map.lookup` st of
@@ -95,18 +96,18 @@ typeEh ty | Just cts <- tagEh ty = case cts of
   (SList, [t]) -> typeEh t
   (SEnum, [t]) -> withScope $
     checkEh (mk SList $ atom SAtom) t
-  (SPi, [s, t]) | Just t' <- lamEh t -> do
+  (SPi, [s, t]) | Just (x, t') <- lamNameEh t -> do
     typeEh s
-    under s $ typeEh t'
-  (SSig, [s, t]) | Just t' <- lamEh t -> do
+    under (x, s) $ typeEh t'
+  (SSig, [s, t]) | Just (x, t') <- lamNameEh t -> do
     typeEh s
-    under s $ typeEh t'
+    under (x, s) $ typeEh t'
   (SMatrix, [rowTy, colTy, cellTy, rs, cs])
-    | Just cellTy <- lamEh cellTy
-    , Just cellTy <- lamEh cellTy -> withScope $ do
+    | Just (r, cellTy) <- lamNameEh cellTy
+    , Just (c, cellTy) <- lamNameEh cellTy -> withScope $ do
       typeEh rowTy
       typeEh colTy
-      under rowTy $ under (wk colTy) $ typeEh cellTy
+      under (r, rowTy) $ under (c, wk colTy) $ typeEh cellTy
       checkEh (mk SList rowTy) rs
       checkEh (mk SList colTy) cs
   (ty, _) -> fail $ "typeEh: unknown type " ++ ty
@@ -158,8 +159,8 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
     True <$ checkEnumEh nfs tm
   (SOne, []) -> pure True
   (SAtom, []) | Atom _ <- tm -> pure True
-  (SPi, [s, t]) | Just t' <- lamEh t, Just tm' <- lamEh tm ->
-    True <$ under s (checkEh t' tm')
+  (SPi, [s, t]) | Just t' <- lamEh t, Just (x, tm') <- lamNameEh tm ->
+    True <$ under (x, s) (checkEh t' tm')
   (SSig, [s, t]) | Just t' <- lamEh t, Just (a, d) <- pairEh tm -> withScope $ do
     checkEh s a
     True <$ checkEh (t' //^ sub0 (R $^ a <&> s)) d
@@ -221,10 +222,10 @@ checkCanMatrixEh ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
     pure ((rs'', cs0), (mk Splus rs0 rs1, cs'))
   | Just tm <- E $? tm = withScope $ tagEh <$> synthEhNorm tm >>= \case
      Just (SMatrix, [rowTy', colTy', cellTy', rs0, cs0]) |
-       Just cellTy' <- lamEh cellTy', Just cellTy' <- lamEh cellTy' -> do
+       Just (r, cellTy') <- lamNameEh cellTy', Just (c, cellTy') <- lamNameEh cellTy' -> do
          subtypeEh rowTy' rowTy
          subtypeEh colTy' colTy
-         under rowTy' $ under (wk colTy') $ subtypeEh cellTy' cellTy
+         under (r, rowTy') $ under (c, wk colTy') $ subtypeEh cellTy' cellTy
          True <- track "after subtyping" $ pure True
          rs1 <- prefixEh rowTy rs0 rs
          True <- track ("row leftovers " ++ show rs1) $ pure True
@@ -370,7 +371,7 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   (SPi, [s, t])
     | Just t' <- lamEh t
     , Just (x, tm') <- lamNameEh tm ->
-        lam x <$> under s (checkNormEval t' tm')
+        lam x <$> under (x, s) (checkNormEval t' tm')
   (SSig, [s, t])
     | Just  t' <- lamEh t
     , Just (a, d) <- pairEh tm -> do
@@ -405,14 +406,14 @@ typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
   (SList, [genTy]) -> mk SList <$> typeEval genTy
   (SEnum, [as]) -> mk SEnum <$> checkNormEval (mk SList (atom SAtom)) as
   (SPi, [s, t]) | Just (x, t') <- lamNameEh t ->
-      mk SPi <$> typeEval s <*> (lam x <$> under s (typeEval t'))
+      mk SPi <$> typeEval s <*> (lam x <$> under (x, s) (typeEval t'))
   (SSig, [s, t]) | Just (x, t') <- lamNameEh t ->
-      mk SSig <$> typeEval s <*> (lam x <$> under s (typeEval t'))
+      mk SSig <$> typeEval s <*> (lam x <$> under (x, s) (typeEval t'))
   (SMatrix, [rowTy, colTy, cellTy, rs, cs])
     | Just (r, cellTy) <- lamNameEh cellTy, Just (c,cellTy) <- lamNameEh cellTy -> do
       mk SMatrix <$> typeEval rowTy
                  <*> typeEval colTy
-                 <*> (lam r <$> under rowTy (lam c <$> under (wk colTy) (typeEval cellTy)))
+                 <*> (lam r <$> under (r, rowTy) (lam c <$> under (c, wk colTy) (typeEval cellTy)))
                  <*> checkEval (mk SList rowTy) rs
                  <*> checkEval (mk SList colTy) cs
   (ty, _) -> fail $ "typeEval: unknown type " ++ ty
@@ -455,19 +456,19 @@ evalSynth tm = withScope $ case tm of
       _ -> fail "evalSynth: eliminator for an unknown type"
   M (x, n) :$ sig :^ th -> metaLookup x >>= \case
     Meta {..}
-      | Just Refl <- nattyEqEh (fst mctxt) n ->
+      | Just Refl <- nattyEqEh (vlen mctxt) n ->
         let ty = mtype //^ (sig :^ th)
         in case mdefn of
           Nothing -> do
-            sig <- evalSubst ((//^ (sig :^ th)) <$> snd mctxt) (sig :^ th)
+            sig <- evalSubst (fmap (//^ (sig :^ th)) <$> mctxt) (sig :^ th)
             pure (E $^ M (x, n) $^ sig, ty)
           Just defn -> evalSynth (R $^ (defn //^ (sig :^ th)) <&> ty)
       | otherwise -> fail "evalSynth: usage of a metavariable at wrong arity"
   _ -> fail "evalSynthEh: no"
 
-evalSubst :: Vec k (Type ^ n) -> Subst k ^ n -> TC n (Subst k ^ n)
+evalSubst :: Vec k (String, Type ^ n) -> Subst k ^ n -> TC n (Subst k ^ n)
 evalSubst VN _ = (Sub0 :^) <$> (no <$> scope)
-evalSubst (ctx :# ty) sig | Just sig <- ST $? sig = case split sig of
+evalSubst (ctx :# (_, ty)) sig | Just sig <- ST $? sig = case split sig of
   (sig, tm) -> do
     sig <- evalSubst ctx sig
     ty  <- typeEval ty
@@ -591,13 +592,13 @@ subtypeEh got want = withScope $
       nws <- termToNFList tyA ws
       () <$ must (stripPrefix ngs nws)
     (Just (SPi, [gs, gt]), Just (SPi, [ws, wt]))
-      | Just gt' <- lamEh gt, Just wt' <- lamEh wt -> do
+      | Just gt' <- lamEh gt, Just (x, wt') <- lamNameEh wt -> do
         subtypeEh ws gs
-        under ws $ subtypeEh gt' wt'
+        under (x, ws) $ subtypeEh gt' wt'
     (Just (SSig, [gs, gt]), Just (SSig, [ws, wt]))
-      | Just gt' <- lamEh gt, Just wt' <- lamEh wt -> do
+      | Just (x, gt') <- lamNameEh gt, Just wt' <- lamEh wt -> do
         subtypeEh gs ws
-        under gs $ subtypeEh gt' wt'
+        under (x, gs) $ subtypeEh gt' wt'
     (_, Just (SOne, [])) -> pure ()
     _ -> guard $ got == want
 
@@ -613,7 +614,7 @@ etaExpand tm gotTy wantTy
     case (gotTy, wantTy) of
       ((SPi, [gs, gt]), (SPi, [ws, wt]))
         | Just gt' <- lamEh gt, Just (name, wt') <- lamNameEh wt ->
-            (lam name <$>) . under ws $ do
+            (lam name <$>) . under (name, ws) $ do
             arg <- etaExpand (evar 0) (wk ws) (wk gs)
             etaExpand (E $^ D $^ wk tm <&> arg) gt' wt'
       ((SSig, [gs, gt]), (SSig, [ws, wt]))
@@ -635,14 +636,14 @@ etaExpand tm gotTy wantTy
 src ==> (tgt :^ th) = mk SPi src (K tgt :^ th)
 
 testShowTC :: TC n (Term 'Chk ^ n)
-           -> Vec n (String, Type ^ n)
+           -> Context n
            -> String
 testShowTC tc ctx =
-  case runTC tc Map.empty (vlen ctx, snd <$> ctx) of
+  case runTC tc Map.empty ctx of
     Left err -> err
     Right tm -> tmShow False tm (fst <$> ctx)
 
-
+{-
 test1 = let ty = mk SSig SType (lam "X" (evar 0))
             tm = D $^ (R $^ (T $^ atom SOne <&> evar 2) <&> ty) <&> atom Ssnd
             ctx = VN :# ("x", atom SOne) :# ("y", atom SOne) :# ("z", atom SOne)
@@ -728,7 +729,7 @@ test11 = let i = evar 3 :: Term4
              nat = mk SList SOne :: Term4
              x = evar 2 :: Term4
              y = evar 0 :: Term4
-             ctx = VN :# nat :# xty :# nat :# yty
+             ctx = VN :# ("", nat) :# ("", xty) :# ("", nat) :# ("", yty)
              tm = mk Svjux (mk Shjux x y :: Term4) (mk Shjux y x :: Term4) :: Term4
              ty = mty two (i + j)
          in runTC (checkEh ty tm) Map.empty (natty, ctx)
@@ -742,3 +743,4 @@ test12 = let rs' = mk Sone nil :: Term Chk ^ Z
              col = mk Svjux cell cell :: Term Chk ^ Z
              tm  = mk Shjux col col :: Term Chk ^ Z
          in  track ("test12 matrix:\n" ++ show tm) $ testShowTC (checkEval ty tm) VN
+-}

@@ -110,6 +110,10 @@ cmpCov u u' = case cmpThin (covl u) (covl u') of
 data (^) :: (Nat -> *) -> Nat -> * where
   (:^) :: p n -> n <= m -> p ^ m
 
+
+scopeOf :: p ^ n -> Natty n
+scopeOf (_ :^ th) = bigEnd th
+
 -- (^) is the free Thinny on (p :: Nat -> *)
 instance Thinny ((^) (p :: Nat -> *)) where
   (p :^ th) -< ph = p :^ (th -< ph)

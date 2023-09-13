@@ -73,6 +73,13 @@ data DeclarationType a
   | LabmateDecl
   deriving (Functor, Show)
 
+data ElabTask where
+  TensorTask :: TensorType' -> ElabTask
+  TypeExprTask :: TypeExpr' -> ElabTask
+  Await :: NATTY n => ConstraintStatus -> Term Chk ^ n -> ElabTask
+  Abandon :: ElabTask -> ElabTask
+deriving instance Show ElabTask
+
 data Problem where
   File :: File -> Problem
   BlockTop :: [Command] -> Problem
@@ -86,15 +93,12 @@ data Problem where
   DeclareAction :: TERM -> String -> Problem
   InputFormatAction :: String -> [String] -> ResponseLocation -> Problem
   FunCalled :: Expr' -> Problem
-  ElabTensorType :: Name -> TensorType' -> Problem
+  Elab :: Name -> ElabTask -> Problem
   -- the `Name` is where the solution goes and it should be a Waiting metavariable,
   -- the `Bwd String` should have the same length as the context of the metavariable
   ElabTypeExpr :: Name -> Bwd String -> TypeExpr' -> Problem
-  Sourced :: (WithSource Problem) -> Problem
-
-deriving instance (Show Problem)
-
-
+  Sourced :: WithSource Problem -> Problem
+  deriving (Show)
 
 data Lit
   = IntLit Int
@@ -193,6 +197,11 @@ getMeta x = do
     Just m -> pure m
     Nothing -> error "getMeta: meta does not exist"
 
+cry :: Name -> Elab ()
+cry x = do
+  meta <- getMeta x
+  modify $ \ms@MS{..} -> ms { metaStore = Map.insert x (meta{ mstat = Crying }) metaStore }
+
 yikes :: TERM -> TERM
 yikes t = T $^ atom "yikes" <&> t
 
@@ -234,9 +243,22 @@ data ConstraintStatus
   | Unstarted
   deriving Show
 
+instance Semigroup ConstraintStatus where
+  (<>) = mappend
+
+instance Monoid ConstraintStatus where
+  mempty = SolvedIf []
+
+  mappend Impossible _ = Impossible
+  mappend _ Impossible = Impossible
+  mappend Blocked _    = Blocked
+  mappend _ Blocked    = Blocked
+  mappend Unstarted y  = Unstarted
+  mappend x Unstarted  = Unstarted
+  mappend (SolvedIf xs) (SolvedIf ys) = SolvedIf $ xs `union` ys
+
 data Constraint = forall n . Constraint
-  { constraintScope :: Natty n
-  , constraintCtx   :: Vec n (ConstraintType n)
+  { constraintCtx   :: Vec n (String, ConstraintType n)
   , constraintType  :: ConstraintType n
   , constraintStatus :: ConstraintStatus
   , lhs :: Term Chk ^ n
@@ -244,7 +266,7 @@ data Constraint = forall n . Constraint
   }
 
 instance (Show Constraint) where
-  show Constraint{..} = nattily constraintScope $ concat
+  show Constraint{..} = nattily (vlen constraintCtx) $ concat
     [ "{ constraintCtx = ", show constraintCtx
     , ", constraintType = ", show constraintType
     , ", status = ", show constraintStatus
@@ -259,13 +281,12 @@ normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
   Right tm -> pure tm
 
 constrain :: String -> Constraint -> Elab ConstraintStatus
-constrain s c@Constraint{..} = case (traverse isHom constraintCtx, constraintType) of
-  (Just ctx, Hom ty) -> nattily constraintScope $ do
+constrain s c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
+  (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms <- gets metaStore
-    let gam = (constraintScope, ctx)
-    ty  <- normalise gam (atom SType) ty
-    lhs <- normalise gam ty lhs
-    rhs <- normalise gam ty rhs
+    ty  <- normalise ctx (atom SType) ty
+    lhs <- normalise ctx ty lhs
+    rhs <- normalise ctx ty rhs
     case (lhs, rhs) of
       _ | lhs == rhs -> pure $ SolvedIf []
       (E :$ (M (x, n) :$ sig) :^ th, t :^ ph)
@@ -274,7 +295,7 @@ constrain s c@Constraint{..} = case (traverse isHom constraintCtx, constraintTyp
         , Right Refl <- idSubstEh sig
         , Just ph <- ph `thicken` th
         , x `Set.notMember` dependencies t ->
-          case nattyEqEh n (fst mctxt) of
+          case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
               modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms}
               pure $ SolvedIf []
@@ -285,7 +306,7 @@ constrain s c@Constraint{..} = case (traverse isHom constraintCtx, constraintTyp
         , Right Refl <- idSubstEh sig
         , Just ph <- ph `thicken` th
         , x `Set.notMember` dependencies t ->
-          case nattyEqEh n (fst mctxt) of
+          case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
               modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms}
               pure $ SolvedIf []
@@ -305,16 +326,28 @@ constrain s c@Constraint{..} = case (traverse isHom constraintCtx, constraintTyp
       Unstarted -> SolvedIf [s]
       _ -> constraintStatus
 
-
 constrainEqualType :: TYPE -> TYPE -> Elab ()
 constrainEqualType lhs rhs = (() <$) . constrain "Q" $ Constraint
-  { constraintScope = Zy
-  , constraintCtx   = VN
+  { constraintCtx   = VN
   , constraintType  = Hom (atom SType)
   , constraintStatus = Unstarted
   , lhs = lhs
   , rhs = rhs
   }
+
+getConstraintStatus :: Name -> Elab ConstraintStatus
+getConstraintStatus x = do
+  cstore <- gets constraintStore
+  case constraintStatus <$> Map.lookup x cstore of
+    Nothing -> pure Impossible
+    Just Blocked -> pure $ SolvedIf [x]
+    Just (SolvedIf xs) -> mconcat <$> traverse getConstraintStatus xs
+    Just cstatus -> pure cstatus
+
+updateConstraintStatus :: ConstraintStatus -> Elab ConstraintStatus
+updateConstraintStatus (SolvedIf xs) =
+  mconcat <$> traverse getConstraintStatus xs
+updateConstraintStatus cs = pure cs
 
 findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe Name)
 findDeclaration LabmateDecl = pure Nothing
@@ -366,24 +399,24 @@ metaDecl s x ctx ty = do
    x <$ modify (\ms@MS{..} -> ms { metaStore = Map.insert x (Meta ctx ty Nothing s) metaStore })
 
 metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
-metaDeclTerm s x ctx@(n, c) ty = nattily n (wrapMeta <$> metaDecl s x ctx ty)
+metaDeclTerm s x ctx ty = nattily (vlen ctx) (wrapMeta <$> metaDecl s x ctx ty)
 
-metaDefn :: Name -> Natty n -> Term Chk ^ n -> Elab ()
-metaDefn x n def = getMeta x >>= \case
+metaDefn :: Name -> Term Chk ^ n -> Elab ()
+metaDefn x def = getMeta x >>= \case
   Meta{..}
-    | Just Refl <- n `nattyEqEh` fst mctxt
+    | Just Refl <- scopeOf def `nattyEqEh` vlen mctxt
     , Waiting <- mstat ->
       modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just def) Defined) metaStore}
   _ -> error "metaDefn: check the status or the scope"
 
-inventType :: String -> Elab TYPE
-inventType x = wrapMeta <$> metaDecl Hoping x emptyContext (atom SType)
+invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
+invent x ctx ty = nattily (vlen ctx) (wrapMeta <$> metaDecl Hoping x ctx ty)
 
 ensureType :: DeclarationType (Maybe TYPE) -> Elab (DeclarationType TYPE)
 ensureType LabmateDecl = error "ensureType: cannot invent type for labmate decl."
 ensureType dt@UserDecl{varTy, currentName} = do
   ty <- case varTy of
-    Nothing  -> inventType $ currentName ++ "Type"
+    Nothing  -> invent (currentName ++ "Type") emptyContext (atom SType)
     Just ty  -> pure ty
   pure $ dt {varTy = ty}
 
@@ -406,7 +439,7 @@ run = prob >>= \case
     newProb $ Done nil
     move
   FormalParam x -> do
-    ty <- inventType $ x ++ "Type"
+    ty <- invent (x ++ "Type") emptyContext (atom SType)
     x <- makeDeclaration (UserDecl ty x True [] False)
     newProb . Done $ FreeVar x
     move
@@ -468,9 +501,9 @@ run = prob >>= \case
     run
   Command (Direct rl ((Declare xs (ty :<=: tySrc) :<=: src, _) :<=: src')) -> do
     traverse_ push [Source src', Source src]
-    mt <- metaDecl Waiting "declType" emptyContext (atom SType)
-    push $ Problems (Sourced . fmap (DeclareAction (wrapMeta mt)) <$> xs)
-    newProb . Sourced $ ElabTensorType mt ty :<=: tySrc
+    (sol, prob) <- elab "declType" emptyContext (atom SType) (TensorTask ty :<=: tySrc)
+    push $ Problems (Sourced . fmap (DeclareAction sol) <$> xs)
+    newProb prob
     run
   Command (Function (lhs, fname :<=: _, args) cs) ->
     findDeclaration (UserDecl Nothing fname True [] False)  >>= \case
@@ -525,36 +558,73 @@ run = prob >>= \case
     modify $ \ms@MS{..} -> ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) nonceTable }
     newProb $ Done nil
     move
-  ElabTensorType sol
-    (Tensor
-      ( (x, xs :<=: xSrc)
-      , (y, ys :<=: ySrc)
-      )
-      (eTy :<=: eSrc)) -> do
-    xTy <- inventType $ x ++ "Type"
-    yTy <- inventType $ y ++ "Type"
-    xsSol <- metaDecl Waiting (x ++ "List") emptyContext (mk SList xTy)
-    ysSol <- metaDecl Waiting (y ++ "List") emptyContext (mk SList yTy)
-    let two = Sy (Sy Zy)
-    let ctx = (two, (-< no two) <$> VN :# xTy :# yTy)
-    eSol <- metaDecl Waiting "entryType" ctx (atom SType)
-    push $ Problems
-      [ Sourced $ ElabTypeExpr xsSol B0 xs :<=: xSrc
-      , Sourced $ ElabTypeExpr ysSol B0 ys :<=: ySrc
-      , Sourced $ ElabTypeExpr eSol (B0 :< x :< y) eTy :<=: eSrc
-      ]
-    metaDefn sol Zy (mk SMatrix xTy yTy
-                      (lam x . lam y $ E $^ (M (eSol, two) $^ (idSubst two :^ io two)))
-                      (wrapMeta xsSol)
-                      (wrapMeta ysSol))
-    newProb $ Done nil
-    move
+  Elab name etask -> do
+    meta <- getMeta name
+    runElabTask name meta etask
   Sourced (p :<=: src) -> do
     localNamespace . take 10 . filter isAlpha $ show p
     push $ Source src
     newProb p
     run
   -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
+  _ -> move
+
+elab
+  :: String -- name advice for new elaboration prob
+  -> Context n
+  -> Type ^ n -- the type of the solution
+  -> WithSource ElabTask
+  -> Elab (Term Chk ^ n, Problem)
+elab x ctx ty (etask :<=: src) = nattily (vlen ctx) $ do
+  x <- metaDecl Waiting x ctx ty
+  pure (wrapMeta x, Sourced $ Elab x etask :<=: src)
+
+runElabTask :: Name -> Meta -> ElabTask -> Elab ()
+runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ case etask of
+  TensorTask (Tensor ((x, xs :<=: xSrc), (y, ys :<=: ySrc)) (eTy :<=: eSrc)) -> do
+    xTy <- invent (x ++ "Type") mctxt (atom SType)
+    yTy <- invent (y ++ "Type") mctxt (atom SType)
+    (xsSol, xsProb) <- elab (x ++ "List") mctxt (mk SList xTy) (TypeExprTask xs :<=: xSrc)
+    (ysSol, ysProb) <- elab (y ++ "List") mctxt (mk SList yTy) (TypeExprTask ys :<=: ySrc)
+    let ctx = mctxt \\\ (x, xTy) \\\ (y, wk yTy)
+    (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask eTy :<=: eSrc)
+    push $ Problems [xsProb, ysProb, eProb]
+    metaDefn sol (mk SMatrix xTy yTy (lam x . lam y $ eSol) xsSol ysSol)
+    newProb $ Done nil
+    move
+  TypeExprTask (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
+    metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
+    newProb $ Done nil
+    move
+  TypeExprTask (TyNum k) -> case tagEh mtype of
+    Just (SList, [genTy]) -> do
+      cs <- constrain "IsOne" $ Constraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , constraintType = Hom (atom SType)
+        , constraintStatus = Unstarted
+        , lhs = genTy
+        , rhs = atom SOne
+        }
+      case () of
+        _ | k >= 0 -> do
+          newProb . Elab sol $ Await cs (ixKI mtype (lit k))
+        _ | True -> do
+          cry sol
+          newProb . Elab sol $ Abandon etask
+      run
+    _ -> move
+  Await cstatus tm -> updateConstraintStatus cstatus >>= \case
+    SolvedIf [] -> do
+      metaDefn sol tm
+      newProb $ Done nil
+      move
+    Impossible -> do
+      cry sol
+      newProb . Elab sol $ Abandon etask
+      move
+    cstatus -> do
+      newProb . Elab sol $ Await cstatus tm
+      move
   _ -> move
 
 -- if move sees a Left fork, it should switch to Right and run
@@ -594,7 +664,7 @@ generateInputReader name body = case translateString Matlab name (concat (init b
 
 fundecl :: Command -> Elab ()
 fundecl (Function (_, fname :<=: _ , _) _ :<=: _) = do
-  ty <- inventType $ fname ++ "Type"
+  ty <- invent (fname ++ "Type") emptyContext (atom SType)
   fname' <- metaDecl Hoping fname emptyContext ty
   push $ Declaration fname' (UserDecl ty fname False [] False)
 fundecl _ = pure ()
