@@ -13,6 +13,10 @@ import Bwd
 import Data.Set (Set)
 import qualified Data.Set as Set
 
+import Debug.Trace
+
+truck = const id
+
 data Sort
   = Syn
   | Chk
@@ -95,7 +99,7 @@ cmpCtor E E = EQ' Refl
 cmpCtor R R = EQ' Refl
 cmpCtor T T = EQ' Refl
 cmpCtor D D = EQ' Refl
-cmpCtor (M (n, k)) (M (n', k')) = case compare n n' of
+cmpCtor (M (n, k)) (M (n', k')) = case truck ("MetaCmp " ++ show n ++" =?= " ++ show n') $ compare n n' of
   LT -> LT'
   GT -> GT'
   EQ -> (\Refl -> Refl) <$> cmpNatty k k'
@@ -123,7 +127,7 @@ instance Ord (Norm s n) where
   compare (P l u r) (P l' u' r') = case cmpCov u u' of
     LT' -> LT
     GT' -> GT
-    EQ' (Refl, Refl) -> compare (l', r') (l', r')
+    EQ' (Refl, Refl) -> compare (l, r) (l', r')
   compare (K t)     (K t')    = compare t t'
   compare (L _ t)   (L _ t')  = compare t t'
   compare (c :$ t)  (c':$ t') = case cmpCtor c c' of

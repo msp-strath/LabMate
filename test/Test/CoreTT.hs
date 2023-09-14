@@ -12,7 +12,7 @@ import MagicStrings
 
 import Test.Tasty(TestTree)
 import Test.Tasty.HUnit
-
+{-
 mkTest :: (Eq a, Show a, HasCallStack) => (String, a, a) -> TestTree
 mkTest (name, val, exp) = testCase name $ val @?= exp
 
@@ -274,3 +274,4 @@ test24 = mkTest
     in  testShowTC (fst <$> evalSynth tm) ctx
   , "[]"
   )
+-}

@@ -28,6 +28,10 @@ import Data.Foldable (traverse_)
 import Data.Set (Set)
 import qualified Data.Set as Set
 
+import Debug.Trace
+
+debug = const id
+
 type Elab = State MachineState
 
 data MachineState = MS
@@ -280,14 +284,14 @@ normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
   Right tm -> pure tm
 
 constrain :: String -> Constraint -> Elab ConstraintStatus
-constrain s c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
+constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = " ++ show c) $ case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms  <- gets metaStore
     ty  <- normalise ctx (atom SType) ty
     lhs <- normalise ctx ty lhs
     rhs <- normalise ctx ty rhs
-    case (lhs, rhs) of
-      _ | lhs == rhs -> pure $ SolvedIf []
+    case debug ("CONSTRAIN " ++ show lhs ++ " = " ++ show rhs) (lhs, rhs) of
+      _ | debug "Checking syntactic equality?" (lhs == rhs) -> debug ("Passed syn eq for " ++ show lhs ++ " =?= " ++ show rhs) (pure $ SolvedIf [])
       (E :$ (M (x, n) :$ sig) :^ th, t :^ ph)
         | Just meta@Meta{..} <- x `Map.lookup` ms
         , Hoping <- mstat
@@ -348,11 +352,11 @@ updateConstraintStatus (SolvedIf xs) =
   mconcat <$> traverse getConstraintStatus xs
 updateConstraintStatus cs = pure cs
 
-findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe Name)
+findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe (Name, TYPE))
 findDeclaration LabmateDecl = pure Nothing
 findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} = excursion (go False)
   where
-  go :: Bool {- we think we are in a function -} -> Elab (Maybe Name)
+  go :: Bool {- we think we are in a function -} -> Elab (Maybe (Name, TYPE))
   go b = pull >>= \case
     Nothing -> pure Nothing
     Just f -> case f of
@@ -363,15 +367,15 @@ findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} =
         case ty of
           Just ty -> constrainEqualType ty ty'
           Nothing -> pure ()
-        Just n <$ push (Declaration n u'{seen = seen' || seen, newNames = news' ++ news})
+        Just (n, ty') <$ push (Declaration n u'{seen = seen' || seen, newNames = news' ++ news})
       _ -> shup f >> go b
 
-makeDeclaration :: DeclarationType TYPE -> Elab Name
+makeDeclaration :: DeclarationType TYPE -> Elab (Name, TYPE)
 makeDeclaration LabmateDecl = error "making labmatedecl declaration"
-makeDeclaration d@UserDecl{currentName} = excursion $ do
+makeDeclaration d@UserDecl{varTy, currentName} = excursion $ do
   findLocale
   x <- fresh currentName
-  x <$ push (Declaration x d)
+  (x, varTy) <$ push (Declaration x d)
   where
     findLocale = pull >>= \case
       Nothing -> error "Locale disappeared!"
@@ -379,7 +383,7 @@ makeDeclaration d@UserDecl{currentName} = excursion $ do
         Locale{} -> pure ()
         _ -> findLocale
 
-ensureDeclaration :: DeclarationType (Maybe TYPE) -> Elab Name
+ensureDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Name, TYPE)
 ensureDeclaration s = findDeclaration s >>= \case
   Nothing -> ensureType s >>= makeDeclaration
   Just x  -> pure x
@@ -431,7 +435,7 @@ run = prob >>= \case
     newProb $ Done nil
     move
   LHS (LVar x) -> do
-    x <- ensureDeclaration (UserDecl Nothing x True [] True)
+    (x, _) <- ensureDeclaration (UserDecl Nothing x True [] True)
     newProb . Done $ FreeVar x
     move
   LHS (LMat []) -> do
@@ -439,7 +443,7 @@ run = prob >>= \case
     move
   FormalParam x -> do
     ty <- invent (x ++ "Type") emptyContext (atom SType)
-    x <- makeDeclaration (UserDecl ty x True [] False)
+    (x, _) <- makeDeclaration (UserDecl ty x True [] False)
     newProb . Done $ FreeVar x
     move
   Expression (Var x) ->
@@ -447,7 +451,7 @@ run = prob >>= \case
     Nothing -> do
       newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
       move
-    Just x -> do
+    Just (x, _) -> do
       newProb . Done $ FreeVar x
       move
   Expression (App (f :<=: src) args) -> do
@@ -510,7 +514,7 @@ run = prob >>= \case
   Command (Function (lhs, fname :<=: _, args) cs) ->
     findDeclaration (UserDecl Nothing fname True [] False)  >>= \case
       Nothing -> error "function should have been declared already"
-      Just fname -> do
+      Just (fname, _) -> do
         traverse_ fundecl cs
         traverse_ push [ Locale FunctionLocale
                        , FunctionLeft fname lhs
@@ -553,7 +557,7 @@ run = prob >>= \case
     newProb $ Done nil
     move
   DeclareAction ty name -> do
-    name <- ensureDeclaration (UserDecl (Just ty) name False [] True)
+    (name, _) <- ensureDeclaration (UserDecl (Just ty) name False [] True)
     newProb $ Done (FreeVar name)
     move
   InputFormatAction name body (n, c) -> do
@@ -657,12 +661,28 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ case etask of
         newProb . Elab sol $ Await (rcs <> ccs) cellSol
         run
     _ -> move
-  LHSTask lhs -> do
-    push $ Problems [LHS lhs]
-    move
-  ExprTask e -> do
-    push $ Problems [Expression e]
-    move
+  LHSTask lhs -> case lhs of
+    LVar x -> do
+      (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
+      ccs <- constrain "IsLHSTy" $ Constraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , constraintType = Hom (atom SType)
+        , constraintStatus = Unstarted
+        , lhs = mk SDest (ty -< no (vlen mctxt))
+        , rhs = mtype
+        }
+      newProb . Done $ FreeVar x
+      move
+    _ -> do
+      newProb $ LHS lhs
+      run
+  ExprTask e -> case e of
+    IntLiteral i -> do
+      newProb . Elab sol $ TypeExprTask (TyNum i)
+      run
+    _ -> do
+      newProb $ Expression e
+      run
   Await cstatus tm -> updateConstraintStatus cstatus >>= \case
     SolvedIf [] -> do
       metaDefn sol tm

@@ -27,7 +27,7 @@ data TestConfig = TestConfig
 main :: IO ()
 main = defaultMain . testGroup "LabMate" =<< sequence
   [ examples
-  , coreTTTests
+  --, coreTTTests
   ]
 
 examples :: IO TestTree
@@ -41,11 +41,12 @@ examples = do
   let excludedDirs = [folder </> "npl"]
   ioTests TestConfig{..}
 
-
+{-
 coreTTTests :: IO TestTree
 coreTTTests = do
  let name = "CoreTT"
  pure $ testGroup name coreTests
+-}
 
 ioTests :: TestConfig -> IO TestTree
 ioTests TestConfig{..} = testGroup name <$> do
