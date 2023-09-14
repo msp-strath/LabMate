@@ -76,6 +76,8 @@ data DeclarationType a
 data ElabTask where
   TensorTask :: TensorType' -> ElabTask
   TypeExprTask :: TypeExpr' -> ElabTask
+  LHSTask :: LHS' -> ElabTask
+  ExprTask :: Expr' -> ElabTask
   Await :: NATTY n => ConstraintStatus -> Term Chk ^ n -> ElabTask
   Abandon :: ElabTask -> ElabTask
 deriving instance Show ElabTask
@@ -476,7 +478,7 @@ run = prob >>= \case
     newProb $ Expression e0
     run
   Expression ColonAlone -> newProb (Done $ atom ":") >> move
-  Expression (Handle f) -> newProb ( Done $ T $^ atom "handle" <&> atom f) >> move
+  Expression (Handle f) -> newProb (Done $ T $^ atom "handle" <&> atom f) >> move
   FunCalled f -> newProb (Expression f) >> run
   Row rs -> case rs of
     [] -> newProb (Done nil) >> move
@@ -484,9 +486,12 @@ run = prob >>= \case
       traverse_ push [Problems (Sourced . fmap Expression <$> rs), Source src]
       newProb $ Expression r
       run
-  Command (Assign lhs (e :<=: src)) -> do
-    traverse_ push [Problems [Sourced (LHS <$> lhs)], Source src]
-    newProb $ Expression e
+  Command (Assign lhs rhs) -> do
+    ty <- invent "assignTy" emptyContext (atom SType)
+    (_, lhsProb) <- elab "AssignLHS" emptyContext (mk SDest ty) (LHSTask <$> lhs)
+    (_, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask <$> rhs)
+    push $ Problems [lhsProb]
+    newProb rhsProb
     run
   Command (Direct rl ((Rename old new :<=: src, _) :<=: src')) -> do
     traverse_ push [Source src', Source src]
@@ -619,6 +624,16 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ case etask of
           cry sol
           newProb . Elab sol $ Abandon etask
       run
+    Just (SAbel, [genTy]) -> do
+      cs <- constrain "IsOne" $ Constraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , constraintType = Hom (atom SType)
+        , constraintStatus = Unstarted
+        , lhs = genTy
+        , rhs = atom SOne
+        }
+      newProb . Elab sol $ Await cs (ixKI mtype (lit k))
+      run
     Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
       | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
         r <- invent r mctxt rowTy
@@ -642,6 +657,12 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ case etask of
         newProb . Elab sol $ Await (rcs <> ccs) cellSol
         run
     _ -> move
+  LHSTask lhs -> do
+    push $ Problems [LHS lhs]
+    move
+  ExprTask e -> do
+    push $ Problems [Expression e]
+    move
   Await cstatus tm -> updateConstraintStatus cstatus >>= \case
     SolvedIf [] -> do
       metaDefn sol tm

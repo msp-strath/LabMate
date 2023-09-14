@@ -10,6 +10,7 @@ pattern SEnum = "Enum"
 pattern SPi   = "Pi"
 pattern SSig  = "Sigma"
 pattern SMatrix = "Matrix"
+pattern SDest = "Destination"
 
 -- eliminators
 pattern Sfst  = "fst"
