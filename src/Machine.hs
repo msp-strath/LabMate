@@ -41,8 +41,22 @@ data MachineState = MS
   , nonceTable :: Map Nonce String
   , metaStore :: Store
   , constraintStore :: Map Name Constraint
+  , clock :: Int
+  , epoch :: Int
   } deriving Show
 
+
+initMachine :: File -> Map Nonce String -> MachineState
+initMachine f t = MS
+  { position = B0 :<+>: []
+  , problem = File f
+  , nameSupply = (B0 :< ("labmate", 0), 0)
+  , nonceTable = t
+  , metaStore = Map.empty
+  , constraintStore = Map.empty
+  , clock = 0
+  , epoch = 0
+  }
 
 type TERM = Term Chk ^ Z
 type TYPE = Type ^ Z
@@ -208,15 +222,8 @@ cry x = do
 yikes :: TERM -> TERM
 yikes t = T $^ atom "yikes" <&> t
 
-initMachine :: File -> Map Nonce String -> MachineState
-initMachine f t = MS
-  { position = B0 :<+>: []
-  , problem = File f
-  , nameSupply = (B0 :< ("labmate", 0), 0)
-  , nonceTable = t
-  , metaStore = Map.empty
-  , constraintStore = Map.empty
-  }
+tick :: Elab ()
+tick =  modify $ \st@MS{..} -> st { clock = clock + 1 }
 
 data ConstraintType n
   = Hom (Type ^ n)
@@ -314,6 +321,23 @@ constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = "
               modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms }
               pure $ SolvedIf []
             _ -> error "constrain: different context lengths"
+      _ | Just (lt, ls) <- tagEh lhs
+        , Just (rt, rs) <- tagEh rhs
+        , lt == rt -> case (lt, ls, rs) of
+          (SDest, [lty], [rty]) -> constrain s $ Constraint
+            { constraintCtx = constraintCtx
+            , constraintType = constraintType
+            , constraintStatus = constraintStatus
+            , lhs = lty
+            , rhs = rty
+            }
+          _ -> do
+            s <- fresh s
+            modify $ \st@MS{..} -> st{ constraintStore = Map.insert s c constraintStore }
+            pure $ case constraintStatus of
+              Blocked   -> SolvedIf [s]
+              Unstarted -> SolvedIf [s]
+              _ -> constraintStatus
       _ -> do
        s <- fresh s
        modify $ \st@MS{..} -> st{ constraintStore = Map.insert s c constraintStore }
@@ -408,7 +432,8 @@ metaDefn :: Name -> Term Chk ^ n -> Elab ()
 metaDefn x def = getMeta x >>= \case
   Meta{..}
     | Just Refl <- scopeOf def `nattyEqEh` vlen mctxt
-    , Waiting <- mstat ->
+    , Waiting <- mstat -> do
+      tick
       modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just def) Defined) metaStore}
   _ -> error "metaDefn: check the status or the scope"
 
@@ -596,117 +621,129 @@ elab x ctx ty (etask :<=: src) =
   fmap (Sourced . (:<=: src)) <$> elab' x ctx ty etask
 
 runElabTask :: Name -> Meta -> ElabTask -> Elab ()
-runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ case etask of
-  TensorTask (Tensor ((x, xs :<=: xSrc), (y, ys :<=: ySrc)) (eTy :<=: eSrc)) -> do
-    xTy <- invent (x ++ "Type") mctxt (atom SType)
-    yTy <- invent (y ++ "Type") mctxt (atom SType)
-    (xsSol, xsProb) <- elab (x ++ "List") mctxt (mk SList xTy) (TypeExprTask xs :<=: xSrc)
-    (ysSol, ysProb) <- elab (y ++ "List") mctxt (mk SList yTy) (TypeExprTask ys :<=: ySrc)
-    let ctx = mctxt \\\ (x, xTy) \\\ (y, wk yTy)
-    (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask eTy :<=: eSrc)
-    push $ Problems [xsProb, ysProb, eProb]
-    metaDefn sol (mk SMatrix xTy yTy (lam x . lam y $ eSol) xsSol ysSol)
-    newProb $ Done nil
-    move
-  TypeExprTask (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
-    metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
-    newProb $ Done nil
-    move
-  TypeExprTask (TyNum k) -> case tagEh mtype of
-    Just (SList, [genTy]) -> do
-      cs <- constrain "IsOne" $ Constraint
-        { constraintCtx = fmap Hom <$> mctxt
-        , constraintType = Hom (atom SType)
-        , constraintStatus = Unstarted
-        , lhs = genTy
-        , rhs = atom SOne
-        }
-      case () of
-        _ | k >= 0 -> do
-          newProb . Elab sol $ Await cs (ixKI mtype (lit k))
-        _ | True -> do
-          cry sol
-          newProb . Elab sol $ Abandon etask
-      run
-    Just (SAbel, [genTy]) -> do
-      cs <- constrain "IsOne" $ Constraint
-        { constraintCtx = fmap Hom <$> mctxt
-        , constraintType = Hom (atom SType)
-        , constraintStatus = Unstarted
-        , lhs = genTy
-        , rhs = atom SOne
-        }
-      newProb . Elab sol $ Await cs (ixKI mtype (lit k))
-      run
-    Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
-      | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
-        r <- invent r mctxt rowTy
-        c <- invent c mctxt colTy
-        rcs <- constrain "IsSingletonR" $ Constraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , constraintType = Hom (mk SList rowTy)
-          , constraintStatus = Unstarted
-          , lhs = mk Sone r
-          , rhs = rs
-          }
-        ccs <- constrain "IsSingletonC" $ Constraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , constraintType = Hom (mk SList colTy)
-          , constraintStatus = Unstarted
-          , lhs = mk Sone c
-          , rhs = cs
-          }
-        (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
-        push $ Problems [cellProb]
-        newProb . Elab sol $ Await (rcs <> ccs) cellSol
-        run
-    _ -> move
-  LHSTask lhs -> case lhs of
-    LVar x -> do
-      (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
-      ccs <- constrain "IsLHSTy" $ Constraint
-        { constraintCtx = fmap Hom <$> mctxt
-        , constraintType = Hom (atom SType)
-        , constraintStatus = Unstarted
-        , lhs = mk SDest (ty -< no (vlen mctxt))
-        , rhs = mtype
-        }
-      newProb . Done $ FreeVar x
-      move
-    _ -> do
-      newProb $ LHS lhs
-      run
-  ExprTask e -> case e of
-    IntLiteral i -> do
-      newProb . Elab sol $ TypeExprTask (TyNum i)
-      run
-    _ -> do
-      newProb $ Expression e
-      run
-  Await cstatus tm -> updateConstraintStatus cstatus >>= \case
-    SolvedIf [] -> do
-      metaDefn sol tm
+runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
+  mtype <- normalise mctxt (atom SType) mtype
+  case etask of
+    TensorTask (Tensor ((x, xs :<=: xSrc), (y, ys :<=: ySrc)) (eTy :<=: eSrc)) -> do
+      xTy <- invent (x ++ "Type") mctxt (atom SType)
+      yTy <- invent (y ++ "Type") mctxt (atom SType)
+      (xsSol, xsProb) <- elab (x ++ "List") mctxt (mk SList xTy) (TypeExprTask xs :<=: xSrc)
+      (ysSol, ysProb) <- elab (y ++ "List") mctxt (mk SList yTy) (TypeExprTask ys :<=: ySrc)
+      let ctx = mctxt \\\ (x, xTy) \\\ (y, wk yTy)
+      (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask eTy :<=: eSrc)
+      push $ Problems [xsProb, ysProb, eProb]
+      metaDefn sol (mk SMatrix xTy yTy (lam x . lam y $ eSol) xsSol ysSol)
       newProb $ Done nil
       move
-    Impossible -> do
-      cry sol
-      newProb . Elab sol $ Abandon etask
+    TypeExprTask (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
+      metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
+      newProb $ Done nil
       move
-    cstatus -> do
-      newProb . Elab sol $ Await cstatus tm
-      move
-  _ -> move
+    TypeExprTask (TyNum k) -> case tagEh mtype of
+      Just (SList, [genTy]) -> do
+        cs <- constrain "IsOne" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , constraintStatus = Unstarted
+          , lhs = genTy
+          , rhs = atom SOne
+          }
+        case () of
+          _ | k >= 0 -> do
+            newProb . Elab sol $ Await cs (ixKI mtype (lit k))
+          _ | True -> do
+            cry sol
+            newProb . Elab sol $ Abandon etask
+        run
+      Just (SAbel, [genTy]) -> do
+        cs <- constrain "IsOne" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , constraintStatus = Unstarted
+          , lhs = genTy
+          , rhs = atom SOne
+          }
+        newProb . Elab sol $ Await cs (ixKI mtype (lit k))
+        run
+      Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+        | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
+          r <- invent r mctxt rowTy
+          c <- invent c mctxt colTy
+          rcs <- constrain "IsSingletonR" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (mk SList rowTy)
+            , constraintStatus = Unstarted
+            , lhs = mk Sone r
+            , rhs = rs
+            }
+          ccs <- constrain "IsSingletonC" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (mk SList colTy)
+            , constraintStatus = Unstarted
+            , lhs = mk Sone c
+            , rhs = cs
+            }
+          (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
+          push $ Problems [cellProb]
+          newProb . Elab sol $ Await (rcs <> ccs) (mk Sone cellSol)
+          run
+      _ -> move
+    LHSTask lhs -> case lhs of
+      LVar x -> do
+        (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
+        ccs <- constrain "IsLHSTy" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , constraintStatus = Unstarted
+          , lhs = mk SDest (ty -< no (vlen mctxt))
+          , rhs = mtype
+          }
+        newProb . Done $ FreeVar x
+        move
+      _ -> do
+        newProb $ LHS lhs
+        run
+    ExprTask e -> case e of
+      IntLiteral i -> do
+        newProb . Elab sol $ TypeExprTask (TyNum i)
+        run
+      _ -> do
+        newProb $ Expression e
+        run
+    Await cstatus tm -> updateConstraintStatus cstatus >>= \case
+      SolvedIf [] -> do
+        metaDefn sol tm
+        newProb $ Done nil
+        move
+      Impossible -> do
+        cry sol
+        newProb . Elab sol $ Abandon etask
+        move
+      cstatus -> do
+        newProb . Elab sol $ Await cstatus tm
+        move
+    _ -> move
 
 -- if move sees a Left fork, it should switch to Right and run
 -- if move sees a Right fork, switch to Left and keep moving
 move :: Elab ()
 move = pull >>= \case
-  Nothing -> pure ()
+  Nothing -> do
+    st@MS{..} <- get
+    case compare clock epoch of
+      GT -> do
+        put st{ epoch = clock }
+        run
+      _ -> pure ()
   Just fr -> case fr of
     Fork (Right frk) fs' p' -> do
       (fs, p) <- switchFwrd (fs', p')
       shup $ Fork (Left frk) fs p
       move
+    Fork (Left frk) fs' p' -> do
+      (fs, p) <- switchFwrd (fs', p')
+      push $ Fork (Right frk) fs p
+      run
     FunctionLeft fname (lhs :<=: src) -> do
       (fs, p) <- switchFwrd ([], LHS lhs)
       traverse_ push [Fork (Right $ FunctionName fname) fs p, Source src]
