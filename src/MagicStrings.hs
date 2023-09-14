@@ -14,6 +14,11 @@ pattern SMatrix = "Matrix"
 -- eliminators
 pattern Sfst  = "fst"
 pattern Ssnd  = "snd"
+-- constructors
+pattern Splus = "plus"
+pattern Sone = "one"
+pattern Shjux = "hjux"
+pattern Svjux = "vjux"
 
 -- Labmate user types
 pattern Lint = "int"

@@ -94,9 +94,6 @@ data Problem where
   InputFormatAction :: String -> [String] -> ResponseLocation -> Problem
   FunCalled :: Expr' -> Problem
   Elab :: Name -> ElabTask -> Problem
-  -- the `Name` is where the solution goes and it should be a Waiting metavariable,
-  -- the `Bwd String` should have the same length as the context of the metavariable
-  ElabTypeExpr :: Name -> Bwd String -> TypeExpr' -> Problem
   Sourced :: WithSource Problem -> Problem
   deriving (Show)
 
@@ -118,26 +115,26 @@ elabTC ctx tc = do
 fresh :: String -> Elab Name
 fresh s = do
   (r, n) <- gets nameSupply
-  modify $ \ms -> ms { nameSupply = (r, n + 1) }
+  modify $ \st -> st { nameSupply = (r, n + 1) }
   pure $ name (r, n) s
 
 pull :: Elab (Maybe Frame)
 pull = gets position >>= \case
   B0 :<+>: _ -> pure Nothing
-  fz :< fr :<+>: fs -> Just fr <$ modify (\ms -> ms { position = fz :<+>: fs })
+  fz :< fr :<+>: fs -> Just fr <$ modify (\st -> st { position = fz :<+>: fs })
 
 push :: Frame -> Elab ()
 push f = do
-  modify $ \ms@MS{ position = fz :<+>: fs } -> ms { position = fz :< f :<+>: fs }
+  modify $ \st@MS{ position = fz :<+>: fs } -> st { position = fz :< f :<+>: fs }
 
 llup :: Elab (Maybe Frame)
 llup = gets position >>= \case
   _ :<+>: [] -> pure Nothing
-  fz :<+>: fr : fs -> Just fr <$ modify (\ms -> ms { position = fz :<+>: fs })
+  fz :<+>: fr : fs -> Just fr <$ modify (\st -> st { position = fz :<+>: fs })
 
 shup :: Frame -> Elab ()
 shup f = do
-  modify $ \ms@MS{ position = fz :<+>: fs } -> ms { position = fz :<+>: f : fs }
+  modify $ \st@MS{ position = fz :<+>: fs } -> st { position = fz :<+>: f : fs }
 
 excursion
   :: Elab v -- the operation should leave the cursor to the left of where it started
@@ -154,9 +151,9 @@ excursion op = do
 
 switchFwrd :: ([Frame], Problem) -> Elab ([Frame], Problem)
 switchFwrd (fs', p') = do
-  ms@MS{..} <- get
+  st@MS{..} <- get
   let fz :<+>: fs = position
-  put $ ms { position = fz :<+>: fs', problem = p' }
+  put $ st { position = fz :<+>: fs', problem = p' }
   pure (fs, problem)
 
 prob :: Elab Problem
@@ -170,18 +167,18 @@ prob = llup >>= \case
 
 newProb :: Problem -> Elab () -- TODO: consider checking if we are at
                               -- the problem
-newProb p = modify (\ms -> ms{ problem = p })
+newProb p = modify (\st -> st{ problem = p })
 
 swapNameSupply :: NameSupply -> Elab NameSupply
 swapNameSupply ns = do
   ns' <- gets nameSupply
-  modify $ \ms -> ms { nameSupply = ns }
+  modify $ \st -> st { nameSupply = ns }
   pure ns'
 
 newNamespace :: String -> Elab NameSupply
 newNamespace s = do
   (root, n) <- gets nameSupply
-  modify $ \ms -> ms { nameSupply = (root, n + 1) }
+  modify $ \st -> st { nameSupply = (root, n + 1) }
   pure (root :< (s, n), 0)
 
 localNamespace :: String -> Elab ()
@@ -192,15 +189,15 @@ localNamespace s = do
 
 getMeta :: Name -> Elab Meta
 getMeta x = do
-  ms <- gets metaStore
-  case Map.lookup x ms of
+  st <- gets metaStore
+  case Map.lookup x st of
     Just m -> pure m
     Nothing -> error "getMeta: meta does not exist"
 
 cry :: Name -> Elab ()
 cry x = do
   meta <- getMeta x
-  modify $ \ms@MS{..} -> ms { metaStore = Map.insert x (meta{ mstat = Crying }) metaStore }
+  modify $ \st@MS{..} -> st { metaStore = Map.insert x (meta{ mstat = Crying }) metaStore }
 
 yikes :: TERM -> TERM
 yikes t = T $^ atom "yikes" <&> t
@@ -283,7 +280,7 @@ normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
 constrain :: String -> Constraint -> Elab ConstraintStatus
 constrain s c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
-    ms <- gets metaStore
+    ms  <- gets metaStore
     ty  <- normalise ctx (atom SType) ty
     lhs <- normalise ctx ty lhs
     rhs <- normalise ctx ty rhs
@@ -297,7 +294,7 @@ constrain s c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, co
         , x `Set.notMember` dependencies t ->
           case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
-              modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms}
+              modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms }
               pure $ SolvedIf []
             _ -> error "constrain: different context lengths"
       (t :^ ph, E :$ (M (x, n) :$ sig) :^ th)
@@ -308,7 +305,7 @@ constrain s c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, co
         , x `Set.notMember` dependencies t ->
           case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
-              modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms}
+              modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms }
               pure $ SolvedIf []
             _ -> error "constrain: different context lengths"
       _ -> do
@@ -396,7 +393,7 @@ onNearestSource f = excursion go
 metaDecl :: Status -> String -> Context n -> Type ^ n -> Elab Name
 metaDecl s x ctx ty = do
    x <- fresh x
-   x <$ modify (\ms@MS{..} -> ms { metaStore = Map.insert x (Meta ctx ty Nothing s) metaStore })
+   x <$ modify (\st@MS{..} -> st { metaStore = Map.insert x (Meta ctx ty Nothing s) metaStore })
 
 metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
 metaDeclTerm s x ctx ty = nattily (vlen ctx) (wrapMeta <$> metaDecl s x ctx ty)
@@ -555,7 +552,7 @@ run = prob >>= \case
     newProb $ Done (FreeVar name)
     move
   InputFormatAction name body (n, c) -> do
-    modify $ \ms@MS{..} -> ms { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) nonceTable }
+    modify $ \st@MS{..} -> st { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) nonceTable }
     newProb $ Done nil
     move
   Elab name etask -> do
@@ -569,15 +566,25 @@ run = prob >>= \case
   -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
   _ -> move
 
+
+elab'
+  :: String -- name advice for new elaboration prob
+  -> Context n
+  -> Type ^ n -- the type of the solution
+  -> ElabTask
+  -> Elab (Term Chk ^ n, Problem)
+elab' x ctx ty etask = nattily (vlen ctx) $ do
+  x <- metaDecl Waiting x ctx ty
+  pure (wrapMeta x, Elab x etask)
+
 elab
   :: String -- name advice for new elaboration prob
   -> Context n
   -> Type ^ n -- the type of the solution
   -> WithSource ElabTask
   -> Elab (Term Chk ^ n, Problem)
-elab x ctx ty (etask :<=: src) = nattily (vlen ctx) $ do
-  x <- metaDecl Waiting x ctx ty
-  pure (wrapMeta x, Sourced $ Elab x etask :<=: src)
+elab x ctx ty (etask :<=: src) =
+  fmap (Sourced . (:<=: src)) <$> elab' x ctx ty etask
 
 runElabTask :: Name -> Meta -> ElabTask -> Elab ()
 runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ case etask of
@@ -612,6 +619,28 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ case etask of
           cry sol
           newProb . Elab sol $ Abandon etask
       run
+    Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+      | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
+        r <- invent r mctxt rowTy
+        c <- invent c mctxt colTy
+        rcs <- constrain "IsSingletonR" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (mk SList rowTy)
+          , constraintStatus = Unstarted
+          , lhs = mk Sone r
+          , rhs = rs
+          }
+        ccs <- constrain "IsSingletonC" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (mk SList colTy)
+          , constraintStatus = Unstarted
+          , lhs = mk Sone c
+          , rhs = cs
+          }
+        (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
+        push $ Problems [cellProb]
+        newProb . Elab sol $ Await (rcs <> ccs) cellSol
+        run
     _ -> move
   Await cstatus tm -> updateConstraintStatus cstatus >>= \case
     SolvedIf [] -> do

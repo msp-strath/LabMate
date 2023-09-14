@@ -1,18 +1,13 @@
 module NormalForm where
 
 import Data.Bifunctor
+import MagicStrings
 
 import Bwd
 import Term
 
-pattern Splus = "plus"
-pattern Sone = "one"
-
 pattern Eplus  <- Atom Splus
 pattern Eone   <- Atom Sone
-
-pattern Shjux = "hjux"
-pattern Svjux = "vjux"
 
 data NFAbel'
  t {- terms -}
