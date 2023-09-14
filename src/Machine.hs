@@ -438,7 +438,9 @@ metaDefn x def = getMeta x >>= \case
   _ -> error "metaDefn: check the status or the scope"
 
 invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
-invent x ctx ty = nattily (vlen ctx) (wrapMeta <$> metaDecl Hoping x ctx ty)
+invent x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
+  ty | Just(SOne, []) <- tagEh ty -> pure nil
+  ty -> wrapMeta <$> metaDecl Hoping x ctx ty
 
 ensureType :: DeclarationType (Maybe TYPE) -> Elab (DeclarationType TYPE)
 ensureType LabmateDecl = error "ensureType: cannot invent type for labmate decl."
