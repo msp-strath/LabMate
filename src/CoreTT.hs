@@ -15,14 +15,16 @@ import Debug.Trace
 track = trace
 
 
-data Status = Crying | Waiting | Hoping | Defined | Abstract
-  deriving Show
+data Status = Crying | Waiting | Hoping | Abstract
+  deriving (Ord, Eq, Show)
+
 
 data Meta = forall n. Meta
   { mctxt :: Context n
   , mtype :: Type ^ n
   , mdefn :: Maybe (Term Chk ^ n)
-  , mstat :: Status
+  , mstat :: Status   -- if mdefn is `Just _` mstat should be only
+                      -- `Waiting` or `Hoping`
   }
 
 instance Show Meta where

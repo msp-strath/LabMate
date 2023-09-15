@@ -1,5 +1,6 @@
+%< LabMate 0.1.3.0
 function z = typecheck(x, y)
-  %> x y :: Int
+  %> x y :: int
   z = x + y
-  %> typecheck Int z
+  %> typecheck int z
 end

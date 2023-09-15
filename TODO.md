@@ -4,9 +4,13 @@
 [ ] Update README.md.
 
 31.08.23
-[ ] elaborate types in type assignments
-[ ] constraints - state and solve them
-[ ] elaborating expressions
-[ ] generating constraints on assignments
-[ ] overloading `0` and `+` ?
-[ ] extend eval to expand definitions
+[x] elaborate types in type assignments
+[x] constraints - state and solve them
+[x] elaborating expressions
+[x] generating constraints on assignments
+[x] overloading `0` and `+` ?
+[x] extend eval to expand definitions
+
+15.09.23
+[ ] implement typechecking directive
+[ ] implement type synth directive

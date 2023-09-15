@@ -5,7 +5,7 @@ import Control.Newtype
 import Control.Monad.State
 import Data.Char
 import Data.List
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Monoid
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -307,7 +307,7 @@ constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = "
         , x `Set.notMember` dependencies t ->
           case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
-              modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms }
+              metaDefn x (t :^ ph)
               pure $ SolvedIf []
             _ -> error "constrain: different context lengths"
       (t :^ ph, E :$ (M (x, n) :$ sig) :^ th)
@@ -318,7 +318,7 @@ constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = "
         , x `Set.notMember` dependencies t ->
           case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
-              modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just (t :^ ph)) Defined) ms }
+              metaDefn x (t :^ ph)
               pure $ SolvedIf []
             _ -> error "constrain: different context lengths"
       _ | Just (lt, ls) <- tagEh lhs
@@ -432,14 +432,22 @@ metaDefn :: Name -> Term Chk ^ n -> Elab ()
 metaDefn x def = getMeta x >>= \case
   Meta{..}
     | Just Refl <- scopeOf def `nattyEqEh` vlen mctxt
-    , Waiting <- mstat -> do
+    , mstat `elem` [Waiting, Hoping] -> do
       tick
-      modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just def) Defined) metaStore}
+      modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just def) mstat) metaStore}
   _ -> error "metaDefn: check the status or the scope"
 
 invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
 invent x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
-  ty | Just(SOne, []) <- tagEh ty -> pure nil
+  ty
+    | Just (SOne, []) <- tagEh ty ->
+      pure nil
+    | Just (SPi, [s, t]) <- tagEh ty, Just (y, t) <- lamNameEh t ->
+      lam y <$> invent x (ctx \\\ (y, s)) t
+    | Just (SSig, [s, t]) <- tagEh ty, Just (y, t) <- lamNameEh t -> do
+        a <- invent x ctx s
+        d <- invent x ctx (t //^ sub0 (R $^ a <&> s))
+        pure (T $^ a <&> d)
   ty -> wrapMeta <$> metaDecl Hoping x ctx ty
 
 ensureType :: DeclarationType (Maybe TYPE) -> Elab (DeclarationType TYPE)
@@ -524,20 +532,9 @@ run = prob >>= \case
     push $ Problems [lhsProb]
     newProb rhsProb
     run
-  Command (Direct rl ((Rename old new :<=: src, _) :<=: src')) -> do
-    traverse_ push [Source src', Source src]
-    newProb $ RenameAction old new rl
-    run
-  Command (Direct rl ((InputFormat name :<=: src, Just (InputFormatBody body)) :<=: src')) -> do
-    traverse_ push [Source src', Source src]
-    newProb $ InputFormatAction name body rl
-    run
-  Command (Direct rl ((Declare xs (ty :<=: tySrc) :<=: src, _) :<=: src')) -> do
-    traverse_ push [Source src', Source src]
-    (sol, prob) <- elab "declType" emptyContext (atom SType) (TensorTask ty :<=: tySrc)
-    push $ Problems (Sourced . fmap (DeclareAction sol) <$> xs)
-    newProb prob
-    run
+  Command (Direct rl (dir :<=: src)) -> do
+    push $ Source src
+    runDirective rl dir
   Command (Function (lhs, fname :<=: _, args) cs) ->
     findDeclaration (UserDecl Nothing fname True [] False)  >>= \case
       Nothing -> error "function should have been declared already"
@@ -602,6 +599,33 @@ run = prob >>= \case
   -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
   _ -> move
 
+runDirective :: ResponseLocation -> Dir' -> Elab ()
+runDirective rl (dir :<=: src, body) = do
+  push $ Source src
+  case dir of
+    Rename old new -> do
+      newProb $ RenameAction old new rl
+      run
+    InputFormat name | Just (InputFormatBody body) <- body -> do
+      newProb $ InputFormatAction name body rl
+      run
+    Declare xs ty -> do
+      (sol, prob) <- elab "declType" emptyContext (atom SType) (TensorTask <$> ty)
+      push $ Problems (Sourced . fmap (DeclareAction sol) <$> xs)
+      newProb prob
+      run
+    Typecheck ty e -> do
+      (tySol, tyProb) <- elab "typeToCheck" emptyContext (atom SType) (TensorTask <$> ty)
+      (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask <$> e)
+      push $ Problems [eProb]
+      newProb tyProb
+      run
+    SynthType e -> do
+      ty <- invent "typeToSynth" emptyContext (atom SType)
+      (eSol, eProb) <- elab "exprToSynth" emptyContext ty (ExprTask <$> e)
+      newProb eProb
+      run
+    _ -> move
 
 elab'
   :: String -- name advice for new elaboration prob
@@ -702,14 +726,14 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           }
         newProb . Done $ FreeVar x
         move
-      _ -> do
+      _ -> do  -- switch to being a scoping problem
         newProb $ LHS lhs
         run
     ExprTask e -> case e of
       IntLiteral i -> do
         newProb . Elab sol $ TypeExprTask (TyNum i)
         run
-      _ -> do
+      _ -> do  -- switch to being a scoping problem
         newProb $ Expression e
         run
     Await cstatus tm -> updateConstraintStatus cstatus >>= \case
@@ -731,12 +755,13 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
 move :: Elab ()
 move = pull >>= \case
   Nothing -> do
+    cleanup
     st@MS{..} <- get
-    case compare clock epoch of
-      GT -> do
+    if clock > epoch
+      then do
         put st{ epoch = clock }
         run
-      _ -> pure ()
+      else pure ()
   Just fr -> case fr of
     Fork (Right frk) fs' p' -> do
       (fs, p) <- switchFwrd (fs', p')
@@ -763,6 +788,17 @@ move = pull >>= \case
       shup $ LocalNamespace ns
       move
     _ -> shup fr >> move
+
+cleanup :: Elab ()
+cleanup = do
+  ms <- gets metaStore
+  flip Map.traverseWithKey ms $ \name meta@Meta{..} -> nattily (vlen mctxt) $ do
+    ctx <- traverse (traverse (normalise mctxt (atom SType))) mctxt
+    ty <- normalise ctx (atom SType) mtype
+    tm <- traverse (normalise ctx ty) mdefn
+    let meta = Meta{ mctxt = ctx, mtype = ty, mdefn = tm, mstat = mstat }
+    modify $ \st@MS{..} -> st{ metaStore = Map.insert name meta metaStore }
+  modify $ \st@MS{..} -> st{ metaStore = Map.filter (\Meta{..} -> mstat /= Hoping || isNothing mdefn) metaStore }
 
 generateInputReader :: String -- ^
   -> [String] -- ^
