@@ -8,7 +8,7 @@
 [x] constraints - state and solve them
 [x] elaborating expressions
 [x] generating constraints on assignments
-[x] overloading `0` and `+` ?
+[ ] overloading `0` and `+` ?
 [x] extend eval to expand definitions
 
 15.09.23

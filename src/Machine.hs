@@ -89,7 +89,9 @@ data DeclarationType a
   , capturable :: Bool     -- is it capturable?
   }
   | LabmateDecl
-  deriving (Functor, Show)
+  deriving (Functor, Show, Foldable)
+
+deriving instance Traversable DeclarationType
 
 data ElabTask where
   TensorTask :: TensorType' -> ElabTask
@@ -665,6 +667,23 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
       newProb $ Done nil
       move
+    TypeExprTask (TyVar x) -> -- TODO: check whether `x` is already present in the mctxt, i.e. shadowing
+      findDeclaration (UserDecl Nothing x True [] False) >>= \case
+        Nothing -> do
+          newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
+          cry sol
+          move
+        Just (x, xty) -> do
+          -- TODO: to solve `sol` with the current value of `x`
+          constrain "VarExpr" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (atom SType)
+            , constraintStatus = Unstarted
+            , lhs = xty -< no natty
+            , rhs = mtype
+            }
+          newProb . Done $ FreeVar x
+          move
     TypeExprTask (TyNum k) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         cs <- constrain "IsOne" $ Constraint
@@ -730,6 +749,9 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb $ LHS lhs
         run
     ExprTask e -> case e of
+      Var x -> do
+        newProb . Elab sol $ TypeExprTask (TyVar x)
+        run
       IntLiteral i -> do
         newProb . Elab sol $ TypeExprTask (TyNum i)
         run
@@ -757,11 +779,9 @@ move = pull >>= \case
   Nothing -> do
     cleanup
     st@MS{..} <- get
-    if clock > epoch
-      then do
-        put st{ epoch = clock }
-        run
-      else pure ()
+    when (clock > epoch) $ do
+      put st{ epoch = clock }
+      run
   Just fr -> case fr of
     Fork (Right frk) fs' p' -> do
       (fs, p) <- switchFwrd (fs', p')
@@ -771,6 +791,11 @@ move = pull >>= \case
       (fs, p) <- switchFwrd (fs', p')
       push $ Fork (Right frk) fs p
       run
+    Declaration x xty -> do  -- propagate information from solved
+                             -- metavars before we clean them up
+      xty <- traverse (normalise emptyContext (atom SType)) xty
+      shup (Declaration x xty)
+      move
     FunctionLeft fname (lhs :<=: src) -> do
       (fs, p) <- switchFwrd ([], LHS lhs)
       traverse_ push [Fork (Right $ FunctionName fname) fs p, Source src]
