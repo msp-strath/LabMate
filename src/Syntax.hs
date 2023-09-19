@@ -81,6 +81,17 @@ data Expr'
   | Lambda [String] Expr
   deriving (Show)
 
+toTypeExpr' :: Expr' -> Maybe TypeExpr'
+toTypeExpr' (Var x) = pure $ TyVar x
+toTypeExpr' (IntLiteral n) = pure $ TyNum n
+toTypeExpr' (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
+-- FIXME : add more
+toTypeExpr' _ = Nothing
+
+toTypeExpr :: Expr -> Maybe TypeExpr
+toTypeExpr = traverse toTypeExpr'
+
+
 data LHS'
   = LVar String
   | LApp LHS [Expr]

@@ -435,7 +435,7 @@ nonceExpand _ t = raw t
 type Source = (Nonce, Hide [Tok])
 
 data WithSource a = (:<=:) { what :: a , source :: Source }
-  deriving (Functor, Show)
+  deriving (Functor, Show, Foldable, Traversable)
 
 nonce :: WithSource a -> Nonce
 nonce = fst . source

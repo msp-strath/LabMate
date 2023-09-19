@@ -89,9 +89,8 @@ data DeclarationType a
   , capturable :: Bool     -- is it capturable?
   }
   | LabmateDecl
-  deriving (Functor, Show, Foldable)
+  deriving (Functor, Show, Foldable, Traversable)
 
-deriving instance Traversable DeclarationType
 
 data ElabTask where
   TensorTask :: TensorType' -> ElabTask
@@ -733,6 +732,15 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           newProb . Elab sol $ Await (rcs <> ccs) (mk Sone cellSol)
           run
       _ -> move
+    TypeExprTask (TyBinaryOp Plus x y) -> do
+      -- TODO:
+      -- 1. make sure `mtype` admits plus
+      -- 2. find the correct way of doing plus in `mtype`
+      (xSol, xProb) <- elab "plusXTy" mctxt mtype (TypeExprTask <$> x)
+      (ySol, yProb) <- elab "plusYTy" mctxt mtype (TypeExprTask <$> y)
+      push $ Problems [xProb, yProb]
+      newProb . Done $ nil -- FIXME: use the solutions
+      move
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
@@ -748,12 +756,9 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       _ -> do  -- switch to being a scoping problem
         newProb $ LHS lhs
         run
-    ExprTask e -> case e of
-      Var x -> do
-        newProb . Elab sol $ TypeExprTask (TyVar x)
-        run
-      IntLiteral i -> do
-        newProb . Elab sol $ TypeExprTask (TyNum i)
+    ExprTask e -> case toTypeExpr' e of
+      Just e -> do
+        newProb . Elab sol $ TypeExprTask e
         run
       _ -> do  -- switch to being a scoping problem
         newProb $ Expression e
