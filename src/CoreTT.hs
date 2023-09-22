@@ -94,6 +94,7 @@ typeEh ty | Just cts <- tagEh ty = case cts of
   (SOne, [])   -> pure ()
   (SAtom, [])  -> pure ()
   (SType, [])  -> pure ()
+  (SChar, [])  -> pure ()
   (SAbel, [t]) -> typeEh t
   (SList, [t]) -> typeEh t
   (SEnum, [t]) -> withScope $
@@ -161,6 +162,7 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
     nfs <- termToNFList (atom SAtom) as
     True <$ checkEnumEh nfs tm
   (SOne, []) -> pure True
+  (SChar, []) | Intg i <- tm, i >= 0 && i <= 128 -> pure True
   (SAtom, []) | Atom _ <- tm -> pure True
   (SPi, [s, t]) | Just t' <- lamEh t, Just (x, tm') <- lamNameEh tm ->
     True <$ under (x, s) (checkEh t' tm')
@@ -362,6 +364,7 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   (SType, []) -> typeEval tm
   (SOne, []) -> pure nil
   (SAtom, []) -> pure tm
+  (SChar, []) -> pure tm
   (SAbel, [genTy]) -> nfAbelToTerm <$> termToNFAbel genTy tm
   (SList, [genTy]) -> propEh genTy >>= \case
       True  -> nfAbelToTerm <$> termToNFAbel genTy tm
@@ -404,7 +407,7 @@ checkEval ty tm = do
 
 typeEval :: Type ^ n -> TC n (NmTy ^ n)
 typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
-  (x, []) | x `elem` [SAtom, SOne, SType] -> pure $ atom x
+  (x, []) | x `elem` [SAtom, SOne, SType, SChar] -> pure $ atom x
   (SAbel, [genTy]) -> mk SAbel <$> typeEval genTy
   (SList, [genTy]) -> mk SList <$> typeEval genTy
   (SEnum, [as]) -> mk SEnum <$> checkNormEval (mk SList (atom SAtom)) as
@@ -646,6 +649,11 @@ testShowTC tc ctx =
   case runTC tc Map.empty ctx of
     Left err -> err
     Right tm -> tmShow False tm (fst <$> ctx)
+
+test1 = let ty = atom SChar
+            ctx = emptyContext
+            tm = lit (99 :: Int)
+        in runTC (checkEh ty tm) Map.empty ctx
 
 {-
 test1 = let ty = mk SSig SType (lam "X" (evar 0))

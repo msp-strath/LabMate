@@ -30,7 +30,7 @@ import qualified Data.Set as Set
 
 import Debug.Trace
 
-debug = const id
+debug = trace
 
 type Elab = State MachineState
 
@@ -322,6 +322,13 @@ constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = "
               metaDefn x (t :^ ph)
               pure $ SolvedIf []
             _ -> error "constrain: different context lengths"
+      -- different atoms are never unifiable, raise the constraint as impossible
+      _ | Just (s1, []) <- tagEh lhs
+        , Just (s2, []) <- tagEh rhs
+        , s1 /= s2 -> do
+            s <- fresh s
+            modify $ \st@MS{..} -> st{ constraintStore = Map.insert s c{constraintStatus = Impossible} constraintStore }
+            pure Impossible
       _ | Just (lt, ls) <- tagEh lhs
         , Just (rt, rs) <- tagEh rhs
         , lt == rt -> case (lt, ls, rs) of
@@ -666,6 +673,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
       newProb $ Done nil
       move
+    TypeExprTask (TyVar Lstring) | Just (SType, []) <- tagEh mtype -> do
+      metaDefn sol $ mk SList (atom SChar) -< no (vlen mctxt)
+      newProb $ Done nil
+      move
     TypeExprTask (TyVar x) -> -- TODO: check whether `x` is already present in the mctxt, i.e. shadowing
       findDeclaration (UserDecl Nothing x True [] False) >>= \case
         Nothing -> do
@@ -741,6 +752,18 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       push $ Problems [xProb, yProb]
       newProb . Done $ nil -- FIXME: use the solutions
       move
+    TypeExprTask (TyStringLiteral s) -> case tagEh mtype of
+      Just (SList, [genTy]) -> do
+        cs <- constrain "IsChar" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , constraintStatus = Unstarted
+          , lhs = genTy
+          , rhs = atom SChar
+          }
+        newProb . Elab sol $ Await cs (ixKI mtype (lit s))
+        run
+      _ -> move
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)

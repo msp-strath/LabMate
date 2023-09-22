@@ -84,6 +84,7 @@ data Expr'
 toTypeExpr' :: Expr' -> Maybe TypeExpr'
 toTypeExpr' (Var x) = pure $ TyVar x
 toTypeExpr' (IntLiteral n) = pure $ TyNum n
+toTypeExpr' (StringLiteral s) = pure $ TyStringLiteral s
 toTypeExpr' (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
 -- FIXME : add more
 toTypeExpr' _ = Nothing

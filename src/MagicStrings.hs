@@ -6,6 +6,7 @@ pattern SOne  = "One"
 pattern SAbel = "Abel"
 pattern SList = "List"
 pattern SAtom = "Atom"
+pattern SChar = "Char"
 pattern SEnum = "Enum"
 pattern SPi   = "Pi"
 pattern SSig  = "Sigma"
@@ -23,3 +24,4 @@ pattern Svjux = "vjux"
 
 -- Labmate user types
 pattern Lint = "int"
+pattern Lstring = "string"
