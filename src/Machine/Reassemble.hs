@@ -44,7 +44,6 @@ reassemble n ms =
       tab' = foldr (\((n, c), grp) rs -> Map.insertWith (++) n (concat ["\n", replicate c ' ', "%< ", renameGripeResponse grp]) rs) tab probs
   in fromMaybe [] $ Map.lookup n (updateNonceTable tab' (resetCursor (position $ if Set.null probs then ms' else ms)))
 
-
 updateNonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
 updateNonceTable table (fz :<+>: []) = table
 updateNonceTable table (fz :<+>: Fork _ fs' e : fs) = updateNonceTable (updateNonceTable table (fz :<+>: fs)) (fz :<+>: fs')
@@ -146,7 +145,6 @@ renamePass ms = inbound ms
        inner [] = Nothing
     respond (t : ts) = t : respond ts
     respond [] = []
-
 
     tellGripes :: RenameGripe -> DeclarationType a -> Writer RenameProblems ()
     tellGripes grp = \case

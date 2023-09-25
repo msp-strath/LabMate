@@ -30,7 +30,7 @@ import qualified Data.Set as Set
 
 import Debug.Trace
 
-debug = trace
+debug = const id --trace
 
 type Elab = State MachineState
 
@@ -61,6 +61,13 @@ initMachine f t = MS
 type TERM = Term Chk ^ Z
 type TYPE = Type ^ Z
 
+data DiagnosticData
+  = SynthD
+      TYPE {- T -}
+      TERM {- t :: T -}
+      Expr {- e, t = elab e -}
+  deriving Show
+
 data Frame where
   Source :: Source -> Frame
   Declaration :: Name -> DeclarationType TYPE -> Frame
@@ -71,6 +78,7 @@ data Frame where
   Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
   Problems :: [Problem] -> Frame
   LocalNamespace :: NameSupply -> Frame
+  Diagnostic :: DiagnosticData -> ResponseLocation -> Frame
   deriving Show
 
 data Fork = Solved | FunctionName Name
@@ -290,6 +298,12 @@ normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
 normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
   Left err -> error $ "normalise : TC error" ++ err
   Right tm -> pure tm
+
+normaliseDiagnostic :: DiagnosticData -> Elab DiagnosticData
+normaliseDiagnostic (SynthD ty tm e) = do
+  ty <- normalise emptyContext (atom SType) ty
+  tm <- normalise emptyContext ty tm
+  pure $ SynthD ty tm e
 
 constrain :: String -> Constraint -> Elab ConstraintStatus
 constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = " ++ show c) $ case (traverse (traverse isHom) constraintCtx, constraintType) of
@@ -625,12 +639,13 @@ runDirective rl (dir :<=: src, body) = do
     Typecheck ty e -> do
       (tySol, tyProb) <- elab "typeToCheck" emptyContext (atom SType) (TensorTask <$> ty)
       (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask <$> e)
-      push $ Problems [eProb]
+      --traverse push [Diagnostic _ rl, Problems [eProb]]
       newProb tyProb
       run
     SynthType e -> do
       ty <- invent "typeToSynth" emptyContext (atom SType)
       (eSol, eProb) <- elab "exprToSynth" emptyContext ty (ExprTask <$> e)
+      push $ Diagnostic (SynthD ty eSol e) rl
       newProb eProb
       run
     _ -> move
@@ -807,9 +822,12 @@ move = pull >>= \case
   Nothing -> do
     cleanup
     st@MS{..} <- get
-    when (clock > epoch) $ do
-      put st{ epoch = clock }
-      run
+    if (clock > epoch)
+      then do
+        put st{ epoch = clock }
+        run
+      else do
+        diagnosticPass
   Just fr -> case fr of
     Fork (Right frk) fs' p' -> do
       (fs, p) <- switchFwrd (fs', p')
@@ -823,6 +841,10 @@ move = pull >>= \case
                              -- metavars before we clean them up
       xty <- traverse (normalise emptyContext (atom SType)) xty
       shup (Declaration x xty)
+      move
+    Diagnostic dd rl -> do
+      dd <- normaliseDiagnostic dd
+      shup (Diagnostic dd rl)
       move
     FunctionLeft fname (lhs :<=: src) -> do
       (fs, p) <- switchFwrd ([], LHS lhs)
@@ -852,6 +874,11 @@ cleanup = do
     let meta = Meta{ mctxt = ctx, mtype = ty, mdefn = tm, mstat = mstat }
     modify $ \st@MS{..} -> st{ metaStore = Map.insert name meta metaStore }
   modify $ \st@MS{..} -> st{ metaStore = Map.filter (\Meta{..} -> mstat /= Hoping || isNothing mdefn) metaStore }
+
+
+diagnosticPass :: Elab ()
+diagnosticPass = do
+  st <- get
 
 generateInputReader :: String -- ^
   -> [String] -- ^

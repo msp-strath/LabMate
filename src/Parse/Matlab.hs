@@ -119,6 +119,7 @@ pdirhead = Declare <$> psep1 (pspc <|> punc ",") (pws pnom) <* pospc <* psym "::
     <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom
     <|> Typecheck <$ pkin Nom "typecheck" <* pospc <*> ptensortype <* pspc <*> pexpr topCI
     <|> SynthType <$ pkin Nom "typeof" <* pospc <*> pexpr topCI
+--    <|> EverythingOkay <$ pkin Nom ""
 
 ptensortype :: Parser TensorType
 ptensortype = pws ptensortype'

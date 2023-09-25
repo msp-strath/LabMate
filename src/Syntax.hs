@@ -34,6 +34,7 @@ data DirHeader
   | InputFormat String {- name of function -}
   | Typecheck ConcreteType Expr
   | SynthType Expr
+--  | EverythingOkay
   deriving Show
 
 data DirBody

@@ -31,7 +31,7 @@ instance Show Meta where
   show = \case
     Meta{..} -> nattily (vlen mctxt) $
       concat [ "Meta{", show mctxt
-             , " , ", show mtype , " , ", show mdefn
+             , " , ", show mtype, " , ", show mdefn
              , " , ", show mstat
              , "}"]
 
