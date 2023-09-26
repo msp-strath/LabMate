@@ -30,7 +30,7 @@ import qualified Data.Set as Set
 
 import Debug.Trace
 
-debug = const id --trace
+debug = trace
 
 type Elab = State MachineState
 
@@ -822,7 +822,7 @@ move = pull >>= \case
   Nothing -> do
     cleanup
     st@MS{..} <- get
-    if (clock > epoch)
+    if clock > epoch
       then do
         put st{ epoch = clock }
         run
@@ -875,10 +875,10 @@ cleanup = do
     modify $ \st@MS{..} -> st{ metaStore = Map.insert name meta metaStore }
   modify $ \st@MS{..} -> st{ metaStore = Map.filter (\Meta{..} -> mstat /= Hoping || isNothing mdefn) metaStore }
 
-
 diagnosticPass :: Elab ()
 diagnosticPass = do
   st <- get
+  pure ()
 
 generateInputReader :: String -- ^
   -> [String] -- ^
