@@ -243,7 +243,7 @@ There are lot of menial programming tasks in the wild\pause
   \item e.g., code that handles data serialisation
   \begin{itemize}
     \item have to keep in mind what input is required, what are the dimensions, what format, etc...
-    \item but this is meta information, not necessarily evident in the \ma{} implementation
+    \item but this is metainformation, not necessarily evident in the \ma{} implementation
   \end{itemize}
 \end{itemize}
 \visible<5->{We can do better}
@@ -507,7 +507,7 @@ Let's take a look at some of the types implemented in \lr{}.\pause \\
       \begin{itemize}
         \item e.g., comes up with types for \ma{} expressions
       \end{itemize}
-      \item makes sure the type errors are human readable
+      \item makes sure that type errors are human readable
     \end{itemize}
   \end{column}
 \end{columns}
@@ -528,7 +528,7 @@ Let's take a look at some of the types implemented in \lr{}.\pause \\
   \mycallout<+>{ass1}{see an assignment at yet unknown type}
   \mycallout<+>{five}{process the RHS, $5$, using the the type of LHS $n$}
   \mycallout<+>{nlhs}{find the type of the declared $n$}
-  \mycallout<+>{ass1}{constrain the type of RHS,$5$, to be equal to that of LHS, $n$}
+  \mycallout<+>{ass1}{constrain the type of RHS, $5$, to be equal to that of LHS, $n$}
   \mycallout<+>{ass2}{see an assignment at yet unknown type}
   \mycallout<+>{nrhs}{simplify the RHS, $n$, finding its type}
   \mycallout<+>{xlhs}{declare $x$ in scope with unknown type}
@@ -540,7 +540,7 @@ Let's take a look at some of the types implemented in \lr{}.\pause \\
   \begin{itemize}[<+->]
     \item The code is available at \repo
     \item We are currently parsing a lot of common \ma{} constructions
-    \item Directives for renaming and code generation are ready
+    \item Directives for renaming and code generation are working
     \item Implemented most of the underlying type system for \ma
     \item Actively working on elaboration
   \end{itemize}
