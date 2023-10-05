@@ -827,7 +827,7 @@ move = pull >>= \case
         put st{ epoch = clock }
         run
       else do
-        diagnosticPass
+        diagnosticRun
   Just fr -> case fr of
     Fork (Right frk) fs' p' -> do
       (fs, p) <- switchFwrd (fs', p')
@@ -875,10 +875,43 @@ cleanup = do
     modify $ \st@MS{..} -> st{ metaStore = Map.insert name meta metaStore }
   modify $ \st@MS{..} -> st{ metaStore = Map.filter (\Meta{..} -> mstat /= Hoping || isNothing mdefn) metaStore }
 
-diagnosticPass :: Elab ()
-diagnosticPass = do
-  st <- get
-  pure ()
+diagnosticRun :: Elab ()
+diagnosticRun = llup >>= \case
+  Just fr -> case fr of
+    Diagnostic dd (n, dent) -> do
+      nt <- gets nonceTable
+      msg <- msg dent dd
+      push $ Source (n, Hide msg)
+      --modify $ \st@MS{..} -> st { nonceTable = Map.insert n msg nt }
+      push fr
+      diagnosticRun
+    _ -> push fr >> diagnosticRun
+  Nothing -> diagnosticMove
+  where
+    msg :: Int -> DiagnosticData -> Elab [Tok]
+    msg dent = \case
+      SynthD _ _ (e :<=: (en, _)) -> pure
+        [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Hello" Nom dump, spc 1, non en]
+      _ -> pure [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Goodbye" Nom dump]
+        {- case dd of
+        SynthD ty tm (e :<=: eSrc) -> case () of
+         _ | Set.null (dependencies ty) -> case () of
+             _ | Set.null (dependencies tm) -> _
+        --concat  ["\n", replicate dent ' ', "%<", " ", "Hello"] -}
+
+diagnosticMove :: Elab ()
+diagnosticMove = pull >>= \case
+  Nothing -> pure ()
+  Just fr -> case fr of
+    Fork (Right frk) fs' p' -> do
+      (fs, p) <- switchFwrd (fs', p')
+      shup $ Fork (Left frk) fs p
+      diagnosticMove
+    Fork (Left frk) fs' p' -> do
+      (fs, p) <- switchFwrd (fs', p')
+      push $ Fork (Right frk) fs p
+      diagnosticRun
+    _ -> shup fr >> diagnosticMove
 
 generateInputReader :: String -- ^
   -> [String] -- ^
