@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiWayIf #-}
 module Machine where
 
 import Control.Monad
@@ -881,23 +882,42 @@ diagnosticRun = llup >>= \case
     Diagnostic dd (n, dent) -> do
       nt <- gets nonceTable
       msg <- msg dent dd
-      push $ Source (n, Hide msg)
-      --modify $ \st@MS{..} -> st { nonceTable = Map.insert n msg nt }
-      push fr
+      traverse_ push [Source (n, Hide msg), fr]
       diagnosticRun
     _ -> push fr >> diagnosticRun
   Nothing -> diagnosticMove
   where
     msg :: Int -> DiagnosticData -> Elab [Tok]
     msg dent = \case
-      SynthD _ _ (e :<=: (en, _)) -> pure
-        [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Hello" Nom dump, spc 1, non en]
+      SynthD ty tm (e :<=: (en, _)) -> do
+        let resp = [Tok "\n" Ret dump, spc dent, sym "%<", spc 1]
+        statTy <- traverse metaStatus . Set.toList $ dependencies ty
+        statTm <- traverse metaStatus . Set.toList $ dependencies tm
+        sty <- unelabType ty
+        pure $ case (statTy, statTm) of
+          ([], []) -> resp ++ [non en, spc 1, sym "::", spc 1] ++ sty
+          ([], _) | Crying `elem` statTm ->
+            resp ++ [non en, spc 1, sym "should have type", spc 1]
+            ++ sty ++ [sym ",", spc 1, sym "but it does not"]
+          ([], _) ->
+            resp ++ [non en, spc 1, sym "should have type", spc 1]
+            ++ sty ++ [sym ",", spc 1, sym "and it might"{-, spc 1, sym (show (dependencies tm)), spc 1, sym (show statTm)-}]
+          (_, _) | Crying `elem` statTy ->
+            resp ++ [sym "There is no sensible type for", spc 1, non en]
+          (_, _) ->
+            resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is quite a puzzle"]
       _ -> pure [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Goodbye" Nom dump]
-        {- case dd of
-        SynthD ty tm (e :<=: eSrc) -> case () of
-         _ | Set.null (dependencies ty) -> case () of
-             _ | Set.null (dependencies tm) -> _
-        --concat  ["\n", replicate dent ' ', "%<", " ", "Hello"] -}
+
+metaStatus :: Name -> Elab Status
+metaStatus x = do
+  ms <- gets metaStore
+  case Map.lookup x ms of
+    Just m -> pure (mstat m)
+    Nothing -> error $ "metaStatus: " ++ show x
+
+unelabType :: TYPE -> Elab [Tok]
+unelabType ty = pure [sym $ show ty]
+
 
 diagnosticMove :: Elab ()
 diagnosticMove = pull >>= \case
