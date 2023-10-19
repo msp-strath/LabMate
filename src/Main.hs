@@ -65,7 +65,7 @@ main = do
    go Conf{hideVersion, verbose} (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = execState run (initMachine cs tab)
       when verbose $
-        print out
+        traverse_ putStrLn (pprint out)
       unless hideVersion $
         putStrLn ("%< LabMate " ++ showVersion version)
       putStrLn $ reassemble n out

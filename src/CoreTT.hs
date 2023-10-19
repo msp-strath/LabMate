@@ -15,7 +15,7 @@ import Debug.Trace
 track = trace
 
 
-data Status = Crying | Waiting | Hoping | Abstract
+data Status = Crying | Waiting | Hoping | Abstract | ProgramVar
   deriving (Ord, Eq, Show)
 
 
