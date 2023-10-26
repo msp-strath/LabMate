@@ -994,6 +994,14 @@ metaStatus x = do
     Nothing -> error $ "metaStatus: " ++ show x
 
 unelabType :: TYPE -> Elab [Tok]
+unelabType ty | Just ct <- tagEh ty = case ct of
+  -- TODO: cover all types properly
+  (SMatrix, [rowTy, colTy, cellTy, Intg 1, Intg 1]) -- 1 x 1 matrix
+    | Just cellTy <- lamEh cellTy, Just cellTy <- lamEh cellTy -> do
+        let sig = subSnoc (sub0 (R $^ nil <&> rowTy)) (R $^ nil <&> colTy)
+        unelabType =<< normalise emptyContext (atom SType) (cellTy //^ sig)
+  (SAbel, [ty]) | Just (SOne, []) <- tagEh ty -> pure [nom "int"]
+  _ -> pure [sym $ show ty]
 unelabType ty = pure [sym $ show ty]
 
 diagnosticMove :: Elab ()

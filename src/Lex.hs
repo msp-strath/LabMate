@@ -71,6 +71,9 @@ dump = Hide (0,0)
 sym :: String -> Tok
 sym s = Tok s Sym dump
 
+nom :: String -> Tok
+nom s = Tok s Nom dump
+
 spc :: Int -> Tok
 spc n = Tok (replicate n ' ') Spc dump
 
