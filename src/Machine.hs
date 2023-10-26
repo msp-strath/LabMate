@@ -109,7 +109,11 @@ data Frame where
   Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
   LocalNamespace :: NameSupply -> Frame
   Diagnostic :: ResponseLocation -> DiagnosticData -> Frame
-  Currently :: TYPE -> TERM -> TERM -> Frame
+  Currently
+    :: TYPE -- T
+    -> TERM -- lhs, a metavar of type Dest T
+    -> TERM -- rhs
+    -> Frame
   deriving Show
 
 data Fork = Solved | FunctionName Name
@@ -209,6 +213,15 @@ excursion op = do
       Just ExcursionReturnMarker -> pure ()
       Just fr -> push fr >> go
       Nothing -> error "excursion got lost"
+
+pullUntil :: s -> (s -> Frame -> Either s t) -> Elab (Maybe t)
+pullUntil s f = pull >>= \case
+  Nothing -> pure Nothing
+  Just fr -> do
+    shup fr
+    case f s fr of
+      Right t -> pure $ Just t
+      Left  s -> pullUntil s f
 
 postRight :: [Frame] -> Elab ()
 postRight fs = pull >>= \case
@@ -747,7 +760,12 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           cry sol
           move
         Just (x, xty) -> do
-          -- TODO: to solve `sol` with the current value of `x`
+          y <- excursion . pullUntil () $ \_ fr -> case fr of
+                 Currently ty lhs rhs | lhs == FreeVar x -> Right rhs
+                 _ -> Left ()
+          case y of
+            Nothing  -> cry sol
+            Just rhs -> metaDefn sol $ rhs -< no (vlen mctxt)
           constrain "VarExpr" $ Constraint
             { constraintCtx = fmap Hom <$> mctxt
             , constraintType = Hom (atom SType)
@@ -925,7 +943,6 @@ normaliseFrame = \case
       tm <- normalise emptyContext ty tm
       pure $ SynthD ty tm e
 
-
 cleanup :: Elab ()
 cleanup = do
   ms <- gets metaStore
@@ -978,7 +995,6 @@ metaStatus x = do
 
 unelabType :: TYPE -> Elab [Tok]
 unelabType ty = pure [sym $ show ty]
-
 
 diagnosticMove :: Elab ()
 diagnosticMove = pull >>= \case
