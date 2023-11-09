@@ -68,7 +68,8 @@ library
                       Term.Thinning,
                       Term.Vec,
                       CoreTT,
-                      NormalForm
+                      NormalForm,
+                      MissingLibrary
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     hs-source-dirs:   src

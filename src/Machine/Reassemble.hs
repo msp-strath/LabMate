@@ -129,7 +129,6 @@ renamePass ms = inbound ms
     captured (fz :< f) b s = captured fz b s
 
     newName :: DeclarationType a -> Writer RenameProblems String
-    newName LabmateDecl = error "renamePass: impossible labmate decl"
     newName UserDecl{ currentName = old, newNames = [] } = pure old
     newName UserDecl{ newNames } | [new] <- L.nub (map fst newNames) = pure new
     newName d@UserDecl{ currentName = old } = old <$ tellGripes TooManyNames d

@@ -29,8 +29,9 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 
 import Debug.Trace
+import Control.Monad.Reader
 
-debug = trace
+debug = const id --trace
 
 type Elab = State MachineState
 
@@ -57,9 +58,18 @@ initMachine f t = MS
   , epoch = 0
   }
 
+-- whatever PPMonad is, it should have Monoid instance which lifts the
+-- monoid structure of values
+type PPMonad = (->) Name
+
 class PrettyPrint t where
   -- the list of strings must be non-empty
-  pprint :: t -> [String]
+  pprint :: t -> PPMonad [String]
+
+pptm :: TERM -> PPMonad String
+pptm tm = do
+  ns <- ask
+  pure $ tmShow False tm (ns, VN)
 
 dent :: [String] -> [String]
 dent [] = []
@@ -68,21 +78,43 @@ dent (s : ss) = ("+-" ++ s) : map ("| " ++) ss
 instance PrettyPrint ([Frame], Problem) where
   pprint ([], p) = pprint p
   pprint (f : fs, p) = case f of
-    Fork (Left  frk) fs' p' -> dent (pprint (fs, p)) ++ pprint (fs', p')
-    Fork (Right frk) fs' p' -> dent (pprint (fs', p')) ++ pprint (fs, p)
-    _ -> pprint f ++ pprint (fs, p)
+    LocalNamespace (root, _) -> do
+      let d = Name (root <>> [])
+      ld <- localName d
+      pure [ld ++ " |-" ] <> local (const d) (pprint (fs, p))
+    Fork (Left  frk) fs' p' -> (dent <$> pprint (fs, p)) <> pprint (fs', p')
+    Fork (Right frk) fs' p' -> (dent <$> pprint (fs', p')) <> pprint (fs, p)
+    _ -> pprint f <> pprint (fs, p)
     --foldMap pprint fs ++ pprint p
 
 instance PrettyPrint Problem where
-  pprint p = [show p]
+  pprint (Done tm) = (:[]) . ("Done " ++) <$> pptm tm
+  pprint p = pure [show p]
+
+instance PrettyPrint DiagnosticData where
+  pprint (SynthD ty tm (exp :<=: (n, _))) = do
+    ty <- pptm ty
+    tm <- pptm tm
+    pure [tm ++ " :: " ++ ty ++ " <- $" ++ show n]
 
 instance PrettyPrint Frame where
-  pprint (Source (n, Hide ts)) = [concat ["$", show n, ": ", ts >>= blat]]
+  pprint (Declaration n UserDecl{..}) = do
+    ns <- ask
+    let dn = localName n ns
+    tm <- pptm varTy
+    pure [dn ++ " := " ++ currentName ++ " :: " ++ tm]
+  pprint (Currently ty lhs rhs) = do
+    ty <- pptm ty
+    lhs <- pptm lhs
+    rhs <- pptm rhs
+    pure ["Currently " ++ lhs ++ " = " ++ rhs ++ " :: " ++ ty]
+  pprint (Diagnostic (n, _) d) =
+    zipWith (++) (("Diagnostic $" ++ show n ++ " ") : repeat "  ") <$> pprint d
+  pprint (Source (n, Hide ts)) = pure [concat ["$", show n, ": ", ts >>= blat]]
    where
      blat t | Non n <- kin t = '$': show n
      blat t = raw t
-  pprint fr = [show fr]
-
+  pprint fr = pure [show fr]
 
 instance PrettyPrint MachineState where
   pprint st =
@@ -131,7 +163,6 @@ data DeclarationType a
   , newNames :: [(String, ResponseLocation)]
   , capturable :: Bool     -- is it capturable?
   }
-  | LabmateDecl
   deriving (Functor, Show, Foldable, Traversable)
 
 
@@ -450,7 +481,6 @@ updateConstraintStatus (SolvedIf xs) =
 updateConstraintStatus cs = pure cs
 
 findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe (Name, TYPE))
-findDeclaration LabmateDecl = pure Nothing
 findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} = excursion (go False)
   where
   go :: Bool {- we think we are in a function -} -> Elab (Maybe (Name, TYPE))
@@ -468,7 +498,6 @@ findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} =
       _ -> shup f >> go b
 
 makeDeclaration :: DeclarationType TYPE -> Elab (Name, TYPE)
-makeDeclaration LabmateDecl = error "making labmatedecl declaration"
 makeDeclaration d@UserDecl{varTy, currentName} = excursion $ do
   findLocale
   x <- metaDecl ProgramVar currentName emptyContext (mk SDest varTy)
@@ -524,7 +553,6 @@ invent x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
   ty -> wrapMeta <$> metaDecl Hoping x ctx ty
 
 ensureType :: DeclarationType (Maybe TYPE) -> Elab (DeclarationType TYPE)
-ensureType LabmateDecl = error "ensureType: cannot invent type for labmate decl."
 ensureType dt@UserDecl{varTy, currentName} = do
   ty <- case varTy of
     Nothing  -> invent (currentName ++ "Type") emptyContext (atom SType)

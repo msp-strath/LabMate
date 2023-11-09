@@ -35,6 +35,7 @@ import Machine.Reassemble
 
 import Data.Version
 import Paths_LabMate
+import Term
 
 data Conf = Conf
   { src :: String
@@ -65,12 +66,11 @@ main = do
    go Conf{hideVersion, verbose} (Right (tab, cs@(_ :<=: (n,src)))) = do
       let out = execState run (initMachine cs tab)
       when verbose $
-        traverse_ putStrLn (pprint out)
+        traverse_ putStrLn (pprint out rootNamespace)
       unless hideVersion $
         putStrLn ("%< LabMate " ++ showVersion version)
       putStrLn $ reassemble n out
    go _ (Left e) = do printError e; exitWith fatalExitCode
-
 
 
 type ParseError = (Maybe FilePath, Reach, Int)

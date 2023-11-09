@@ -14,6 +14,8 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 
 import Debug.Trace
+import Data.List (intercalate)
+import MissingLibrary
 
 truck = const id
 
@@ -50,10 +52,23 @@ data Ctor (s :: Sort) (t :: Sort) where
 
 type Root = Bwd (String, Int)
 type NameSupply = (Root, Int)
-type Name = [(String, Int)]
+newtype Name = Name { longname :: [(String, Int)] }
+  deriving (Eq, Ord)
+
+localName :: Name -> Name -> String
+localName (Name dns) (Name lns) =
+  let (_, (px, py)) =  mpullback lns dns
+  in (if null px then "" else show (length px) ++ "\\")
+     ++ intercalate "." [n ++ show i | (n, i) <- py]
+
+rootNamespace :: Name
+rootNamespace = Name [("labmate", 0)]
+
+instance Show Name where
+  show (Name ns) = intercalate "." $ map (\(n,i) -> n ++ show i) ns
 
 name :: NameSupply -> String -> Name
-name (r, n) s = r <>> [(s, n)]
+name (r, n) s = Name $ r <>> [(s, n)]
 
 data Term (s :: Sort)
           (n :: Nat)     -- object variable support
@@ -294,9 +309,10 @@ subSnoc sig tm = ST $^ sig <&> tm
 tmShow :: forall s n
        .  Bool         -- is the term a cdr
        -> Term s ^ n
-       -> Vec n String -- we know the names of all vars in scope
+       -> (Name, Vec n String) -- pair of a local namespace and the
+                               -- names of all vars in scope
        -> String
-tmShow b (V :^ th) ctx = barIf b ++ vonly (th ?^ ctx)
+tmShow b (V :^ th) (_, ctx) = barIf b ++ vonly (th ?^ ctx)
 tmShow b Nil _
   | b = ""
   | otherwise = "[]"
@@ -305,21 +321,21 @@ tmShow b (I i :$ U :^ _) _ = barIf b ++ show i
 tmShow b (U :^ _) _ = ""
 tmShow b (P tl u tr :^ th) _ = "tmShow: not in a great spot"
 tmShow b (K tm :^ th) ctx = barIf b ++ "(\\_. " ++ tmShow b (tm :^ th) ctx ++ ")"
-tmShow b (L (Hide nm) tm :^ th) ctx = concat [barIf b, "(\\", x, ". ", tmShow False (tm :^ Su th) (ctx :# x), ")"]
+tmShow b (L (Hide nm) tm :^ th) (ns, ctx) = concat [barIf b, "(\\", x, ". ", tmShow False (tm :^ Su th) (ns, ctx :# x), ")"]
   where
     x = head $ filter (not . (`elem` ctx)) (nm : [nm ++ show i | i <- [0..]])
 tmShow b (E :$ t :^ th) ctx = tmShow b (t :^ th) ctx
 tmShow b (R :$ t :^ th) ctx =
   concat [barIf b, "(", tmShow False tm ctx, " : ", tmShow False ty ctx, ")"]
     where (tm, ty) = split (t :^ th)
-tmShow b (M m :$ sig :^ th) ctx = barIf b ++ show m ++ case idSubstEh sig of
+tmShow b (M (m, _) :$ sig :^ th) (ns, ctx) = barIf b ++ localName m ns ++ case idSubstEh sig of
   Left (IsSy n) -> case sig of
-    SubT sig u t -> concat ["{", substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, "}"]
+    SubT sig u t -> concat ["{", substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) (ns, ctx), "}"]
   Right Refl -> ""
   where
     substShow :: forall j n . Subst j ^ n -> Vec n String -> String
     substShow (Sub0 :^ _) _ = ""
-    substShow (SubT sig u t :^ th) ctx = concat [substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) ctx, ", "]
+    substShow (SubT sig u t :^ th) ctx = concat [substShow (sig :^ covl u -< th) ctx, tmShow False (t :^ covr u -< th) (ns, ctx), ", "]
 tmShow b (T :$ P tl u tr :^ th) ctx =
   if b then " " ++ s else "[" ++ s ++ "]"
   where
@@ -333,7 +349,7 @@ barIf True = " | "
 barIf False = ""
 
 instance NATTY n => Show (Term s ^ n) where
-  show t = tmShow False t (names natty)
+  show t = tmShow False t (rootNamespace, names natty)
 
 data Roof :: Nat -> Nat -> Nat -> * where
   Roof :: Subst l l' -> Cov l' r' n -> Subst r r' -> Roof l r n
@@ -430,7 +446,7 @@ theNames :: Vec (S (S (S Z))) String
 theNames = VN :# "z" :# "y" :# "x"
 
 testShow :: Term Chk ^ S (S (S Z)) -> IO ()
-testShow t = putStrLn $ tmShow False t theNames
+testShow t = putStrLn $ tmShow False t (rootNamespace, theNames)
 
 -- computig deBruijn levels
 names :: Natty n -> Vec n String

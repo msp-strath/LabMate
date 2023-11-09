@@ -648,7 +648,7 @@ testShowTC :: TC n (Term 'Chk ^ n)
 testShowTC tc ctx =
   case runTC tc Map.empty ctx of
     Left err -> err
-    Right tm -> tmShow False tm (fst <$> ctx)
+    Right tm -> tmShow False tm (rootNamespace, fst <$> ctx)
 
 test1 = let ty = atom SChar
             ctx = emptyContext
