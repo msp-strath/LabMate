@@ -85,10 +85,16 @@ instance PrettyPrint ([Frame], Problem) where
     Fork (Left  frk) fs' p' -> (dent <$> pprint (fs, p)) <> pprint (fs', p')
     Fork (Right frk) fs' p' -> (dent <$> pprint (fs', p')) <> pprint (fs, p)
     _ -> pprint f <> pprint (fs, p)
-    --foldMap pprint fs ++ pprint p
+
+instance PrettyPrint ElabTask where
+  -- TODO: implement
+  pprint = pure . (:[]) . show
 
 instance PrettyPrint Problem where
   pprint (Done tm) = (:[]) . ("Done " ++) <$> pptm tm
+  pprint (Elab n x) = do
+    ln <- localName n
+    zipWith (++) ((ln ++ " <- ") : repeat "  ") <$> pprint x
   pprint p = pure [show p]
 
 instance PrettyPrint DiagnosticData where
@@ -99,8 +105,7 @@ instance PrettyPrint DiagnosticData where
 
 instance PrettyPrint Frame where
   pprint (Declaration n UserDecl{..}) = do
-    ns <- ask
-    let dn = localName n ns
+    dn <- localName n
     tm <- pptm varTy
     pure [dn ++ " := " ++ currentName ++ " :: " ++ tm]
   pprint (Currently ty lhs rhs) = do
@@ -164,7 +169,6 @@ data DeclarationType a
   , capturable :: Bool     -- is it capturable?
   }
   deriving (Functor, Show, Foldable, Traversable)
-
 
 data ElabTask where
   TensorTask :: TensorType' -> ElabTask
@@ -861,6 +865,15 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       pushProblems [xProb, yProb]
       newProb . Done $ nil -- FIXME: use the solutions
       move
+    TypeExprTask (TyBinaryOp (Mul False {- dotted -} div) x y) -> do
+      -- Two main issues:
+      -- redundancy in representation of matrices:
+      -- (e.g., R C [a] [b] \r.c. X vs
+      -- \One One one one \_._. X[a/r, b/c])
+      -- guessing which multiplication case we are in (try them all):
+      -- scalar * mx, mx * scalar, mx * mx
+      -- (do we need two phase commit to metastore, local metastores?)
+      undefined -- TODO
     TypeExprTask (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         cs <- constrain "IsChar" $ Constraint
