@@ -65,7 +65,7 @@ rootNamespace :: Name
 rootNamespace = Name [("labmate", 0)]
 
 instance Show Name where
-  show (Name ns) = intercalate "." $ map (\(n,i) -> n ++ show i) ns
+  show (Name ns) = intercalate "." [n ++ show i | (n, i) <- ns]
 
 name :: NameSupply -> String -> Name
 name (r, n) s = Name $ r <>> [(s, n)]

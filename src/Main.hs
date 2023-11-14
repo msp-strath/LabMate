@@ -63,7 +63,7 @@ main = do
         False -> actFile f >>= go conf
  where
    stdin = T.getContents >>= actInput
-   go Conf{hideVersion, verbose} (Right (tab, cs@(_ :<=: (n,src)))) = do
+   go Conf{hideVersion, verbose} (Right (tab, cs@(_ :<=: (n, src)))) = do
       let out = execState run (initMachine cs tab)
       when verbose $
         traverse_ putStrLn (pprint out rootNamespace)
