@@ -14,10 +14,8 @@ import Debug.Trace
 
 track = trace
 
-
 data Status = Crying | Waiting | Hoping | Abstract | ProgramVar
   deriving (Ord, Eq, Show)
-
 
 data Meta = forall n. Meta
   { mctxt :: Context n
@@ -34,6 +32,7 @@ instance Show Meta where
              , " , ", show mtype, " , ", show mdefn
              , " , ", show mstat
              , "}"]
+
 
 type Store = Map Name Meta
 
