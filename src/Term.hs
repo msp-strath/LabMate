@@ -407,7 +407,7 @@ class Mk t where
 instance (NATTY n) => Mk (Term Chk ^ n) where
   type Scope (Term Chk ^ n) = n
   type Uncurry (Term Chk ^ n) = ()
-  from = (\() -> nil, ($()))
+  from = (\() -> nil, ($ ()))
 
 instance (Mk t, NATTY (Scope t)) => Mk (String -> t) where
   type Scope (String -> t) = Scope t

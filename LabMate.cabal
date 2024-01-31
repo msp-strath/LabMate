@@ -90,13 +90,16 @@ test-suite labmate-tests
   hs-source-dirs:      test/
   main-is:             Test/Main.hs
   other-modules:       Test.CoreTT
-  build-depends:       base <5
+                     , Test.Golden
+  build-depends:       LabMate
+                     , base <5
                      , directory
                      , filepath
                      , tasty
-                     , tasty-silver
                      , tasty-hunit
-                     , LabMate
-  build-tool-depends:  LabMate:labmate
+                     , tasty-silver
+                     , tasty-autocollect
+  build-tool-depends:  tasty-autocollect:tasty-autocollect
+  ghc-options:         -F -pgmF=tasty-autocollect
   default-extensions:  OverloadedStrings
   default-language:    Haskell2010

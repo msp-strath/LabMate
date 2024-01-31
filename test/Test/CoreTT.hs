@@ -1,4 +1,8 @@
-module Test.CoreTT where
+{- AUTOCOLLECT.TEST -}
+
+module Test.CoreTT (
+  {- AUTOCOLLECT.TEST.export -}
+) where
 
 import qualified Data.Map as Map
 
@@ -12,19 +16,25 @@ import MagicStrings
 
 import Test.Tasty(TestTree)
 import Test.Tasty.HUnit
-{-
+
 mkTest :: (Eq a, Show a, HasCallStack) => (String, a, a) -> TestTree
 mkTest (name, val, exp) = testCase name $ val @?= exp
 
-coreTests :: [TestTree]
+{- coreTests :: [TestTree]
 coreTests = [ test0,  test1, test2, test3, test4, test5, test5', test6, test7
             , test8, test9, test10, test11, test12, test13, test14, test14'
             , test15, test16, test17, test18, test19, test20, test21, test22
             , test23, test24
-            ]
+            ] -}
 
 runTC tc = TT.runTC tc Map.empty
 
+test =
+  testCase "Addition" $ do
+    1 + 1 @?= (2 :: Int)
+    2 + 2 @?= (4 :: Int)
+
+{-
 test0 = mkTest
   ( "Eval Abel (prop): x + y"
   , let ty = mk SAbel SOne
