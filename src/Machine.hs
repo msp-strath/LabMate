@@ -82,9 +82,16 @@ instance PrettyPrint ([Frame], Problem) where
       let d = Name (root <>> [])
       ld <- localName d
       pure [ld ++ " |-" ] <> local (const d) (pprint (fs, p))
-    Fork (Left  frk) fs' p' -> (dent <$> pprint (fs, p)) <> pprint (fs', p')
-    Fork (Right frk) fs' p' -> (dent <$> pprint (fs', p')) <> pprint (fs, p)
+    Fork (Left frk) ->
+      (dent <$> pprint (fs, p)) <> pprint frk
+    Fork (Right frk) ->
+      (dent <$> pprint frk) <> pprint (fs, p)
     _ -> pprint f <> pprint (fs, p)
+
+instance PrettyPrint Fork where
+  pprint MkFork{..} = tweak fstatus <$> pprint (fframes, fprob) where
+    tweak Complete   = id
+    tweak Incomplete = ("???" :)
 
 instance PrettyPrint ElabTask where
   -- TODO: implement
@@ -152,7 +159,7 @@ data Frame where
   Locale :: LocaleType -> Frame
   ExcursionReturnMarker :: Frame
   RenameFrame :: String -> String -> Frame
-  FunctionLeft :: Name -> LHS -> Frame
+  -- FunctionLeft :: Name -> LHS -> Frame
   Fork :: (Either Fork Fork) -> Frame
   LocalNamespace :: NameSupply -> Frame
   Diagnostic :: ResponseLocation -> DiagnosticData -> Frame
@@ -170,7 +177,7 @@ data Fork = MkFork
   , fprob   :: Problem
   } deriving Show
 
-data LocaleType = ScriptLocale | FunctionLocale
+data LocaleType = ScriptLocale | FunctionLocale Name
   deriving (Show, Eq)
 
 data Mood' a
@@ -293,10 +300,11 @@ postRight fs = pull >>= \case
   Just (Fork (Left frk@MkFork{..})) ->
     push $ Fork (Left frk{ fstatus = foldMap getStatus fs <> fstatus
                          , fframes = fs ++ fframes})
-    where
-      getStatus (Fork frk) = either fstatus fstatus frk
-      getStatus _ = mempty
   Just fr -> shup fr >> postRight fs
+  where
+    getStatus (Fork frk) = either fstatus fstatus frk
+    getStatus _ = mempty
+
 
 switchFwrd :: ([Frame], Problem) -> Elab ([Frame], Problem)
 switchFwrd (fs', p') = do
@@ -318,7 +326,8 @@ prob = llup >>= \case
     prob
 
 pushProblems :: [Problem] -> Elab ()
-pushProblems ps = push (Fork (Left Solved) [] (Problems ps))
+pushProblems ps = push $ Fork
+  (Left MkFork{fstatus = Incomplete, fframes = [], fprob = Problems ps})
 
 newProb :: Problem -> Elab () -- TODO: consider checking if we are at
                               -- the problem
@@ -527,7 +536,7 @@ findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} =
     Just f -> case f of
       Locale ScriptLocale | b -> -- if we are in a function, script
         Nothing <$ push f        -- variables are out of scope
-      Locale FunctionLocale -> shup f >> go True -- we know we are in a function
+      Locale (FunctionLocale _) -> shup f >> go True -- we know we are in a function
       Declaration n u'@UserDecl{varTy = ty', currentName = old', seen = seen', newNames = news'} | old == old' -> do
         case ty of
           Just ty -> constrainEqualType ty ty'
@@ -684,9 +693,10 @@ run = prob >>= \case
       Nothing -> error "function should have been declared already"
       Just (fname, _) -> do
         traverse_ fundecl cs
-        traverse_ push [ Locale FunctionLocale
-                       , Fork (Left MkFork{fprob = LHS lhs, fframes = [], fstatus = Incomplete})]
-        pushProblems $ (Sourced . fmap Command <$> cs) ++ (Sourced . fmap FormalParam <$> args)
+        traverse_ push [ Locale (FunctionLocale fname)
+                       , Fork (Left MkFork{fprob = Sourced (LHS <$> lhs), fframes = [], fstatus = Incomplete})
+                       ]
+        pushProblems $ (Sourced . fmap FormalParam <$> args) ++ (Sourced . fmap Command <$> cs)
         newProb $ Done nil
         move winning
   Command (Respond ts) -> do
@@ -983,31 +993,33 @@ move mood = pull >>= \case
       -- forks
       move $ fmap (<> fstatus) mood
     Fork (Left MkFork{..}) -> case mood of
-      Winning winningEh ms' -> do
+      Winning stat ms' -> do
         (fframes, fprob) <- switchFwrd (fframes, fprob)
-        push $ LocalStore ms'
+        unless (Map.null ms') $
+          push $ LocalStore ms'
         push $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
         run
-      Worried -> do
+      _  -> do
         (fframes, fprob) <- switchFwrd (fframes, fprob)
         push $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
         run
-      Whacked -> do
+      {- Whacked -> do
         (fframes, fprob) <- switchFwrd (fframes, fprob)
         shup $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
-        move Whacked
-    {- FunctionLeft fname (lhs :<=: src) -> do
-      (fs, p) <- switchFwrd ([], LHS lhs)
-      traverse_ push [Fork (Right $ FunctionName fname) fs p, Source src]
-      run -}
+        move Whacked -}
     LocalNamespace ns -> do
       ns <- swapNameSupply ns
       shup $ LocalNamespace ns
-      move
+      move mood
+    LocalStore store -> case mood of
+      Winning stat store' -> move (Winning stat (store' <> store))
+      _ -> do
+        shup $ LocalStore store
+        move mood
     _ -> do
       fr <- normaliseFrame fr
       shup fr
-      move
+      move mood
 
 normaliseFrame :: Frame -> Elab Frame
 normaliseFrame = \case
@@ -1050,7 +1062,7 @@ diagnosticRun = llup >>= \case
       traverse_ push [Source (n, Hide msg), fr]
       diagnosticRun
     _ -> push fr >> diagnosticRun
-  Nothing -> diagnosticMove
+  Nothing -> diagnosticMove mempty
   where
     msg :: Int -> DiagnosticData -> Elab [Tok]
     msg dent = \case
@@ -1091,19 +1103,19 @@ unelabType ty | Just ct <- tagEh ty = case ct of
   _ -> pure [sym $ show ty]
 unelabType ty = pure [sym $ show ty]
 
-diagnosticMove :: Elab ()
-diagnosticMove = pull >>= \case
+diagnosticMove :: ForkCompleteStatus -> Elab ()
+diagnosticMove stat = pull >>= \case
   Nothing -> pure ()
   Just fr -> case fr of
-    Fork (Right frk) -> do
-      (fs, p) <- switchFwrd (fs', p')
-      shup $ Fork (Left frk) fs p
-      diagnosticMove
-    Fork (Left frk)  -> do
-      (fs, p) <- switchFwrd (fs', p')
-      push $ Fork (Right frk) fs p
+    Fork (Right MkFork{..}) -> do
+      (fframes, fprob) <- switchFwrd (fframes, fprob)
+      shup $ Fork (Left MkFork{fstatus = stat ,..})
+      diagnosticMove $ stat <> fstatus
+    Fork (Left MkFork{..})  -> do
+      (fframes, fprob) <- switchFwrd (fframes, fprob)
+      push $ Fork (Right MkFork{fstatus = stat, ..})
       diagnosticRun
-    _ -> shup fr >> diagnosticMove
+    _ -> shup fr >> diagnosticMove stat
 
 generateInputReader :: String -- ^
   -> [String] -- ^
