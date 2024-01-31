@@ -167,8 +167,7 @@ data DeclarationType a
   -- requested name and how to reply (we hope of length at most 1)
   , newNames :: [(String, ResponseLocation)]
   , capturable :: Bool     -- is it capturable?
-  }
-  deriving (Functor, Show, Foldable, Traversable)
+  } deriving (Functor, Show, Foldable, Traversable)
 
 data ElabTask where
   TensorTask :: TensorType' -> ElabTask

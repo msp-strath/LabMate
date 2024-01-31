@@ -95,15 +95,13 @@ renamePass ms = inbound ms
     renamer B0 n b = error "ScriptLocale disappeared in renamer!"
     renamer (fz :< Locale FunctionLocale) n b = renamer fz n True
     renamer (fz :< Locale ScriptLocale) n True = error "Declaration disappeared in renamer!"
-    renamer (fz :< Declaration n' d) n b = do
+    renamer (fz :< Declaration n' d@UserDecl{capturable}) n b = do
       s <- newName d
-      if n == n' then case d of
-        UserDecl{ capturable } -> do
+      if n == n' then do
           when capturable $ do
             cap <- captured fz b s
             when cap $ tellGripes Captured d
           pure s
-        _ -> error "Impossible: renaming LabMate var"
       else do
         s <- renamer fz n b
         s' <- newName d
@@ -146,9 +144,7 @@ renamePass ms = inbound ms
     respond [] = []
 
     tellGripes :: RenameGripe -> DeclarationType a -> Writer RenameProblems ()
-    tellGripes grp = \case
-       UserDecl{ newNames } -> traverse_ (\(_, src) -> tell $ Set.singleton (src, grp)) newNames
-       _ -> pure ()
+    tellGripes grp UserDecl{ newNames } = traverse_ (\(_, src) -> tell $ Set.singleton (src, grp)) newNames
 
 -- Plan:
 -- 1. Try to do renaming, computing Either Gripe MachineState, turning directives into responses
