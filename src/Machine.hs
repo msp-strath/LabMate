@@ -160,7 +160,10 @@ data Frame where
   ExcursionReturnMarker :: Frame
   RenameFrame :: String -> String -> Frame
   -- FunctionLeft :: Name -> LHS -> Frame
+  -- conjunctive interpretation
   Fork :: (Either Fork Fork) -> Frame
+  -- disjunctive interpretation
+  Catch :: Fork -> Frame
   LocalNamespace :: NameSupply -> Frame
   Diagnostic :: ResponseLocation -> DiagnosticData -> Frame
   Currently
@@ -243,10 +246,25 @@ data Gripe =
   RenameFail Nonce String
   deriving Show
 
+modifyNearestStore :: (Store -> Store) -> Elab ()
+modifyNearestStore f = excursion go where
+  go = pull >>= \case
+    Nothing -> modify (\st@MS{..} -> st { metaStore = f metaStore })
+    Just (LocalStore st) -> push $ LocalStore (f st)
+    Just fr -> shup fr >> go
+
+-- TODO: cache the accumulated stores
 elabTC :: Context n -> TC n x -> Elab (Either String x)
 elabTC ctx tc = do
   store <- gets metaStore
-  pure $ runTC tc store ctx
+  fz :<+>: fs <- gets position
+  let accStores = ala' Dual foldMap frameToStore fz
+  pure $ runTC tc (accStores <> store) ctx
+  where
+    frameToStore :: Frame -> Store
+    frameToStore (LocalStore st) = debug ("Local store: " ++ intercalate ", " (show <$> Map.keys st)) st
+    frameToStore _ = mempty
+
 
 fresh :: String -> Elab Name
 fresh s = do
@@ -562,17 +580,16 @@ ensureDeclaration s = findDeclaration s >>= \case
   Just x  -> pure x
 
 onNearestSource :: ([Tok] -> [Tok]) -> Elab ()
-onNearestSource f = excursion go
-  where
-    go = pull >>= \case
-      Nothing -> error "Impossible: no enclosing Source frame"
-      Just (Source (n, Hide ts)) -> push $ Source (n, Hide $ f ts)
-      Just f -> shup f >> go
+onNearestSource f = excursion go where
+  go = pull >>= \case
+    Nothing -> error "Impossible: no enclosing Source frame"
+    Just (Source (n, Hide ts)) -> push $ Source (n, Hide $ f ts)
+    Just f -> shup f >> go
 
 metaDecl :: Status -> String -> Context n -> Type ^ n -> Elab Name
 metaDecl s x ctx ty = do
    x <- fresh x
-   x <$ modify (\st@MS{..} -> st { metaStore = Map.insert x (Meta ctx ty Nothing s) metaStore })
+   x <$ modifyNearestStore (Map.insert x (Meta ctx ty Nothing s))
 
 metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
 metaDeclTerm s x ctx ty = nattily (vlen ctx) (wrapMeta <$> metaDecl s x ctx ty)
@@ -583,7 +600,7 @@ metaDefn x def = getMeta x >>= \case
     | Just Refl <- scopeOf def `nattyEqEh` vlen mctxt
     , mstat `elem` [Waiting, Hoping] -> do
       tick
-      modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just def) mstat) metaStore}
+      modifyNearestStore (Map.insert x (Meta mctxt mtype (Just def) mstat))
   _ -> error "metaDefn: check the status or the scope"
 
 invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
@@ -990,7 +1007,8 @@ move mood = pull >>= \case
       -- branch, associated with the mood
       shup $ Fork (Left MkFork{fstatus = moodStatus mood, ..})
       -- as we are moving out, the completeness status covers both
-      -- forks
+      -- forks; any store we are carrying is useful even if the status
+      -- is `Incomplete`
       move $ fmap (<> fstatus) mood
     Fork (Left MkFork{..}) -> case mood of
       Winning stat ms' -> do
@@ -1007,6 +1025,21 @@ move mood = pull >>= \case
         (fframes, fprob) <- switchFwrd (fframes, fprob)
         shup $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
         move Whacked -}
+    Catch MkFork{..} -> case mood of
+      -- decision to commit
+      Winning Complete ms -> move mood
+      -- don't commit yet, keep local store local
+      Winning Incomplete ms -> do
+        shup $ LocalStore ms
+        shup fr
+        move Worried
+      -- right forks are our only hope now
+      Whacked -> do
+        switchFwrd (fframes, fprob)
+        run
+      Worried -> do
+        shup fr
+        move mood
     LocalNamespace ns -> do
       ns <- swapNameSupply ns
       shup $ LocalNamespace ns

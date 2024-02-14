@@ -36,6 +36,8 @@ instance Show Meta where
 
 type Store = Map Name Meta
 
+-- TODO: issue lookup requests out rather than asking for store in;
+-- use freer monads
 newtype TC n x =
  TC { runTC :: Store -> Context n -> Either String x }
 
