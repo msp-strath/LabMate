@@ -174,6 +174,26 @@ data Fork = MkFork
 data LocaleType = ScriptLocale | FunctionLocale Name
   deriving (Show, Eq)
 
+{- TODO:
+Unify `Mood` and `ForkCompleteStatus` as:
+
+data Mood' a = Whacked | Worried a | Winning a
+
+type Mood = Mood' Store
+type ForkCompleteStatus = Mood' ()
+
+-- linear in the store, paying attention to the way things can get worse
+andMood :: Mood' Store -> Mood' () -> (Mood' Store, Maybe Store)
+andMood (Worried st) Whacked = (Whacked, Just st) andMood (Winning st)
+Whacked = (Whacked, Just st) andMood (Winning st) (Worried ()) =
+(Worried st, Nothing) andMood m _ = (m, Nothing)
+
+When we are moving through a `Fork`, `andMood` should tell us how the
+status of the other conjuncts affects our mood and whether we should
+contain a local store.
+-}
+
+
 data ForkCompleteStatus = Incomplete | Complete
   deriving (Show, Eq, Ord)
 
