@@ -32,6 +32,7 @@ import Debug.Trace
 import Control.Monad.Reader
 
 debug = const id --trace
+debugCatch = trace
 
 type Elab = State MachineState
 
@@ -143,16 +144,6 @@ data DiagnosticData
       Expr {- e, t = elab e -}
   deriving Show
 
-data ForkCompleteStatus = Incomplete | Complete
-  deriving (Show, Eq, Ord)
-
-instance Monoid ForkCompleteStatus where
-  mempty = Complete
-  mappend = min
-
-instance Semigroup ForkCompleteStatus where
-  (<>) = mappend
-
 data Frame where
   Source :: Source -> Frame
   Declaration :: Name -> DeclarationType TYPE -> Frame
@@ -183,11 +174,21 @@ data Fork = MkFork
 data LocaleType = ScriptLocale | FunctionLocale Name
   deriving (Show, Eq)
 
+data ForkCompleteStatus = Incomplete | Complete
+  deriving (Show, Eq, Ord)
+
+instance Monoid ForkCompleteStatus where
+  mempty = Complete
+  mappend = min
+
+instance Semigroup ForkCompleteStatus where
+  (<>) = mappend
+
 data Mood' a
   = Winning a Store
   | Worried
   | Whacked
-  deriving (Functor, Foldable, Traversable)
+  deriving (Functor, Foldable, Traversable, Show)
 
 type Mood = Mood' ForkCompleteStatus
 
@@ -232,6 +233,8 @@ data Problem where
   InputFormatAction :: String -> [String] -> ResponseLocation -> Problem
   FunCalled :: Expr' -> Problem
   Elab :: Name -> ElabTask -> Problem
+  Prefer :: Problem -> Problem -> Problem
+  Grump :: Problem
   Sourced :: WithSource Problem -> Problem
   Problems :: [Problem] -> Problem
   deriving (Show)
@@ -371,10 +374,15 @@ localNamespace s = do
 
 getMeta :: Name -> Elab Meta
 getMeta x = do
+  fz :<+>: _ <- gets position
   st <- gets metaStore
-  case Map.lookup x st of
+  let stores = st : foldMap collectStores fz
+  case ala' Last foldMap (Map.lookup x) stores of
     Just m -> pure m
     Nothing -> error "getMeta: meta does not exist"
+  where
+    collectStores (LocalStore st) = [st]
+    collectStores _ = []
 
 cry :: Name -> Elab ()
 cry x = do
@@ -761,6 +769,13 @@ run = prob >>= \case
   Elab name etask -> do
     meta <- getMeta name
     runElabTask name meta etask
+  Prefer p1 p2 -> debugCatch "Prefer" $ do
+    push . Catch $ MkFork Incomplete [] p2
+    push $ LocalStore mempty
+    newProb p1
+    run
+  Grump -> debugCatch "Grump grump" $ do
+    move Whacked
   Sourced (p :<=: src) -> do
     localNamespace . take 10 . filter isAlpha $ show p
     push $ Source src
@@ -893,7 +908,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           , lhs = genTy
           , rhs = atom SOne
           }
-        newProb . Elab sol $ Await cs (ixKI mtype (lit k))
+        -- TODO: delete all traces of the bad version (added for
+        -- debugging purposes)
+        let badP = Problems [Elab sol $ Await cs (ixKI mtype (lit $ k + 1)), Grump]
+        newProb {- . Prefer badP -} . Elab sol $ Await cs (ixKI mtype (lit k))
         run
       Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
         | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
@@ -1017,27 +1035,32 @@ move mood = pull >>= \case
           push $ LocalStore ms'
         push $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
         run
-      _  -> do
-        (fframes, fprob) <- switchFwrd (fframes, fprob)
-        push $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
-        run
+      -- essentially: abandon the right problem if the left problem is
+      -- `Whacked`. But is that too aggressive?
+      -- Yes, because we give up processing way too early and won't
+      -- process the remaining source in the file.
       {- Whacked -> do
         (fframes, fprob) <- switchFwrd (fframes, fprob)
         shup $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
         move Whacked -}
+      _  -> debugCatch ("Left fork with mood = " ++ show mood) $ do
+        (fframes, fprob) <- switchFwrd (fframes, fprob)
+        push $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
+        run
     Catch MkFork{..} -> case mood of
       -- decision to commit
-      Winning Complete ms -> move mood
+      Winning Complete ms ->
+        debugCatch ("Winning Complete with " ++ show ms) $ move mood
       -- don't commit yet, keep local store local
-      Winning Incomplete ms -> do
+      Winning Incomplete ms -> debugCatch ("Winning Incomplete with " ++ show ms) $ do
         shup $ LocalStore ms
         shup fr
         move Worried
       -- right forks are our only hope now
-      Whacked -> do
+      Whacked -> debugCatch "Whacked" $ do
         switchFwrd (fframes, fprob)
         run
-      Worried -> do
+      Worried -> debugCatch "Worried" $ do
         shup fr
         move mood
     LocalNamespace ns -> do
