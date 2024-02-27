@@ -6,282 +6,222 @@ module Test.CoreTT (
 
 import qualified Data.Map as Map
 
-import CoreTT (testShowTC, checkEh, checkEval, typeEh, evalSynth, (==>))
+import CoreTT (TC, emptyStore, runTC, checkEh, checkEval, typeEh, evalSynth)
 import qualified CoreTT as TT
-import Term hiding (testShow)
-import Term.Natty
-import Term.Vec
+
+import Term
 import NormalForm
 import MagicStrings
 
-import Test.Tasty(TestTree)
+import Test.Tasty (TestTree)
 import Test.Tasty.HUnit
 
-mkTest :: (Eq a, Show a, HasCallStack) => (String, a, a) -> TestTree
-mkTest (name, val, exp) = testCase name $ val @?= exp
+infixr 5 ==>
+(==>) :: Type ^ S Z -> Type ^ S Z -> Type ^ S Z
+src ==> (tgt :^ th) = mk SPi src (K tgt :^ th)
 
-{- coreTests :: [TestTree]
-coreTests = [ test0,  test1, test2, test3, test4, test5, test5', test6, test7
-            , test8, test9, test10, test11, test12, test13, test14, test14'
-            , test15, test16, test17, test18, test19, test20, test21, test22
-            , test23, test24
-            ] -}
+testShowTC :: TC n (Term 'Chk ^ n)
+           -> Context n
+           -> String
+testShowTC tc ctx =
+  case runTC tc emptyStore ctx of
+    Left err -> err
+    Right tm -> tmShow False tm (rootNamespace, fst <$> ctx)
 
-runTC tc = TT.runTC tc Map.empty
 
-test =
-  testCase "Addition" $ do
-    1 + 1 @?= (2 :: Int)
-    2 + 2 @?= (4 :: Int)
+abel :: NATTY n => Type ^ n
+abel = mk SAbel SOne
 
-{-
-test0 = mkTest
-  ( "Eval Abel (prop): x + y"
-  , let ty = mk SAbel SOne
-        tm = evar 0 + evar 1
-    in TT.testShowTC (checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
-  , "['plus y x]"
-  )
+list :: NATTY n => Type ^ n
+list = mk SList SOne
 
-test1 = mkTest
-  ( "Eval Abel (prop): y + x"
-  , let ty = mk SAbel SOne
-        tm = evar 0 + evar 1
-    in testShowTC (checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
-  , "['plus y x]"
-  )
+toA :: NATTY n => String -> Term Chk ^ n
+toA s = mk Sone (atom s)
 
-test2 = mkTest
-  ( "Eval Abel (prop): x + x"
-  , let ty = mk SAbel SOne
-        tm = evar 0 + evar 0
-    in testShowTC (checkEval ty tm) (VN :# ("x", ty))
-  , "[2 x]"
-  )
+test = testCase "Eval Abel (prop): x + y" $ do
+  let tm = evar 0 + evar 1
+  let ctx = VN :# ("y", abel) :# ("x", abel)
+  testShowTC (checkEval abel tm) ctx
+    @?= "['plus y x]"
 
-test3 = mkTest
-  ( "Eval Abel (prop): x + 3 + x"
-  , let ty = mk SAbel SOne
-        tm = (evar 0 + 3) + evar 0
-    in testShowTC (checkEval ty tm) (VN :# ("x", ty))
-  , "['plus 3 [2 x]]"
-  )
+test = testCase "Eval Abel (prop): y + x" $ do
+  let tm = evar 1 + evar 0
+  let ctx = VN :# ("y", abel) :# ("x", abel)
+  testShowTC (checkEval abel tm) ctx
+    @?= "['plus y x]"
 
-test4 = mkTest
-  ( "Eval Abel (prop): (int 5) :: Abel One"
-  , let ty = mk SAbel SOne
-        tm = mk Sone $ lit (5 :: Int)
-    in testShowTC (checkEval ty tm) VN
-  , "1"
-  )
+test = testCase "Eval Abel (prop): x + x" $ do
+  let tm = evar 0 + evar 0
+  let ctx = VN :# ("x", abel)
+  testShowTC (checkEval abel tm) ctx
+    @?= "[2 x]"
 
-test5 = mkTest
-  ( "Eval List (prop): x + y"
-  , let ty = mk SList SOne
-        tm = evar 0 + evar 1
-    in testShowTC (checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
-  , "['plus y x]"
-  )
+test = testCase "Eval Abel (prop): x + 3 + x" $ do
+  let tm = evar 0 + 3 + evar 0
+  let ctx = VN :# ("x", abel)
+  testShowTC (checkEval abel tm) ctx
+    @?= "['plus 3 [2 x]]"
 
-test5' = mkTest
-  ( "Eval List (non-prop): x + y"
-  , let ty = mk SList SType
-        tm = evar 0 + evar 1
-    in testShowTC (TT.checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
-  , "['plus x y]"
-  )
+test = testCase "Eval Abel (prop): (int 5) :: Abel One" $ do
+  let tm = mk Sone $ lit (5 :: Int)
+  testShowTC (checkEval abel tm) emptyContext
+    @?= "1"
 
-test6 = mkTest
-  ( "Eval List (prop): y + x"
-  , let ty = mk SList SOne
-        tm = evar 1 + evar 0
-    in testShowTC (checkEval ty tm) (VN :# ("y", ty) :# ("x", ty))
-  , "['plus y x]"
-  )
+test = testCase "Eval List (prop): x + y" $ do
+  let tm = evar 0 + evar 1
+  let ctx = VN :# ("y", list) :# ("x", list)
+  testShowTC (checkEval list tm) ctx
+    @?= "['plus y x]"
 
-test7 = mkTest
-  ( "Eval List (prop): x + 3 + x"
-  , let ty = mk SList SOne
-        tm = (evar 0 + 3) + evar 0
-    in testShowTC (TT.checkEval ty tm) (VN :# ("x", ty))
-  , "['plus 3 [2 x]]"
-  )
+test = testCase "Eval List (non-prop): x + y" $ do
+  let ty = mk SList SType
+  let tm = evar 0 + evar 1
+  let ctx =  VN :# ("y", ty) :# ("x", ty)
+  testShowTC (TT.checkEval ty tm) ctx
+    @?= "['plus x y]"
 
-test8 = mkTest
-  ( "Chk List (prop): x + 3 + x"
-  , let ty = mk SList SOne
-        tm = (evar 0 + 3) + evar 0
-    in runTC (TT.checkEh ty tm) (natty, VN :# ty)
-  , Right ()
-  )
+test = testCase "Eval List (prop): y + x" $ do
+  let tm = evar 1 + evar 0
+  let ctx = VN :# ("y", list) :# ("x", list)
+  testShowTC (checkEval list tm) ctx
+    @?= "['plus y x]"
 
-test9 = mkTest
-  ( "Chk List (prop): x - 3 + x"
-  , let ty = mk SList SOne
-        tm = evar 0 + (-3) + evar 0
-    in runTC (checkEh ty tm) (natty, VN :# ty)
-  , Left "checkCanEh: negative length list"
-  )
+test = testCase "Eval List (prop): x + 3 + x" $ do
+  let tm = evar 0 + 3 + evar 0
+  let ctx = VN :# ("x", list)
+  testShowTC (checkEval list tm) ctx
+    @?= "['plus 3 [2 x]]"
 
-test10 = mkTest
-  ( "Chk Enum('a, 'b, 'c): 'a"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-        tm = atom "a"
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Right ()
-  )
+test = testCase "Chk List (prop): x + 3 + x" $ do
+  let tm = (evar 0 + 3) + evar 0
+  let ctx = VN :# ("x", list)
+  runTC (checkEh list tm) emptyStore ctx
+    @?= Right ()
 
-test11 = mkTest
-  ( "Chk Enum('a, 'b, 'c): 'd"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-        tm = atom "d"
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Left "checkEnumEh: position of atom 'd not determined."
-  )
+test = testCase "Chk List (prop): x - 3 + x" $ do
+  let tm = evar 0 + (-3) + evar 0
+  let ctx = VN :# ("x", list)
+  runTC (checkEh list tm) emptyStore ctx
+    @?= Left "checkCanEh: negative length list"
 
-test12 = mkTest
-  ( "Chk Enum('a, 'b, 'c): 2"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-        tm = lit (2 :: Int)
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Right ()
-  )
+test = testCase "Chk 'a :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = atom "a"
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
 
-test13 = mkTest
-  ( "Chk Enum('a, 'b, 'c): 5"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-        tm = lit (5 :: Int)
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Left "checkEnumEh: tag at index not determined."
-  )
+test = testCase "Chk 'd :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = atom "d"
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Left "checkEnumEh: position of atom 'd not determined."
 
-test14 = mkTest
-  ( "Chk Enum('a, 'b, 'c): 'b + 1"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-        tm = atom "b" + 1
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Right ()
-  )
+test = testCase "Chk 2 :: Enum('a, 'b, 'c):" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = lit (2 :: Int)
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
 
-test14' = mkTest
-  ( "Eval Enum('a, 'b, 'c): 'b + 1"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-        tm = atom "b" + 1
-        f s = mk Sone (atom s)
-   in testShowTC (checkEval ty tm) VN
-  , "2"
-  )
+test = testCase "Chk 5 :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = lit (5 :: Int)
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Left "checkEnumEh: tag at index not determined."
 
-test15 = mkTest
-  ( "Chk Enum('a, 'b, 'c): 'b + 2"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ Z
-        tm = atom "b" + 2
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Left "checkEnumEh: tag at index not determined."
-  )
+test = testCase "Chk 'b + 1 :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = atom "b" + 1
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
 
-test16 = mkTest
-  ( "Chk Enum('a, 'b, 'c): (x :: Atom)"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ S Z
-        tm = evar 0
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN :# atom SAtom)
- , Left "TC monad"
- )
+test = testCase "Eval 'b + 1 :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = atom "b" + 1
+  testShowTC (checkEval ty tm) emptyContext
+    @?= "2"
 
-test17 = mkTest
-  ( "Chk Enum('a, 'b, 'c): x :: Enum('a, 'b, 'c)"
-  , let ty = mk SEnum atoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ S Z
-        tm = evar 0
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN :# ty)
-  , Right ()
-  )
+test = testCase "Chk 'b + 2 :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = atom "b" + 2
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Left "checkEnumEh: tag at index not determined."
 
-test18 = mkTest
-  ( "Chk Enum('a, 'b, 'c): x :: Enum('a, 'b)"
-  , let ty = mk SEnum atoms
-        subty = mk SEnum subatoms
-        atoms = (f "a" + f "b" + f "c") :: Term Chk ^ S Z
-        subatoms = (f "a" + f "b") :: Term Chk ^ S Z
-        tm = evar 0
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, VN :# subty)
-  , Right ()
-  )
+test = testCase "Chk (x :: atom) :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = evar 0
+  let ctx = VN :# ("x", atom SAtom)
+  runTC (checkEh ty tm) emptyStore ctx
+    @?= Left "TC monad"
 
-test19 = mkTest
-  ( "Chk Enum('a, 'b, 'c): y :: Enum(z + ('a, 'b, 'c))"
-  , let zty = mk SList SAtom
-        yty = mk SEnum (evar 2)
-        xty = mk SEnum atoms
-        ty  = mk SEnum (evar 2 + atoms)
-        atoms = f "a" + f "b" + f "c"
-        tm = evar 1
-        ctx = VN :# zty :# yty :# xty
-        f s = mk Sone (atom s)
-    in runTC (checkEh ty tm) (natty, ctx)
-  , Right ()
-  )
+test = testCase "Chk (x :: Enum('a, 'b, 'c)) :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let ty = mk SEnum atoms
+  let tm = evar 0
+  let ctx = VN :# ("x", ty)
+  runTC (checkEh ty tm) emptyStore ctx
+    @?= Right ()
 
-test20 = mkTest
-  ( "Ty Pi: lam (X : Type). lam (x : X) . x"
-  , let ty = mk SPi SType (lam "X" body)
-        body = mk SPi (evar 0) (lam "x" (evar 1))
-    in runTC (typeEh ty) (natty, VN)
-  , Right ()
-  )
+test = testCase  "Chk (x :: Enum('a, 'b)) :: Enum('a, 'b, 'c)" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let subatoms = toA "a" + toA "b"
+  let ty = mk SEnum atoms
+  let subty = mk SEnum subatoms
+  let tm = evar 0
+  let ctx = VN :# ("x", subty)
+  runTC (checkEh ty tm) emptyStore ctx
+    @?= Right ()
 
-test21 = mkTest
-  ( "Chk Pi: lam X x. x : (X : Type) -> (x : X) -> x"
-  , let ty = mk SPi SType (lam "X" body)
-        body = mk SPi (evar 0) (lam "x" (evar 1))
-        tm = lam "X" $ lam "x" (evar 0)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Right ()
-  )
+test = testCase "Chk (y :: Enum(z)) :: Enum(z + ('a, 'b', c'))" $ do
+  let atoms = toA "a" + toA "b" + toA "c"
+  let zty = mk SList SAtom
+  let yty = mk SEnum (evar 2)
+  let xty = mk SEnum atoms
+  let ty  = mk SEnum (evar 2 + atoms)
+  let tm = evar 1
+  let ctx = VN :# ("z", zty) :# ("y", yty) :# ("x", xty)
+  runTC (checkEh ty tm) emptyStore ctx
+    @?= Right ()
 
-test22 = mkTest
-  ( "Chk Pi: lam X f x. f (f x)"
-  , let ty = mk SPi SType (lam "X" body)
-        body = (evar 0 ==> evar 0) ==> (evar 0 ==> evar 0)
-        tm = lam "X" $ lam "f" $ lam "x" $
-              E $^ D $^ var 1 <&> (E $^ D $^ var 1 <&> evar 0)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Right ()
-  )
+test = testCase "Type Pi: \\(X : Type) (x : X) . x" $ do
+  let body = mk SPi (evar 0) (lam "x" (evar 1))
+  let ty = mk SPi SType (lam "X" body)
+  runTC (typeEh ty) emptyStore emptyContext
+    @?= Right ()
 
-test23 = mkTest
-  ( "Chk Pi: lam X f x : f (x x)"
-  , let ty = mk SPi SType (lam "X" body)
-        body = (evar 0 ==> evar 0) ==> (evar 0 ==> evar 0)
-        tm = lam "X" $ lam "f" $ lam "x" $
-              E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
-    in runTC (checkEh ty tm) (natty, VN)
-  , Left "synthEh: no"
-  )
+test = testCase "Chk Pi: \\X x. x :: (X : Type) -> (x : X) -> X" $ do
+  let body = mk SPi (evar 0) (lam "x" (evar 1))
+  let ty = mk SPi SType (lam "X" body)
+  let tm = lam "X" $ lam "x" (evar 0)
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
 
-test24 = mkTest
-  ( "EvalSyn Sig: (One, x)"
-  , let ty = mk SSig SType (lam "X" (evar 0))
-        tm = D $^ (R $^ (T $^ atom SOne <&> evar 0) <&> ty) <&> atom Ssnd
-        ctx = VN :# ("x", atom SOne)
-    in  testShowTC (fst <$> evalSynth tm) ctx
-  , "[]"
-  )
--}
+test = testCase  "Chk Pi: \\X f x. f (f x) :: (X : Type) -> (f : X -> X) -> X -> X" $ do
+  let body = (evar 0 ==> evar 0) ==> evar 0 ==> evar 0
+  let ty = mk SPi SType (lam "X" body)
+  let tm = lam "X" $ lam "f" $ lam "x" $
+             E $^ D $^ var 1 <&> (E $^ D $^ var 1 <&> evar 0)
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
+
+test = testCase "Chk Pi: \\X f x : f (x x) :: (X : Type) -> (f : X -> X) -> X -> X" $ do
+  let body = (evar 0 ==> evar 0) ==> evar 0 ==> evar 0
+  let ty = mk SPi SType (lam "X" body)
+  let tm = lam "X" $ lam "f" $ lam "x" $
+             E $^ D $^ var 1 <&> (E $^ D $^ var 0 <&> evar 0)
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Left "synthEh: no"
+
+test = testCase "EvalSyn Sig: (One, x) :: (Sigma (X:Type), X)" $ do
+  let ty = mk SSig SType (lam "X" (evar 0))
+  let tm = D $^ (R $^ (T $^ atom SOne <&> evar 0) <&> ty) <&> atom Ssnd
+  let ctx = VN :# ("x", atom SOne)
+  testShowTC (fst <$> evalSynth tm) ctx
+    @?= "[]"

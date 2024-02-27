@@ -18,7 +18,6 @@ track = trace
 data Status = Crying | Waiting | Hoping | Abstract | ProgramVar
   deriving (Ord, Eq, Show)
 
-
 data Meta = forall n. Meta
   { mctxt :: Context n
   , mtype :: Type ^ n
@@ -36,6 +35,9 @@ instance Show Meta where
              , "}"]
 
 type Store = Map Name Meta
+
+emptyStore :: Store
+emptyStore = Map.empty
 
 newtype TC n x =
  TC { runTC :: Store -> Context n -> Either String x }
@@ -638,17 +640,6 @@ etaExpand tm gotTy wantTy
   | otherwise = pure tm
 
 ------------------ testing -----------------------
-
-(==>) :: Type ^ S Z -> Type ^ S Z -> Type ^ S Z
-src ==> (tgt :^ th) = mk SPi src (K tgt :^ th)
-
-testShowTC :: TC n (Term 'Chk ^ n)
-           -> Context n
-           -> String
-testShowTC tc ctx =
-  case runTC tc Map.empty ctx of
-    Left err -> err
-    Right tm -> tmShow False tm (rootNamespace, fst <$> ctx)
 
 test1 = let ty = atom SChar
             ctx = emptyContext

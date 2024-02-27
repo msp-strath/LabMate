@@ -70,8 +70,6 @@ library
                       CoreTT,
                       NormalForm,
                       MissingLibrary
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
     hs-source-dirs:   src
     default-language: Haskell2010
 
@@ -83,23 +81,34 @@ executable labmate
     autogen-modules:  Paths_LabMate
     default-language: Haskell2010
 
-
-test-suite labmate-tests
+test-suite coreTT
   import:              haskell
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test/
-  main-is:             Test/Main.hs
+  main-is:             Test/RunCoreTT.hs
   other-modules:       Test.CoreTT
-                     , Test.Golden
+  build-depends:       LabMate
+                     , base <5
+                     , tasty
+                     , tasty-hunit
+                     , tasty-autocollect
+  build-tool-depends:  tasty-autocollect:tasty-autocollect
+                     , LabMate:labmate
+  ghc-options:         -F -pgmF=tasty-autocollect
+  default-extensions:  OverloadedStrings
+  default-language:    Haskell2010
+
+test-suite examples
+  import:              haskell
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test/
+  main-is:             Test/RunExamples.hs
   build-depends:       LabMate
                      , base <5
                      , directory
                      , filepath
                      , tasty
-                     , tasty-hunit
                      , tasty-silver
-                     , tasty-autocollect
-  build-tool-depends:  tasty-autocollect:tasty-autocollect
-  ghc-options:         -F -pgmF=tasty-autocollect
+  build-tool-depends:  LabMate:labmate
   default-extensions:  OverloadedStrings
   default-language:    Haskell2010
