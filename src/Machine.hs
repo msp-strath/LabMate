@@ -32,7 +32,7 @@ import Debug.Trace
 import Control.Monad.Reader
 
 debug = const id --trace
-debugCatch = trace
+debugCatch = const id --trace
 
 type Elab = State MachineState
 
@@ -91,8 +91,9 @@ instance PrettyPrint ([Frame], Problem) where
 
 instance PrettyPrint Fork where
   pprint MkFork{..} = tweak fstatus <$> pprint (fframes, fprob) where
-    tweak Complete   = id
-    tweak Incomplete = ("???" :)
+    tweak (Winning True ()) = id
+    tweak (Winning False ()) = ("???" :)
+    tweak Whacked = ("%%%" :)
 
 instance PrettyPrint ElabTask where
   -- TODO: implement
@@ -174,50 +175,39 @@ data Fork = MkFork
 data LocaleType = ScriptLocale | FunctionLocale Name
   deriving (Show, Eq)
 
-{- TODO:
-Unify `Mood` and `ForkCompleteStatus` as:
+--Unify `Mood` and `ForkCompleteStatus` as:
 
-data Mood' a = Whacked | Worried a | Winning a
+data Mood' a
+  = Whacked
+  | Winning Bool {- have we completely won yet -} a
+  deriving (Functor, Foldable, Traversable, Show, Ord, Eq)
 
 type Mood = Mood' Store
 type ForkCompleteStatus = Mood' ()
 
--- linear in the store, paying attention to the way things can get worse
-andMood :: Mood' Store -> Mood' () -> (Mood' Store, Maybe Store)
-andMood (Worried st) Whacked = (Whacked, Just st) andMood (Winning st)
-Whacked = (Whacked, Just st) andMood (Winning st) (Worried ()) =
-(Worried st, Nothing) andMood m _ = (m, Nothing)
-
-When we are moving through a `Fork`, `andMood` should tell us how the
-status of the other conjuncts affects our mood and whether we should
-contain a local store.
--}
-
-
-data ForkCompleteStatus = Incomplete | Complete
-  deriving (Show, Eq, Ord)
-
-instance Monoid ForkCompleteStatus where
-  mempty = Complete
-  mappend = min
-
 instance Semigroup ForkCompleteStatus where
   (<>) = mappend
 
-data Mood' a
-  = Winning a Store
-  | Worried
-  | Whacked
-  deriving (Functor, Foldable, Traversable, Show)
+instance Monoid ForkCompleteStatus where
+  mempty = winning
+  mappend = min
 
-type Mood = Mood' ForkCompleteStatus
+-- linear in the store, paying attention to the way things can get worse
+andMood :: Mood' Store -> Mood' () -> (Mood' Store, Maybe Store)
+andMood (Winning _ st) Whacked = (Whacked, Just st)
+andMood (Winning True st) (Winning False ()) = (Winning False st, Nothing)
+andMood m _ = (m, Nothing)
 
-moodStatus :: Mood -> ForkCompleteStatus
-moodStatus (Winning status _) = status
-moodStatus _ = Incomplete
+-- When we are moving through a `Fork`, `andMood` should tell us how
+-- the status of the other conjuncts affects our mood and whether we
+-- should contain a local store.
 
-winning :: Mood
-winning = Winning mempty mempty
+winning :: Monoid a => Mood' a
+winning = Winning True mempty
+
+worried :: Monoid a => Mood' a
+worried = Winning False mempty
+
 
 data DeclarationType a
   = UserDecl
@@ -368,7 +358,7 @@ prob = llup >>= \case
 
 pushProblems :: [Problem] -> Elab ()
 pushProblems ps = push $ Fork
-  (Left MkFork{fstatus = Incomplete, fframes = [], fprob = Problems ps})
+  (Left MkFork{fstatus = worried, fframes = [], fprob = Problems ps})
 
 newProb :: Problem -> Elab () -- TODO: consider checking if we are at
                               -- the problem
@@ -739,7 +729,7 @@ run = prob >>= \case
       Just (fname, _) -> do
         traverse_ fundecl cs
         traverse_ push [ Locale (FunctionLocale fname)
-                       , Fork (Left MkFork{fprob = Sourced (LHS <$> lhs), fframes = [], fstatus = Incomplete})
+                       , Fork (Left MkFork{fprob = Sourced (LHS <$> lhs), fframes = [], fstatus = worried})
                        ]
         pushProblems $ (Sourced . fmap FormalParam <$> args) ++ (Sourced . fmap Command <$> cs)
         newProb $ Done nil
@@ -790,7 +780,7 @@ run = prob >>= \case
     meta <- getMeta name
     runElabTask name meta etask
   Prefer p1 p2 -> debugCatch "Prefer" $ do
-    push . Catch $ MkFork Incomplete [] p2
+    push . Catch $ MkFork worried [] p2
     push $ LocalStore mempty
     newProb p1
     run
@@ -809,7 +799,7 @@ run = prob >>= \case
     newProb p
     run
   -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
-  _ -> move Worried
+  _ -> move worried
 
 runDirective :: ResponseLocation -> Dir' -> Elab ()
 runDirective rl (dir :<=: src, body) = do
@@ -838,7 +828,7 @@ runDirective rl (dir :<=: src, body) = do
       push $ Diagnostic rl (SynthD ty eSol e)
       newProb eProb
       run
-    _ -> move Worried
+    _ -> move worried
 
 elab'
   :: String -- name advice for new elaboration prob
@@ -928,10 +918,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           , lhs = genTy
           , rhs = atom SOne
           }
-        -- TODO: delete all traces of the bad version (added for
-        -- debugging purposes)
-        let badP = Problems [Elab sol $ Await cs (ixKI mtype (lit $ k + 1)), Grump]
-        newProb {- . Prefer badP -} . Elab sol $ Await cs (ixKI mtype (lit k))
+        newProb . Elab sol $ Await cs (ixKI mtype (lit k))
         run
       Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
         | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
@@ -955,7 +942,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           pushProblems [cellProb]
           newProb . Elab sol $ Await (rcs <> ccs) (mk Sone cellSol)
           run
-      _ -> move Worried
+      _ -> move worried
     TypeExprTask (TyBinaryOp Plus x y) -> do
       -- TODO:
       -- 1. make sure `mtype` admits plus
@@ -985,7 +972,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           }
         newProb . Elab sol $ Await cs (ixKI mtype (lit s))
         run
-      _ -> move Worried
+      _ -> move worried
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
@@ -1021,7 +1008,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       cstatus -> do
         newProb . Elab sol $ Await cstatus tm
         move winning
-    _ -> move Worried
+    _ -> move worried
 
 -- if move sees a Left fork, it should switch to Right and run
 -- if move sees a Right fork, switch to Left and keep moving
@@ -1040,55 +1027,44 @@ move mood = pull >>= \case
         diagnosticRun
   Just fr -> case fr of
     Fork (Right MkFork{..}) -> do
+      let (mood', store') = mood `andMood` fstatus
+      case store' of
+        Nothing -> pure ()
+        -- confine the local store we were carrying to the largest
+        -- region where it makes sense
+        Just store' -> shup $ LocalStore store'
       (fframes, fprob) <- switchFwrd (fframes, fprob)
       -- after switching forward, fframes and fprob pertain to the
       -- branch, associated with the mood
-      shup $ Fork (Left MkFork{fstatus = moodStatus mood, ..})
-      -- as we are moving out, the completeness status covers both
-      -- forks; any store we are carrying is useful even if the status
-      -- is `Incomplete`
-      move $ fmap (<> fstatus) mood
-    Fork (Left MkFork{..}) -> case mood of
-      Winning stat ms' -> do
-        (fframes, fprob) <- switchFwrd (fframes, fprob)
-        unless (Map.null ms') $
-          push $ LocalStore ms'
-        push $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
-        run
-      -- essentially: abandon the right problem if the left problem is
-      -- `Whacked`. But is that too aggressive?
-      -- Yes, because we give up processing way too early and won't
-      -- process the remaining source in the file.
-      {- Whacked -> do
-        (fframes, fprob) <- switchFwrd (fframes, fprob)
-        shup $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
-        move Whacked -}
-      _  -> debugCatch ("Left fork with mood = " ++ show mood) $ do
-        (fframes, fprob) <- switchFwrd (fframes, fprob)
-        push $ Fork (Right MkFork{fstatus = moodStatus mood, ..})
-        run
+      shup $ Fork (Left MkFork{fstatus = () <$ mood, ..})
+      -- as we are moving out, the mood covers both forks
+      move mood'
+    Fork (Left MkFork{..}) -> do
+      case mood of
+        Winning _ store' | not (Map.null store') -> push $ LocalStore store'
+        _ -> pure ()
+      (fframes, fprob) <- switchFwrd (fframes, fprob)
+      push $ Fork (Right MkFork{fstatus = () <$ mood, ..})
+      run
     Catch MkFork{..} -> case mood of
       -- decision to commit
-      Winning Complete ms ->
-        debugCatch ("Winning Complete with " ++ show ms) $ move mood
+      Winning True ms ->
+        debugCatch ("Committing with " ++ show ms) $ move mood
       -- don't commit yet, keep local store local
-      Winning Incomplete ms -> debugCatch ("Winning Incomplete with " ++ show ms) $ do
-        shup $ LocalStore ms
+      Winning False ms -> debugCatch ("Winning but not committing with " ++ show ms) $ do
+        unless (Map.null ms) . shup $ LocalStore ms
         shup fr
-        move Worried
-      -- right forks are our only hope now
+        move worried
+      -- right forks are our only hope now, prune the left fork
       Whacked -> debugCatch "Whacked" $ do
         switchFwrd (fframes, fprob)
         run
-      Worried -> debugCatch "Worried" $ do
-        shup fr
-        move mood
     LocalNamespace ns -> do
       ns <- swapNameSupply ns
       shup $ LocalNamespace ns
       move mood
     LocalStore store -> case mood of
-      Winning stat store' -> move (Winning stat (store' <> store))
+      Winning wonEh store' -> move (Winning wonEh (store' <> store))
       _ -> do
         shup $ LocalStore store
         move mood
