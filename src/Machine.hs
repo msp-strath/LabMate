@@ -31,7 +31,7 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Control.Monad.Reader
 
-debug = const id --trace
+debug = trace --trace
 debugCatch = const id --trace
 
 type Elab = State MachineState
@@ -131,9 +131,10 @@ instance PrettyPrint Frame where
   pprint fr = pure [show fr]
 
 instance PrettyPrint MachineState where
-  pprint st =
+  pprint st = do
     let (fz :<+>: fs) = position st
-    in pprint (fz <>> fs, problem st)
+    lines <- pprint (fz <>> fs, problem st)
+    pure (show (metaStore st) : lines)
 
 type TERM = Term Chk ^ Z
 type TYPE = Type ^ Z
@@ -244,10 +245,11 @@ data Problem where
   FunCalled :: Expr' -> Problem
   Elab :: Name -> ElabTask -> Problem
   Prefer :: Problem -> Problem -> Problem
-  Grump :: Problem
+  Whack :: Problem
+  Worry :: Problem
   Sourced :: WithSource Problem -> Problem
   Problems :: [Problem] -> Problem
-  deriving (Show)
+  deriving Show
 
 data Lit
   = IntLit Int
@@ -455,7 +457,7 @@ data Constraint = forall n . Constraint
   , rhs :: Term Chk ^ n
   }
 
-instance (Show Constraint) where
+instance Show Constraint where
   show Constraint{..} = nattily (vlen constraintCtx) $ concat
     [ "{ constraintCtx = ", show constraintCtx
     , ", constraintType = ", show constraintType
@@ -464,6 +466,14 @@ instance (Show Constraint) where
     , ", rhs = ", show rhs
     , " }"
     ]
+
+-- TODO: if the inner constraints are `Impossible`, just give up
+-- if they are `SolvedIf` continue generating Hom/Het constraints
+-- extractNames :: ConstraintStatus -> Elab [Names]
+
+mkConstraintType :: Type ^ n -> ConstraintStatus -> Type ^ n -> ConstraintType n
+mkConstraintType lty (SolvedIf []) rty = Hom lty
+mkConstraintType lty (SolvedIf names) rty = Het lty names rty
 
 normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
 normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
@@ -518,6 +528,32 @@ constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = "
             , lhs = lty
             , rhs = rty
             }
+          (SMatrix, [rowTy, colTy, cellTy, rs, cs], [rowTy', colTy', cellTy', rs', cs'])
+            | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
+            , Just (r', cellTy') <- lamNameEh cellTy', Just (c', cellTy') <- lamNameEh cellTy' -> do
+              rstat <- constrain s $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType = Hom (atom SType)
+                , constraintStatus = Unstarted
+                , lhs = rowTy
+                , rhs = rowTy'
+                }
+
+              cstat <- constrain s $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType = Hom (atom SType)
+                , constraintStatus = Unstarted
+                , lhs = colTy
+                , rhs = colTy'
+                }
+
+              cellStat <- constrain s $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType =
+                , constraintStatus =
+                , lhs = rowTy
+                , rhs = rowTy'
+                }
           _ -> do
             s <- fresh s
             modify $ \st@MS{..} -> st{ constraintStore = Map.insert s c constraintStore }
@@ -618,7 +654,8 @@ metaDefn x def = getMeta x >>= \case
     | Just Refl <- scopeOf def `nattyEqEh` vlen mctxt
     , mstat `elem` [Waiting, Hoping] -> do
       tick
-      modifyNearestStore (Map.insert x (Meta mctxt mtype (Just def) mstat))
+      debug ("Meta Defn assigning" ++ show x) $
+        modifyNearestStore (Map.insert x (Meta mctxt mtype (Just def) mstat))
   _ -> error "metaDefn: check the status or the scope"
 
 invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
@@ -784,8 +821,10 @@ run = prob >>= \case
     push $ LocalStore mempty
     newProb p1
     run
-  Grump -> debugCatch "Grump grump" $ do
+  Whack -> debugCatch "Whack whack" $ do
     move Whacked
+  Worry -> debugCatch "Worry worry" $ do
+    move worried
   Sourced (p :<=: src) -> do
     localNamespace . take 10 . filter isAlpha $ show p
     push $ Source src
@@ -849,7 +888,11 @@ elab
 elab x ctx ty (etask :<=: src) =
   fmap (Sourced . (:<=: src)) <$> elab' x ctx ty etask
 
-runElabTask :: Name -> Meta -> ElabTask -> Elab ()
+runElabTask
+  :: Name
+  -> Meta -- meta which carries the solution for T
+  -> ElabTask -- T
+  -> Elab ()
 runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
   mtype <- normalise mctxt (atom SType) mtype
   case etask of
@@ -952,15 +995,34 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       pushProblems [xProb, yProb]
       newProb . Done $ nil -- FIXME: use the solutions
       move winning
-    TypeExprTask (TyBinaryOp (Mul False {- dotted -} div) x y) -> do
+    TypeExprTask (TyBinaryOp (Mul False{- x*y -} div) x y) -> do
       -- Two main issues:
       -- redundancy in representation of matrices:
-      -- (e.g., R C [a] [b] \r.c. X vs
-      -- \One One one one \_._. X[a/r, b/c])
+      -- (e.g., R C [a] [b] \r c. X vs
+      -- \One One one one \_ _. X[a/r, b/c])
       -- guessing which multiplication case we are in (try them all):
       -- scalar * mx, mx * scalar, mx * mx
       -- (do we need two phase commit to metastore, local metastores?)
-      undefined -- TODO
+      rowTy <- invent "rowType" mctxt (atom SType)
+      midTy <- invent "middleType" mctxt (atom SType)
+      colTy <- invent "colType" mctxt (atom SType)
+
+      rx <- invent "rowX" mctxt (mk SList rowTy)
+      cx <- invent "colX" mctxt (mk SList midTy)
+      ry <- invent "rowY" mctxt (mk SList midTy)
+      cy <- invent "colY" mctxt (mk SList colTy)
+
+      cellXTy <- invent "cellX" (mctxt \\\ ("i", rowTy) \\\ ("j", wk midTy)) (atom SType)
+      cellYTy <- invent "cellY" (mctxt \\\ ("j'", midTy) \\\ ("k", wk colTy)) (atom SType)
+
+      let xTy = mk SMatrix rowTy midTy (lam "i" . lam "j" $ cellXTy) rx cx
+      let yTy = mk SMatrix midTy colTy (lam "j'" . lam "k" $ cellYTy) ry cy
+      (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask <$> x)
+      (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask <$> y)
+      pushProblems [xProb, yProb]
+
+      newProb Worry  -- TODO: temporary patch
+      run
     TypeExprTask (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         cs <- constrain "IsChar" $ Constraint
