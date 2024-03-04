@@ -190,11 +190,18 @@ test = testCase "Chk (y :: Enum(z)) :: Enum(z + ('a, 'b', c'))" $ do
   runTC (checkEh ty tm) emptyStore ctx
     @?= Right ()
 
-test = testCase "Type Pi: \\(X : Type) (x : X) . x" $ do
+test = testCase "Type Pi: (X : Type) -> (x : X) -> x" $ do
   let body = mk SPi (evar 0) (lam "x" (evar 1))
   let ty = mk SPi SType (lam "X" body)
   runTC (typeEh ty) emptyStore emptyContext
     @?= Right ()
+
+test = testCase "Eval Pi: f :: (X : Type) -> X" $ do
+  let ty = mk SPi SType (lam "X" $ atom SType)
+  let tm = evar 0
+  let ctx = VN :# ("f", ty)
+  testShowTC (checkEval ty tm) ctx
+    @?= "(\\_. f(_))"
 
 test = testCase "Chk Pi: \\X x. x :: (X : Type) -> (x : X) -> X" $ do
   let body = mk SPi (evar 0) (lam "x" (evar 1))
@@ -219,9 +226,134 @@ test = testCase "Chk Pi: \\X f x : f (x x) :: (X : Type) -> (f : X -> X) -> X ->
   runTC (checkEh ty tm) emptyStore emptyContext
     @?= Left "synthEh: no"
 
-test = testCase "EvalSyn Sig: (One, x) :: (Sigma (X:Type), X)" $ do
+test = testCase "Eval Sig: x :: Sigma Type \\X . x" $ do
+  let ty = mk SSig SType (lam "X" $ atom SType)
+  let tm = evar 0
+  let ctx = VN :# ("x", ty)
+  testShowTC (checkEval ty tm) ctx
+    @?= "[x('fst) | x('snd)]"
+
+test = testCase "EvalSyn Sig: snd (One, x) :: Sigma Type \\X . X" $ do
   let ty = mk SSig SType (lam "X" (evar 0))
   let tm = D $^ (R $^ (T $^ atom SOne <&> evar 0) <&> ty) <&> atom Ssnd
   let ctx = VN :# ("x", atom SOne)
   testShowTC (fst <$> evalSynth tm) ctx
     @?= "[]"
+
+test = testCase "EvalSyn Sig: snd (One, z) :: Sigma Type \\X . X" $ do
+  let ty = mk SSig SType (lam "X" (evar 0))
+  let tm = D $^ (R $^ (T $^ atom SOne <&> evar 2) <&> ty) <&> atom Ssnd
+  let ctx = VN :# ("x", atom SOne) :# ("y", atom SOne) :# ("z", atom SOne)
+  testShowTC (fst <$> evalSynth tm) ctx
+    @?= "[]"
+
+test = testCase "Eval x :: Sigma ((X:Type) -> X) \\_ . Type" $ do
+  let aty = mk SPi SType (lam "X" $ atom SType) :: Type ^ S Z
+  let ty = mk SSig aty (lam "X" $ atom SType)
+  let ctx = VN :# ("x", ty)
+  let tm = evar 0
+  testShowTC (checkEval ty tm) ctx
+    @?= "[(\\_. x('fst)(_)) | x('snd)]"
+
+test = testCase "Chk 99 :: Char" $ do
+  let ty = atom SChar
+  let tm = lit (99 :: Int)
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
+
+test = testCase "Chk [()] :: Matrix [()] [()] \\_ _ . Type" $ do
+  let rs = mk Sone nil :: Term Chk ^ Z
+  let cs = mk Sone nil :: Term Chk ^ Z
+  let ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+  let tm = mk Sone SOne
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
+
+test = testCase "Chk [()] +h+ [()] :: Matrix [()] [(), ()] \\_ _ . Type" $ do
+  let rs = mk Sone nil :: Term Chk ^ Z
+  let cs' = mk Sone nil :: Term Chk ^ Z
+  let cs = cs' + cs'
+  let ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+  let tm' = mk Sone SOne :: Term Chk ^ Z
+  let tm = mk Shjux tm' tm' :: Term Chk ^ Z
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
+
+
+test = testCase "Chk [()] +v+ [()] :: Matrix [(), ()] [()] \\_ _ . Type" $ do
+  let rs' = mk Sone nil :: Term Chk ^ Z
+  let cs = mk Sone nil :: Term Chk ^ Z
+  let rs = rs' + rs'
+  let ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+  let tm' = mk Sone SOne :: Term Chk ^ Z
+  let tm = mk Svjux tm' tm' :: Term Chk ^ Z
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
+
+test = testCase "Chk ([()] +h+ [()]) +v+ ([()] +h+ [()]) :: Matrix [(), ()] [(), ()] \\_ _ . Type" $ do
+  let rs' = mk Sone nil :: Term Chk ^ Z
+  let cs' = mk Sone nil :: Term Chk ^ Z
+  let cs = cs' + cs'
+  let rs = rs' + rs'
+  let ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+  let cell = mk Sone SOne :: Term Chk ^ Z
+  let row = mk Shjux cell cell :: Term Chk ^ Z
+  let tm  = mk Svjux row row :: Term Chk ^ Z
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Right ()
+
+test =  testCase "Chk ([()] +h+ [()]) +v+ ([()] +h+ [()]) :: Matrix [(), ()] [(), ()] \\_ _ . Foo" $ do
+  let rs' = mk Sone nil :: Term Chk ^ Z
+  let cs' = mk Sone nil :: Term Chk ^ Z
+  let cs = cs' + cs'
+  let rs = rs' + rs'
+  let ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+  let cell = mk Sone ("Foo" :: String) :: Term Chk ^ Z
+  let row = mk Shjux cell cell :: Term Chk ^ Z
+  let tm  = mk Svjux row row :: Term Chk ^ Z
+  runTC (checkEh ty tm) emptyStore emptyContext
+    @?= Left "typeEh: unknown type Foo"
+
+
+test = testCase "Chk [()] +h+ [()] :: Matrix [(), ()] [(), ()] \\_ _ . Type" $ do
+  let rs' = mk Sone nil :: Term Chk ^ Z
+  let cs' = mk Sone nil :: Term Chk ^ Z
+  let cs = cs' + cs'
+  let rs = rs' + rs'
+  let ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+  let cell = mk Sone SOne :: Term Chk ^ Z
+  let row = mk Shjux cell cell :: Term Chk ^ Z
+  runTC (checkEh ty row) emptyStore emptyContext
+    @?= Left "unnil: non-zero number"
+
+
+type Term4 = Term Chk ^ S (S (S (S Z)))
+
+test = testCase "Chk (x +h+ y) +v+ (x +h+ y) :: Matrix [(), ()] (i + j) \\_ _ . Type" $ do
+  let i = evar 3 :: Term4
+  let j = evar 1 :: Term4
+  let mty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) :: Term4 -> Term4 -> Term4
+  let one = mk Sone nil :: Term4
+  let two = one + one
+  let xty = mty one i
+  let yty = mty one j
+  let nat = mk SList SOne :: Term4
+  let x = evar 2 :: Term4
+  let y = evar 0 :: Term4
+  let ctx = VN :# ("", nat) :# ("", xty) :# ("", nat) :# ("", yty)
+  let tm = mk Svjux (mk Shjux x y :: Term4) (mk Shjux y x :: Term4) :: Term4
+  let ty = mty two (i + j)
+  runTC (checkEh ty tm) emptyStore ctx
+    @?= Right ()
+
+test = testCase "Chk ([()] +v+ [()]) +h+ ([()] +v+ [()]) :: Matrix [(), ()] (i + j) \\_ _ . Type" $ do
+  let rs' = mk Sone nil :: Term Chk ^ Z
+  let cs' = mk Sone nil :: Term Chk ^ Z
+  let cs = cs' + cs'
+  let rs = rs' + rs'
+  let ty = mk SMatrix SOne SOne (lam "_" $ lam "_" $ atom SType) rs cs :: Term Chk ^ Z
+  let cell = mk Sone SOne :: Term Chk ^ Z
+  let col = mk Svjux cell cell :: Term Chk ^ Z
+  let tm  = mk Shjux col col :: Term Chk ^ Z
+  testShowTC (checkEval ty tm) emptyContext
+    @?= "['vjux ['hjux ['one 'One] ['one 'One]] ['hjux ['one 'One] ['one 'One]]]"
