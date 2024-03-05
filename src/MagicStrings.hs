@@ -21,6 +21,9 @@ pattern Splus = "plus"
 pattern Sone = "one"
 pattern Shjux = "hjux"
 pattern Svjux = "vjux"
+-- TODO: cannonical multiplication, remove?
+pattern Smult = "mult"
+
 
 -- Labmate user types
 pattern Lint = "int"

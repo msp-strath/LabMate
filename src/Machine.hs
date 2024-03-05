@@ -407,12 +407,14 @@ yikes t = T $^ atom "yikes" <&> t
 tick :: Elab ()
 tick =  modify $ \st@MS{..} -> st { clock = clock + 1 }
 
-data ConstraintType n
-  = Hom (Type ^ n)
+data ConstraintType' t
+  = Hom t
   -- heterogenous constraint will become homogenous as soon as the
   -- named constraints have been solved
-  | Het (Type ^ n) [Name] (Type ^ n)
-  deriving Show
+  | Het t [Name] t
+  deriving (Show, Functor)
+
+type ConstraintType n = ConstraintType' (Type ^ n)
 
 lhsType :: ConstraintType n -> Type ^ n
 rhsType :: ConstraintType n -> Type ^ n
@@ -449,12 +451,21 @@ instance Monoid ConstraintStatus where
   mappend x Unstarted  = Unstarted
   mappend (SolvedIf xs) (SolvedIf ys) = SolvedIf $ xs `union` ys
 
+type ConstraintContext n = Vec n (String, ConstraintType n)
+
 data Constraint = forall n . Constraint
-  { constraintCtx   :: Vec n (String, ConstraintType n)
+  { constraintCtx   :: ConstraintContext n
   , constraintType  :: ConstraintType n
   , constraintStatus :: ConstraintStatus
   , lhs :: Term Chk ^ n
   , rhs :: Term Chk ^ n
+  }
+  -- TODO: actually use it
+  | forall n. Multiplicable
+  { constraintCtx :: ConstraintContext n
+  , constraintStatus :: ConstraintStatus
+  , mulIndexTypes :: (Type ^ n, Type ^ n, Type ^ n)
+  , mulDataTypes :: (Type ^ S (S n), Type ^ S (S n), Type ^ S (S n))
   }
 
 instance Show Constraint where
@@ -466,14 +477,35 @@ instance Show Constraint where
     , ", rhs = ", show rhs
     , " }"
     ]
+  show Multiplicable{..} = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", status = ", show constraintStatus
+    , ", mulIndexTypes = ", show mulIndexTypes
+    , ", mulDataTypes = ", show mulDataTypes
+    , " }"
+    ]
 
--- TODO: if the inner constraints are `Impossible`, just give up
--- if they are `SolvedIf` continue generating Hom/Het constraints
--- extractNames :: ConstraintStatus -> Elab [Names]
+mkConstraintType :: Type ^ n -> [Name] -> Type ^ n -> ConstraintType n
+mkConstraintType lty [] rty = Hom lty
+mkConstraintType lty names rty = Het lty names rty
 
-mkConstraintType :: Type ^ n -> ConstraintStatus -> Type ^ n -> ConstraintType n
-mkConstraintType lty (SolvedIf []) rty = Hom lty
-mkConstraintType lty (SolvedIf names) rty = Het lty names rty
+getConstraintStatus :: Name -> Elab ConstraintStatus
+getConstraintStatus x = do
+  cstore <- gets constraintStore
+  case constraintStatus <$> Map.lookup x cstore of
+    Nothing -> pure Impossible
+    Just Blocked -> pure $ SolvedIf [x]
+    Just (SolvedIf xs) -> mconcat <$> traverse getConstraintStatus xs
+    Just cstatus -> pure cstatus
+
+updateConstraintStatus :: ConstraintStatus -> Elab ConstraintStatus
+updateConstraintStatus (SolvedIf xs) =
+  mconcat <$> traverse getConstraintStatus xs
+updateConstraintStatus cs = pure cs
+
+infixl 5 \\\\
+(\\\\) :: ConstraintContext n -> (String, ConstraintType n) -> ConstraintContext (S n)
+ctx \\\\ x = fmap (fmap wk) <$> ctx :# x
 
 normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
 normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
@@ -481,7 +513,8 @@ normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
   Right tm -> pure tm
 
 constrain :: String -> Constraint -> Elab ConstraintStatus
-constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = " ++ show c) $ case (traverse (traverse isHom) constraintCtx, constraintType) of
+constrain s c | debug ("Constrain call " ++ s ++ " constraint = " ++ show c) False = undefined
+constrain s c@Constraint{..} =  case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms  <- gets metaStore
     ty  <- normalise ctx (atom SType) ty
@@ -531,31 +564,47 @@ constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = "
           (SMatrix, [rowTy, colTy, cellTy, rs, cs], [rowTy', colTy', cellTy', rs', cs'])
             | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
             , Just (r', cellTy') <- lamNameEh cellTy', Just (c', cellTy') <- lamNameEh cellTy' -> do
-              {-
-              rstat <- constrain s $ Constraint
-                { constraintCtx = constraintCtx
-                , constraintType = Hom (atom SType)
-                , constraintStatus = Unstarted
-                , lhs = rowTy
-                , rhs = rowTy'
-                }
-              cstat <- constrain s $ Constraint
-                { constraintCtx = constraintCtx
-                , constraintType = Hom (atom SType)
-                , constraintStatus = Unstarted
-                , lhs = colTy
-                , rhs = colTy'
-                }
-              // TODO: FIXME
-              cellStat <- constrain s $ Constraint
-                { constraintCtx = constraintCtx
-                , constraintType = undefined
-                , constraintStatus = undefined
-                , lhs = rowTy
-                , rhs = rowTy'
-                }
-              -}
-              undefined
+                rstat <- constrain s $ Constraint
+                  { constraintCtx = constraintCtx
+                  , constraintType = Hom (atom SType)
+                  , constraintStatus = Unstarted
+                  , lhs = rowTy
+                  , rhs = rowTy'
+                  }
+                cstat <- constrain s $ Constraint
+                  { constraintCtx = constraintCtx
+                  , constraintType = Hom (atom SType)
+                  , constraintStatus = Unstarted
+                  , lhs = colTy
+                  , rhs = colTy'
+                  }
+                case (rstat, cstat) of
+                  (SolvedIf rdeps, SolvedIf cdeps) -> do
+                    cellStat <- constrain s $ Constraint
+                      { constraintCtx = constraintCtx
+                                        \\\\ (r, mkConstraintType rowTy rdeps rowTy')
+                                        \\\\ (c, mkConstraintType (wk colTy) cdeps (wk colTy'))
+                      , constraintType = mkConstraintType (atom SType) (rdeps <> cdeps) (atom SType)
+                      , constraintStatus = Unstarted
+                      , lhs = cellTy
+                      , rhs = cellTy'
+                      }
+                    rowStat <- constrain s $ Constraint
+                      { constraintCtx = constraintCtx
+                      , constraintType = mkConstraintType  (mk SList rowTy) rdeps (mk SList rowTy')
+                      , constraintStatus = Unstarted
+                      , lhs = rs
+                      , rhs = rs'
+                      }
+                    colStat <- constrain s $ Constraint
+                      { constraintCtx = constraintCtx
+                      , constraintType = mkConstraintType  (mk SList colTy) cdeps (mk SList colTy')
+                      , constraintStatus = Unstarted
+                      , lhs = cs
+                      , rhs = cs'
+                      }
+                    pure $ mconcat [rstat, cstat, cellStat, rowStat, colStat]
+                  _ -> pure Impossible
           _ -> do
             s <- fresh s
             modify $ \st@MS{..} -> st{ constraintStore = Map.insert s c constraintStore }
@@ -577,6 +626,46 @@ constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = "
       Blocked   -> SolvedIf [s]
       Unstarted -> SolvedIf [s]
       _ -> constraintStatus
+constrain s c@Multiplicable{mulDataTypes = (x, y, z), mulIndexTypes = (i, j, k), ..}
+  | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
+     i <- normalise ctx (atom SType) i
+     j <- normalise ctx (atom SType) j
+     k <- normalise ctx (atom SType) k
+     x <- normalise (ctx \\\ ("i", i) \\\ ("j", wk j)) (atom SType) x
+     y <- normalise (ctx \\\ ("j", j) \\\ ("k", wk k)) (atom SType) y
+     z <- normalise (ctx \\\ ("i", i) \\\ ("k", wk k)) (atom SType) z
+     debug ("MULTIPLICABLE #####################" ++ show [x, y, z]) $ case (tagEh x, tagEh y, tagEh z) of
+       -- TODO: matching for `No No` does not account for metavariables
+       (Just (SAbel, [x' :^ (No (No th))]), Just (SAbel, [y' :^ (No (No ph))]), _) -> do
+         xystat <- constrain s $ Constraint
+           { constraintCtx = constraintCtx
+           , constraintType = Hom (atom SType)
+           , constraintStatus = Unstarted
+           , lhs = x' :^ th
+           , rhs = y' :^ ph
+           }
+         zstat <- constrain s $ Constraint
+           { constraintCtx = constraintCtx \\\\ ("i", Hom i) \\\\ ("k", Hom $ wk k)
+           , constraintType = Hom (atom SType)
+           , constraintStatus = Unstarted
+           , lhs = z
+           , rhs = x
+           }
+         pure $ xystat <> zstat
+       _ -> do
+         s <- fresh s
+         modify $ \st@MS{..} -> st{ constraintStore = Map.insert s c constraintStore }
+         pure $ case constraintStatus of
+           Blocked   -> SolvedIf [s]
+           Unstarted -> SolvedIf [s]
+           _ -> constraintStatus
+constrain s c = do
+    s <- fresh s
+    modify $ \st@MS{..} -> st{ constraintStore = Map.insert s c constraintStore }
+    pure $ case constraintStatus c of
+      Blocked   -> SolvedIf [s]
+      Unstarted -> SolvedIf [s]
+      _ -> constraintStatus c
 
 constrainEqualType :: TYPE -> TYPE -> Elab ()
 constrainEqualType lhs rhs = (() <$) . constrain "Q" $ Constraint
@@ -586,20 +675,6 @@ constrainEqualType lhs rhs = (() <$) . constrain "Q" $ Constraint
   , lhs = lhs
   , rhs = rhs
   }
-
-getConstraintStatus :: Name -> Elab ConstraintStatus
-getConstraintStatus x = do
-  cstore <- gets constraintStore
-  case constraintStatus <$> Map.lookup x cstore of
-    Nothing -> pure Impossible
-    Just Blocked -> pure $ SolvedIf [x]
-    Just (SolvedIf xs) -> mconcat <$> traverse getConstraintStatus xs
-    Just cstatus -> pure cstatus
-
-updateConstraintStatus :: ConstraintStatus -> Elab ConstraintStatus
-updateConstraintStatus (SolvedIf xs) =
-  mconcat <$> traverse getConstraintStatus xs
-updateConstraintStatus cs = pure cs
 
 findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe (Name, TYPE))
 findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} = excursion (go False)
@@ -1023,8 +1098,39 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask <$> y)
       pushProblems [xProb, yProb]
 
-      newProb Worry  -- TODO: temporary patch
-      run
+      cstat <- constrain "middle" $ Constraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , constraintType = Hom (mk SList midTy)
+        , constraintStatus = Unstarted
+        , lhs = cx
+        , rhs = ry
+        }
+      case cstat of
+        SolvedIf deps -> do
+          -- 1. Invent the cell type for the result
+          cellZTy <- invent "cellZ" (mctxt \\\ ("i", rowTy) \\\ ("k", wk colTy)) (atom SType)
+          -- 2. Construct the matrix type for the result
+          let zTy = mk SMatrix rowTy colTy (lam "i" . lam "k" $ cellZTy) rx cy
+          -- 3. Constrain it to the type we are checking against
+          zstat <- constrain "Zmatrix" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (atom SType)
+            , constraintStatus = Unstarted
+            , lhs = zTy
+            , rhs = mtype
+            }
+          -- 4. Switch to the problem of ensuring the cell types are compatible
+          mulstat <- constrain "ZMultiplicable" $ Multiplicable
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintStatus = Unstarted
+            , mulIndexTypes = (rowTy, midTy, colTy)
+            , mulDataTypes = (cellXTy, cellYTy, cellZTy)
+            }
+          newProb . Elab sol $ Await (cstat <> zstat <> mulstat) (mk Smult xSol ySol)
+          run
+        _ -> do
+          newProb Whack
+          run
     TypeExprTask (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         cs <- constrain "IsChar" $ Constraint
