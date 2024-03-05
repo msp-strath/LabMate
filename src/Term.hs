@@ -153,8 +153,7 @@ instance Ord (Norm s n) where
     where
        helper :: Term s n -> Integer
        helper = \case
-         { V{} -> 0; U{} -> 1; P{} -> 2;
-         ; K{} -> 3; L{} -> 4; (:$){} -> 6 }
+         { V{} -> 0; K{} -> 3; L{} -> 4; (:$){} -> 6 }
 
 --------------- smart ctors ---------------
 var :: S Z <= n -> Term Syn ^ n

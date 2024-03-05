@@ -46,7 +46,8 @@ reassemble n ms =
 
 updateNonceTable :: Map Nonce String -> Cursor Frame -> Map Nonce String
 updateNonceTable table (fz :<+>: []) = table
-updateNonceTable table (fz :<+>: Fork _ fs' e : fs) = updateNonceTable (updateNonceTable table (fz :<+>: fs)) (fz :<+>: fs')
+updateNonceTable table (fz :<+>: Fork frk : fs) =
+  updateNonceTable (updateNonceTable table (fz :<+>: fs)) (fz :<+>: either fframes fframes frk)
 updateNonceTable table (fz :<+>: Source (n, Hide ts) : fs) =
   let m = updateNonceTable table (fz :<+>: fs)
       ts' = ts >>= nonceExpand m
@@ -60,19 +61,19 @@ renamePass ms = inbound ms
     inbound ms@(MS { position = fz :<+>: fs, problem = p }) =
       case (outsource (fz <>< fs :<+>: []), p) of
         (fz :< Source (n, Hide [t]) :<+>: fs, Done (FreeVar x)) | kin t == Nom -> do
-          ~True <- track ("HIT" ++ show  (fz , x, n)) $ pure True
+          ~True <- track ("HIT" ++ show (x, n)) $ pure True
           x' <- renamer fz x False
-          outbound ms{ position = fz :<+>: Source (n, Hide [t{ raw = x' }]) : fs }
+          outbound mempty ms{ position = fz :<+>: Source (n, Hide [t{ raw = x' }]) : fs }
         (fz :< Source (l, Hide (s:ss)) :< Source (n, Hide ts) :< Source (m, Hide (t':ts')) :<+>: fs, Done (Atom ""))
           | raw t' == "rename", Grp Directive dss <- kin s ->
-            outbound ms{
+            outbound mempty ms{
               position = fz :<+>:
                   Source (l, Hide (s{kin = Grp Response dss} : ss))
                 : Source (n, Hide (respond ts))
                 : Source (m, Hide (t'{raw = "renamed"} : ts'))
                 : fs
               }
-        (cur, p) -> outbound ms{ position = cur }
+        (cur, p) -> outbound mempty ms{ position = cur }
 
     outsource :: Cursor Frame -> Cursor Frame
     outsource cur@(_ :< Source _ :<+>: _) = cur
@@ -80,12 +81,15 @@ renamePass ms = inbound ms
     outsource (fz :< f :<+>: fs) = outsource (fz :<+>: f : fs)
     outsource cur@(B0 :<+>: _) = cur
 
-    outbound :: MachineState -> Writer RenameProblems MachineState
-    outbound ms@(MS { position = B0 :<+>: _ }) = pure ms
-    outbound ms@(MS { position = fz :< f :<+>: fs, problem = p }) = case f of
-      Fork (Left frk) fs' p' -> inbound ms{ position = fz :< Fork (Right frk) fs p :<+>: fs' , problem = p' }
-      Fork (Right frk) fs' p' -> outbound ms{ position = fz :<+>: Fork (Left frk) fs p : fs', problem = p' }
-      _ -> outbound ms { position = fz :<+>: f : fs }
+    outbound :: ForkCompleteStatus -> MachineState -> Writer RenameProblems MachineState
+    outbound stat ms@(MS { position = B0 :<+>: _ }) = pure ms
+    outbound stat ms@(MS { position = fz :< f :<+>: fs, problem = p }) = case f of
+      Fork (Left MkFork{..}) -> inbound ms{ position = fz :< Fork (Right MkFork{fstatus = stat, fframes = fs, fprob= p})
+                                                       :<+>: fframes
+                                          , problem = fprob }
+      Fork (Right MkFork{..}) -> outbound (fstatus <> stat) ms{ position = fz :<+>: Fork (Left MkFork{fstatus = stat, fframes = fs, fprob= p}) : fframes
+                                            , problem = fprob }
+      _ -> outbound stat ms { position = fz :<+>: f : fs }
 
     renamer
       :: Bwd Frame
@@ -93,7 +97,7 @@ renamePass ms = inbound ms
       -> Bool  -- have we found FunctionLocale yet?
       -> Writer RenameProblems String
     renamer B0 n b = error "ScriptLocale disappeared in renamer!"
-    renamer (fz :< Locale FunctionLocale) n b = renamer fz n True
+    renamer (fz :< Locale (FunctionLocale _)) n b = renamer fz n True
     renamer (fz :< Locale ScriptLocale) n True = error "Declaration disappeared in renamer!"
     renamer (fz :< Declaration n' d@UserDecl{capturable}) n b = do
       s <- newName d
@@ -115,7 +119,7 @@ renamePass ms = inbound ms
       -> String
       -> Writer RenameProblems Bool
     captured B0 b s = pure False
-    captured (fz :< Locale FunctionLocale) b s = captured fz True s
+    captured (fz :< Locale (FunctionLocale _)) b s = captured fz True s
     captured (fz :< Locale ScriptLocale) True s = pure False
     captured (fz :< Declaration _ d) b s = do
       s' <- newName d

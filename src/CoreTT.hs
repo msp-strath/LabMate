@@ -14,7 +14,6 @@ import Debug.Trace
 
 track = trace
 
-
 data Status = Crying | Waiting | Hoping | Abstract | ProgramVar
   deriving (Ord, Eq, Show)
 
@@ -34,11 +33,14 @@ instance Show Meta where
              , " , ", show mstat
              , "}"]
 
+
 type Store = Map Name Meta
 
 emptyStore :: Store
 emptyStore = Map.empty
 
+-- TODO: issue lookup requests out rather than asking for store in;
+-- use freer monads
 newtype TC n x =
  TC { runTC :: Store -> Context n -> Either String x }
 

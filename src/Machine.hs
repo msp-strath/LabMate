@@ -31,7 +31,8 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Control.Monad.Reader
 
-debug = const id --trace
+debug = trace --trace
+debugCatch = const id --trace
 
 type Elab = State MachineState
 
@@ -82,9 +83,17 @@ instance PrettyPrint ([Frame], Problem) where
       let d = Name (root <>> [])
       ld <- localName d
       pure [ld ++ " |-" ] <> local (const d) (pprint (fs, p))
-    Fork (Left  frk) fs' p' -> (dent <$> pprint (fs, p)) <> pprint (fs', p')
-    Fork (Right frk) fs' p' -> (dent <$> pprint (fs', p')) <> pprint (fs, p)
+    Fork (Left frk) ->
+      (dent <$> pprint (fs, p)) <> pprint frk
+    Fork (Right frk) ->
+      (dent <$> pprint frk) <> pprint (fs, p)
     _ -> pprint f <> pprint (fs, p)
+
+instance PrettyPrint Fork where
+  pprint MkFork{..} = tweak fstatus <$> pprint (fframes, fprob) where
+    tweak (Winning True ()) = id
+    tweak (Winning False ()) = ("???" :)
+    tweak Whacked = ("%%%" :)
 
 instance PrettyPrint ElabTask where
   -- TODO: implement
@@ -122,9 +131,10 @@ instance PrettyPrint Frame where
   pprint fr = pure [show fr]
 
 instance PrettyPrint MachineState where
-  pprint st =
+  pprint st = do
     let (fz :<+>: fs) = position st
-    in pprint (fz <>> fs, problem st)
+    lines <- pprint (fz <>> fs, problem st)
+    pure (show (metaStore st) : lines)
 
 type TERM = Term Chk ^ Z
 type TYPE = Type ^ Z
@@ -142,8 +152,11 @@ data Frame where
   Locale :: LocaleType -> Frame
   ExcursionReturnMarker :: Frame
   RenameFrame :: String -> String -> Frame
-  FunctionLeft :: Name -> LHS -> Frame
-  Fork :: (Either Fork Fork) -> [Frame] -> Problem -> Frame
+  -- FunctionLeft :: Name -> LHS -> Frame
+  -- conjunctive interpretation
+  Fork :: (Either Fork Fork) -> Frame
+  -- disjunctive interpretation
+  Catch :: Fork -> Frame
   LocalNamespace :: NameSupply -> Frame
   Diagnostic :: ResponseLocation -> DiagnosticData -> Frame
   Currently
@@ -151,13 +164,51 @@ data Frame where
     -> TERM -- lhs, a metavar of type Dest T
     -> TERM -- rhs
     -> Frame
+  LocalStore :: Store -> Frame
   deriving Show
 
-data Fork = Solved | FunctionName Name
-  deriving Show
+data Fork = MkFork
+  { fstatus :: ForkCompleteStatus
+  , fframes :: [Frame]
+  , fprob   :: Problem
+  } deriving Show
 
-data LocaleType = ScriptLocale | FunctionLocale
+data LocaleType = ScriptLocale | FunctionLocale Name
   deriving (Show, Eq)
+
+--Unify `Mood` and `ForkCompleteStatus` as:
+
+data Mood' a
+  = Whacked
+  | Winning Bool {- have we completely won yet -} a
+  deriving (Functor, Foldable, Traversable, Show, Ord, Eq)
+
+type Mood = Mood' Store
+type ForkCompleteStatus = Mood' ()
+
+instance Semigroup ForkCompleteStatus where
+  (<>) = mappend
+
+instance Monoid ForkCompleteStatus where
+  mempty = winning
+  mappend = min
+
+-- linear in the store, paying attention to the way things can get worse
+andMood :: Mood' Store -> Mood' () -> (Mood' Store, Maybe Store)
+andMood (Winning _ st) Whacked = (Whacked, Just st)
+andMood (Winning True st) (Winning False ()) = (Winning False st, Nothing)
+andMood m _ = (m, Nothing)
+
+-- When we are moving through a `Fork`, `andMood` should tell us how
+-- the status of the other conjuncts affects our mood and whether we
+-- should contain a local store.
+
+winning :: Monoid a => Mood' a
+winning = Winning True mempty
+
+worried :: Monoid a => Mood' a
+worried = Winning False mempty
+
 
 data DeclarationType a
   = UserDecl
@@ -167,7 +218,8 @@ data DeclarationType a
   -- requested name and how to reply (we hope of length at most 1)
   , newNames :: [(String, ResponseLocation)]
   , capturable :: Bool     -- is it capturable?
-  } deriving (Functor, Show, Foldable, Traversable)
+  }
+  deriving (Functor, Show, Foldable, Traversable)
 
 data ElabTask where
   TensorTask :: TensorType' -> ElabTask
@@ -192,9 +244,12 @@ data Problem where
   InputFormatAction :: String -> [String] -> ResponseLocation -> Problem
   FunCalled :: Expr' -> Problem
   Elab :: Name -> ElabTask -> Problem
+  Prefer :: Problem -> Problem -> Problem
+  Whack :: Problem
+  Worry :: Problem
   Sourced :: WithSource Problem -> Problem
   Problems :: [Problem] -> Problem
-  deriving (Show)
+  deriving Show
 
 data Lit
   = IntLit Int
@@ -206,10 +261,25 @@ data Gripe =
   RenameFail Nonce String
   deriving Show
 
+modifyNearestStore :: (Store -> Store) -> Elab ()
+modifyNearestStore f = excursion go where
+  go = pull >>= \case
+    Nothing -> modify (\st@MS{..} -> st { metaStore = f metaStore })
+    Just (LocalStore st) -> push $ LocalStore (f st)
+    Just fr -> shup fr >> go
+
+-- TODO: cache the accumulated stores
 elabTC :: Context n -> TC n x -> Elab (Either String x)
 elabTC ctx tc = do
   store <- gets metaStore
-  pure $ runTC tc store ctx
+  fz :<+>: fs <- gets position
+  let accStores = ala' Dual foldMap frameToStore fz
+  pure $ runTC tc (accStores <> store) ctx
+  where
+    frameToStore :: Frame -> Store
+    frameToStore (LocalStore st) = debug ("Local store: " ++ intercalate ", " (show <$> Map.keys st)) st
+    frameToStore _ = mempty
+
 
 fresh :: String -> Elab Name
 fresh s = do
@@ -260,8 +330,14 @@ pullUntil s f = pull >>= \case
 postRight :: [Frame] -> Elab ()
 postRight fs = pull >>= \case
   Nothing -> error "Not in a left fork, is it a hard fail?"
-  Just (Fork (Left frk) fs' p') -> push $ Fork (Left frk) (fs ++ fs') p'
+  Just (Fork (Left frk@MkFork{..})) ->
+    push $ Fork (Left frk{ fstatus = foldMap getStatus fs <> fstatus
+                         , fframes = fs ++ fframes})
   Just fr -> shup fr >> postRight fs
+  where
+    getStatus (Fork frk) = either fstatus fstatus frk
+    getStatus _ = mempty
+
 
 switchFwrd :: ([Frame], Problem) -> Elab ([Frame], Problem)
 switchFwrd (fs', p') = do
@@ -283,7 +359,8 @@ prob = llup >>= \case
     prob
 
 pushProblems :: [Problem] -> Elab ()
-pushProblems ps = push (Fork (Left Solved) [] (Problems ps))
+pushProblems ps = push $ Fork
+  (Left MkFork{fstatus = worried, fframes = [], fprob = Problems ps})
 
 newProb :: Problem -> Elab () -- TODO: consider checking if we are at
                               -- the problem
@@ -309,10 +386,15 @@ localNamespace s = do
 
 getMeta :: Name -> Elab Meta
 getMeta x = do
+  fz :<+>: _ <- gets position
   st <- gets metaStore
-  case Map.lookup x st of
+  let stores = st : foldMap collectStores fz
+  case ala' Last foldMap (Map.lookup x) stores of
     Just m -> pure m
     Nothing -> error "getMeta: meta does not exist"
+  where
+    collectStores (LocalStore st) = [st]
+    collectStores _ = []
 
 cry :: Name -> Elab ()
 cry x = do
@@ -375,7 +457,7 @@ data Constraint = forall n . Constraint
   , rhs :: Term Chk ^ n
   }
 
-instance (Show Constraint) where
+instance Show Constraint where
   show Constraint{..} = nattily (vlen constraintCtx) $ concat
     [ "{ constraintCtx = ", show constraintCtx
     , ", constraintType = ", show constraintType
@@ -384,6 +466,14 @@ instance (Show Constraint) where
     , ", rhs = ", show rhs
     , " }"
     ]
+
+-- TODO: if the inner constraints are `Impossible`, just give up
+-- if they are `SolvedIf` continue generating Hom/Het constraints
+-- extractNames :: ConstraintStatus -> Elab [Names]
+
+mkConstraintType :: Type ^ n -> ConstraintStatus -> Type ^ n -> ConstraintType n
+mkConstraintType lty (SolvedIf []) rty = Hom lty
+mkConstraintType lty (SolvedIf names) rty = Het lty names rty
 
 normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
 normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
@@ -438,6 +528,34 @@ constrain s c@Constraint{..} = debug ("Constrain call " ++ s ++ " constraint = "
             , lhs = lty
             , rhs = rty
             }
+          (SMatrix, [rowTy, colTy, cellTy, rs, cs], [rowTy', colTy', cellTy', rs', cs'])
+            | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
+            , Just (r', cellTy') <- lamNameEh cellTy', Just (c', cellTy') <- lamNameEh cellTy' -> do
+              {-
+              rstat <- constrain s $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType = Hom (atom SType)
+                , constraintStatus = Unstarted
+                , lhs = rowTy
+                , rhs = rowTy'
+                }
+              cstat <- constrain s $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType = Hom (atom SType)
+                , constraintStatus = Unstarted
+                , lhs = colTy
+                , rhs = colTy'
+                }
+              // TODO: FIXME
+              cellStat <- constrain s $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType = undefined
+                , constraintStatus = undefined
+                , lhs = rowTy
+                , rhs = rowTy'
+                }
+              -}
+              undefined
           _ -> do
             s <- fresh s
             modify $ \st@MS{..} -> st{ constraintStore = Map.insert s c constraintStore }
@@ -492,7 +610,7 @@ findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} =
     Just f -> case f of
       Locale ScriptLocale | b -> -- if we are in a function, script
         Nothing <$ push f        -- variables are out of scope
-      Locale FunctionLocale -> shup f >> go True -- we know we are in a function
+      Locale (FunctionLocale _) -> shup f >> go True -- we know we are in a function
       Declaration n u'@UserDecl{varTy = ty', currentName = old', seen = seen', newNames = news'} | old == old' -> do
         case ty of
           Just ty -> constrainEqualType ty ty'
@@ -518,17 +636,16 @@ ensureDeclaration s = findDeclaration s >>= \case
   Just x  -> pure x
 
 onNearestSource :: ([Tok] -> [Tok]) -> Elab ()
-onNearestSource f = excursion go
-  where
-    go = pull >>= \case
-      Nothing -> error "Impossible: no enclosing Source frame"
-      Just (Source (n, Hide ts)) -> push $ Source (n, Hide $ f ts)
-      Just f -> shup f >> go
+onNearestSource f = excursion go where
+  go = pull >>= \case
+    Nothing -> error "Impossible: no enclosing Source frame"
+    Just (Source (n, Hide ts)) -> push $ Source (n, Hide $ f ts)
+    Just f -> shup f >> go
 
 metaDecl :: Status -> String -> Context n -> Type ^ n -> Elab Name
 metaDecl s x ctx ty = do
    x <- fresh x
-   x <$ modify (\st@MS{..} -> st { metaStore = Map.insert x (Meta ctx ty Nothing s) metaStore })
+   x <$ modifyNearestStore (Map.insert x (Meta ctx ty Nothing s))
 
 metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
 metaDeclTerm s x ctx ty = nattily (vlen ctx) (wrapMeta <$> metaDecl s x ctx ty)
@@ -539,7 +656,8 @@ metaDefn x def = getMeta x >>= \case
     | Just Refl <- scopeOf def `nattyEqEh` vlen mctxt
     , mstat `elem` [Waiting, Hoping] -> do
       tick
-      modify $ \st@MS{..} -> st{ metaStore = Map.insert x (Meta mctxt mtype (Just def) mstat) metaStore}
+      debug ("Meta Defn assigning" ++ show x) $
+        modifyNearestStore (Map.insert x (Meta mctxt mtype (Just def) mstat))
   _ -> error "metaDefn: check the status or the scope"
 
 invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
@@ -572,27 +690,27 @@ run = prob >>= \case
   BlockTop cs -> do
     pushProblems (Sourced . fmap Command <$> cs)
     newProb $ Done nil
-    move
+    move winning
   LHS (LVar x) -> do
     (x, _) <- ensureDeclaration (UserDecl Nothing x True [] True)
     newProb . Done $ FreeVar x
-    move
+    move winning
   LHS (LMat []) -> do
     newProb $ Done nil
-    move
+    move winning
   FormalParam x -> do
     ty <- invent (x ++ "Type") emptyContext (atom SType)
     (x, _) <- makeDeclaration (UserDecl ty x True [] False)
     newProb . Done $ FreeVar x
-    move
+    move winning
   Expression (Var x) ->
     findDeclaration (UserDecl Nothing x True [] False) >>= \case
     Nothing -> do
       newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
-      move
+      move Whacked
     Just (x, _) -> do
       newProb . Done $ FreeVar x
-      move
+      move winning
   Expression (App (f :<=: src) args) -> do
     pushProblems $ Sourced . fmap Expression <$> args
     push $ Source src
@@ -610,10 +728,10 @@ run = prob >>= \case
   Expression (Mat es) -> do
     pushProblems (Row <$> es)
     newProb $ Done nil
-    move
-  Expression (IntLiteral i) -> newProb (Done $ lit i) >> move
-  Expression (DoubleLiteral d) -> newProb (Done $ lit d) >> move
-  Expression (StringLiteral s) -> newProb (Done $ lit s) >> move
+    move winning
+  Expression (IntLiteral i) -> newProb (Done $ lit i) >> move winning
+  Expression (DoubleLiteral d) -> newProb (Done $ lit d) >> move winning
+  Expression (StringLiteral s) -> newProb (Done $ lit s) >> move winning
   Expression (UnaryOp op (e :<=: src)) -> do
     push $ Source src
     newProb $ Expression e
@@ -623,11 +741,11 @@ run = prob >>= \case
     push $ Source src0
     newProb $ Expression e0
     run
-  Expression ColonAlone -> newProb (Done $ atom ":") >> move
-  Expression (Handle f) -> newProb (Done $ T $^ atom "handle" <&> atom f) >> move
+  Expression ColonAlone -> newProb (Done $ atom ":") >> move winning
+  Expression (Handle f) -> newProb (Done $ T $^ atom "handle" <&> atom f) >> move winning
   FunCalled f -> newProb (Expression f) >> run
   Row rs -> case rs of
-    [] -> newProb (Done nil) >> move
+    [] -> newProb (Done nil) >> move winning
     (r :<=: src):rs -> do
       pushProblems (Sourced . fmap Expression <$> rs)
       push $ Source src
@@ -649,23 +767,25 @@ run = prob >>= \case
       Nothing -> error "function should have been declared already"
       Just (fname, _) -> do
         traverse_ fundecl cs
-        traverse_ push [Locale FunctionLocale, FunctionLeft fname lhs]
-        pushProblems $ (Sourced . fmap Command <$> cs) ++ (Sourced . fmap FormalParam <$> args)
+        traverse_ push [ Locale (FunctionLocale fname)
+                       , Fork (Left MkFork{fprob = Sourced (LHS <$> lhs), fframes = [], fstatus = worried})
+                       ]
+        pushProblems $ (Sourced . fmap FormalParam <$> args) ++ (Sourced . fmap Command <$> cs)
         newProb $ Done nil
-        move
+        move winning
   Command (Respond ts) -> do
     onNearestSource $ const []
     newProb $ Done nil
-    move
+    move winning
   Command (GeneratedCode cs) -> do
     onNearestSource $ const []
     newProb $ Done nil
-    move
+    move winning
   Command (If brs els) -> do
     let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els
     pushProblems $ conds >>= \(e, cs) -> Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
     newProb $ Done nil
-    move
+    move winning
   Command (For (x, e :<=: src) cs) -> do
     pushProblems $ (Sourced. fmap Command <$> cs) ++ [Sourced (LHS . LVar <$> x)]
     push $ Source src
@@ -674,10 +794,10 @@ run = prob >>= \case
   Command (While e cs) -> do
     pushProblems $ Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
     newProb $ Done nil
-    move
-  Command Break -> newProb (Done nil) >> move
-  Command Continue -> newProb (Done nil) >> move
-  Command Return -> newProb (Done nil) >> move
+    move winning
+  Command Break -> newProb (Done nil) >> move winning
+  Command Continue -> newProb (Done nil) >> move winning
+  Command Return -> newProb (Done nil) >> move winning
   Command (Switch exp brs els) -> do
     let conds = brs ++ foldMap (\cs -> [(noSource $ IntLiteral 1, cs)]) els -- TODO: handle `otherwise` responsibly
     pushProblems $ conds >>= \(e, cs) ->  Sourced (Expression <$> e) : (Sourced . fmap Command <$> cs)
@@ -686,18 +806,27 @@ run = prob >>= \case
   RenameAction old new rl -> do
     ensureDeclaration (UserDecl Nothing old False [(new, rl)] True)
     newProb $ Done nil
-    move
+    move winning
   DeclareAction ty name -> do
     (name, _) <- ensureDeclaration (UserDecl (Just ty) name False [] True)
     newProb $ Done (FreeVar name)
-    move
+    move winning
   InputFormatAction name body (n, c) -> do
     modify $ \st@MS{..} -> st { nonceTable = Map.insertWith (++) n (concat["\n", replicate c ' ', "%<{", "\n", generateInputReader name body, "\n", replicate c ' ', "%<}"]) nonceTable }
     newProb $ Done nil
-    move
+    move winning
   Elab name etask -> do
     meta <- getMeta name
     runElabTask name meta etask
+  Prefer p1 p2 -> debugCatch "Prefer" $ do
+    push . Catch $ MkFork worried [] p2
+    push $ LocalStore mempty
+    newProb p1
+    run
+  Whack -> debugCatch "Whack whack" $ do
+    move Whacked
+  Worry -> debugCatch "Worry worry" $ do
+    move worried
   Sourced (p :<=: src) -> do
     localNamespace . take 10 . filter isAlpha $ show p
     push $ Source src
@@ -705,13 +834,13 @@ run = prob >>= \case
     run
   Problems [] -> do
     newProb $ Done nil
-    move
+    move winning
   Problems (p : ps) -> do
     pushProblems ps
     newProb p
     run
   -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
-  _ -> move
+  _ -> move worried
 
 runDirective :: ResponseLocation -> Dir' -> Elab ()
 runDirective rl (dir :<=: src, body) = do
@@ -740,7 +869,7 @@ runDirective rl (dir :<=: src, body) = do
       push $ Diagnostic rl (SynthD ty eSol e)
       newProb eProb
       run
-    _ -> move
+    _ -> move worried
 
 elab'
   :: String -- name advice for new elaboration prob
@@ -761,7 +890,11 @@ elab
 elab x ctx ty (etask :<=: src) =
   fmap (Sourced . (:<=: src)) <$> elab' x ctx ty etask
 
-runElabTask :: Name -> Meta -> ElabTask -> Elab ()
+runElabTask
+  :: Name
+  -> Meta -- meta which carries the solution for T
+  -> ElabTask -- T
+  -> Elab ()
 runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
   mtype <- normalise mctxt (atom SType) mtype
   case etask of
@@ -775,21 +908,21 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       pushProblems [xsProb, ysProb, eProb]
       metaDefn sol (mk SMatrix xTy yTy (lam x . lam y $ eSol) xsSol ysSol)
       newProb $ Done nil
-      move
+      move winning
     TypeExprTask (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
       metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
       newProb $ Done nil
-      move
+      move winning
     TypeExprTask (TyVar Lstring) | Just (SType, []) <- tagEh mtype -> do
       metaDefn sol $ mk SList (atom SChar) -< no (vlen mctxt)
       newProb $ Done nil
-      move
+      move winning
     TypeExprTask (TyVar x) -> -- TODO: check whether `x` is already present in the mctxt, i.e. shadowing
       findDeclaration (UserDecl Nothing x True [] False) >>= \case
         Nothing -> do
           newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
           cry sol
-          move
+          move Whacked
         Just (x, xty) -> do
           y <- excursion . pullUntil () $ \_ fr -> case fr of
                  Currently ty lhs rhs | lhs == FreeVar x -> Right rhs
@@ -805,7 +938,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , rhs = mtype
             }
           newProb . Done $ FreeVar x
-          move
+          move winning
     TypeExprTask (TyNum k) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         cs <- constrain "IsOne" $ Constraint
@@ -854,7 +987,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           pushProblems [cellProb]
           newProb . Elab sol $ Await (rcs <> ccs) (mk Sone cellSol)
           run
-      _ -> move
+      _ -> move worried
     TypeExprTask (TyBinaryOp Plus x y) -> do
       -- TODO:
       -- 1. make sure `mtype` admits plus
@@ -863,16 +996,35 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       (ySol, yProb) <- elab "plusYTy" mctxt mtype (TypeExprTask <$> y)
       pushProblems [xProb, yProb]
       newProb . Done $ nil -- FIXME: use the solutions
-      move
-    TypeExprTask (TyBinaryOp (Mul False {- dotted -} div) x y) -> do
+      move winning
+    TypeExprTask (TyBinaryOp (Mul False{- x*y -} div) x y) -> do
       -- Two main issues:
       -- redundancy in representation of matrices:
-      -- (e.g., R C [a] [b] \r.c. X vs
-      -- \One One one one \_._. X[a/r, b/c])
+      -- (e.g., R C [a] [b] \r c. X vs
+      -- \One One one one \_ _. X[a/r, b/c])
       -- guessing which multiplication case we are in (try them all):
       -- scalar * mx, mx * scalar, mx * mx
       -- (do we need two phase commit to metastore, local metastores?)
-      undefined -- TODO
+      rowTy <- invent "rowType" mctxt (atom SType)
+      midTy <- invent "middleType" mctxt (atom SType)
+      colTy <- invent "colType" mctxt (atom SType)
+
+      rx <- invent "rowX" mctxt (mk SList rowTy)
+      cx <- invent "colX" mctxt (mk SList midTy)
+      ry <- invent "rowY" mctxt (mk SList midTy)
+      cy <- invent "colY" mctxt (mk SList colTy)
+
+      cellXTy <- invent "cellX" (mctxt \\\ ("i", rowTy) \\\ ("j", wk midTy)) (atom SType)
+      cellYTy <- invent "cellY" (mctxt \\\ ("j'", midTy) \\\ ("k", wk colTy)) (atom SType)
+
+      let xTy = mk SMatrix rowTy midTy (lam "i" . lam "j" $ cellXTy) rx cx
+      let yTy = mk SMatrix midTy colTy (lam "j'" . lam "k" $ cellYTy) ry cy
+      (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask <$> x)
+      (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask <$> y)
+      pushProblems [xProb, yProb]
+
+      newProb Worry  -- TODO: temporary patch
+      run
     TypeExprTask (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         cs <- constrain "IsChar" $ Constraint
@@ -884,7 +1036,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           }
         newProb . Elab sol $ Await cs (ixKI mtype (lit s))
         run
-      _ -> move
+      _ -> move worried
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
@@ -897,7 +1049,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           }
         metaDefn sol (FreeVar x -< no (vlen mctxt))
         newProb . Done $ FreeVar x
-        move
+        move winning
       _ -> do  -- switch to being a scoping problem
         newProb $ LHS lhs
         run
@@ -912,22 +1064,24 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       SolvedIf [] -> do
         metaDefn sol tm
         newProb $ Done nil
-        move
+        move winning
       Impossible -> do
         cry sol
         newProb . Elab sol $ Abandon etask
-        move
+        move Whacked
       cstatus -> do
         newProb . Elab sol $ Await cstatus tm
-        move
-    _ -> move
+        move winning
+    _ -> move worried
 
 -- if move sees a Left fork, it should switch to Right and run
 -- if move sees a Right fork, switch to Left and keep moving
-move :: Elab ()
-move = pull >>= \case
+-- the mood tells us the status of the fork we are inside, i.e.,
+-- the frames and the problem in the state
+move :: Mood -> Elab ()
+move mood = pull >>= \case
   Nothing -> do
-    cleanup
+    cleanup mood
     st@MS{..} <- get
     if clock > epoch
       then do
@@ -936,34 +1090,52 @@ move = pull >>= \case
       else do
         diagnosticRun
   Just fr -> case fr of
-    Fork (Right frk) fs' p' -> do
-      (fs, p) <- switchFwrd (fs', p')
-      shup $ Fork (Left frk) fs p
-      move
-    Fork (Left frk) fs' p' -> do
-      (fs, p) <- switchFwrd (fs', p')
-      push $ Fork (Right frk) fs p
+    Fork (Right MkFork{..}) -> do
+      let (mood', store') = mood `andMood` fstatus
+      case store' of
+        Nothing -> pure ()
+        -- confine the local store we were carrying to the largest
+        -- region where it makes sense
+        Just store' -> shup $ LocalStore store'
+      (fframes, fprob) <- switchFwrd (fframes, fprob)
+      -- after switching forward, fframes and fprob pertain to the
+      -- branch, associated with the mood
+      shup $ Fork (Left MkFork{fstatus = () <$ mood, ..})
+      -- as we are moving out, the mood covers both forks
+      move mood'
+    Fork (Left MkFork{..}) -> do
+      case mood of
+        Winning _ store' | not (Map.null store') -> push $ LocalStore store'
+        _ -> pure ()
+      (fframes, fprob) <- switchFwrd (fframes, fprob)
+      push $ Fork (Right MkFork{fstatus = () <$ mood, ..})
       run
-    FunctionLeft fname (lhs :<=: src) -> do
-      (fs, p) <- switchFwrd ([], LHS lhs)
-      traverse_ push [Fork (Right $ FunctionName fname) fs p, Source src]
-      run
-    {- Problems [] -> do
-      (fs, p) <- switchFwrd ([], Done nil)
-      push $ Fork (Right Solved) fs p
-      move
-    Problems (p : ps) -> do
-      (fs, p) <- switchFwrd ([], p)
-      traverse_ push [Fork (Right Solved) fs p, Problems ps]
-      run -}
+    Catch MkFork{..} -> case mood of
+      -- decision to commit
+      Winning True ms ->
+        debugCatch ("Committing with " ++ show ms) $ move mood
+      -- don't commit yet, keep local store local
+      Winning False ms -> debugCatch ("Winning but not committing with " ++ show ms) $ do
+        unless (Map.null ms) . shup $ LocalStore ms
+        shup fr
+        move worried
+      -- right forks are our only hope now, prune the left fork
+      Whacked -> debugCatch "Whacked" $ do
+        switchFwrd (fframes, fprob)
+        run
     LocalNamespace ns -> do
       ns <- swapNameSupply ns
       shup $ LocalNamespace ns
-      move
+      move mood
+    LocalStore store -> case mood of
+      Winning wonEh store' -> move (Winning wonEh (store' <> store))
+      _ -> do
+        shup $ LocalStore store
+        move mood
     _ -> do
       fr <- normaliseFrame fr
       shup fr
-      move
+      move mood
 
 normaliseFrame :: Frame -> Elab Frame
 normaliseFrame = \case
@@ -983,9 +1155,12 @@ normaliseFrame = \case
       tm <- normalise emptyContext ty tm
       pure $ SynthD ty tm e
 
-cleanup :: Elab ()
-cleanup = do
+cleanup :: Mood -> Elab ()
+cleanup mood = do
   ms <- gets metaStore
+  ms <- case mood of
+    Winning _ ms' -> pure $ ms' <> ms
+    _ -> pure ms
   flip Map.traverseWithKey ms $ \name meta@Meta{..} -> nattily (vlen mctxt) $ do
     ctx <- traverse (traverse (normalise mctxt (atom SType))) mctxt
     ty <- normalise ctx (atom SType) mtype
@@ -1003,7 +1178,7 @@ diagnosticRun = llup >>= \case
       traverse_ push [Source (n, Hide msg), fr]
       diagnosticRun
     _ -> push fr >> diagnosticRun
-  Nothing -> diagnosticMove
+  Nothing -> diagnosticMove mempty
   where
     msg :: Int -> DiagnosticData -> Elab [Tok]
     msg dent = \case
@@ -1044,19 +1219,19 @@ unelabType ty | Just ct <- tagEh ty = case ct of
   _ -> pure [sym $ show ty]
 unelabType ty = pure [sym $ show ty]
 
-diagnosticMove :: Elab ()
-diagnosticMove = pull >>= \case
+diagnosticMove :: ForkCompleteStatus -> Elab ()
+diagnosticMove stat = pull >>= \case
   Nothing -> pure ()
   Just fr -> case fr of
-    Fork (Right frk) fs' p' -> do
-      (fs, p) <- switchFwrd (fs', p')
-      shup $ Fork (Left frk) fs p
-      diagnosticMove
-    Fork (Left frk) fs' p' -> do
-      (fs, p) <- switchFwrd (fs', p')
-      push $ Fork (Right frk) fs p
+    Fork (Right MkFork{..}) -> do
+      (fframes, fprob) <- switchFwrd (fframes, fprob)
+      shup $ Fork (Left MkFork{fstatus = stat ,..})
+      diagnosticMove $ stat <> fstatus
+    Fork (Left MkFork{..})  -> do
+      (fframes, fprob) <- switchFwrd (fframes, fprob)
+      push $ Fork (Right MkFork{fstatus = stat, ..})
       diagnosticRun
-    _ -> shup fr >> diagnosticMove
+    _ -> shup fr >> diagnosticMove stat
 
 generateInputReader :: String -- ^
   -> [String] -- ^
