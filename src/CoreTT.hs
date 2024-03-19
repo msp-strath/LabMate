@@ -465,6 +465,14 @@ evalSynth tm = withScope $ case tm of
                                       , t' //^ sub0 (D $^ tgt <&> atom Sfst))
             | otherwise -> error "evalSynth: funny pair"
       _ -> fail "evalSynth: eliminator for an unknown type"
+  tm | Just tm <- MX $? tm, (lmx, rmx) <- split tm -> do
+    (lmx, lmxTy) <- evalSynth lmx
+    (rmx, rmxTy) <- evalSynth rmx
+    -- TODO: FIXME
+    retTy <- case (tagEh lmxTy, tagEh rmxTy) of
+      (Just (SMatrix, [rowTy, midTy, lcellTy, rs, _]), Just (SMatrix, [_, colTy, rcellTy, _, cs])) ->
+        pure (mk SMatrix rowTy colTy lcellTy {- YIKES -} rs cs)
+    pure (E $^ MX $^ (R $^ lmx <&> lmxTy) <&> (R $^ rmx <&> rmxTy), retTy)
   M (x, n) :$ sig :^ th -> metaLookup x >>= \case
     Meta {..}
       | Just Refl <- nattyEqEh (vlen mctxt) n ->
@@ -581,8 +589,8 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
            cs1 <- prefixEh colTy cs0 cs
            h   <- nf rowTy rs0
            pure ([(h, [NFNeutral tm])], ((rs1, cs0), (rs0, cs1)))
-         _ -> fail "checkEvalMatrixAbel:"
-  | otherwise = fail "checkEvalMatrixAbel: not a valid matrix ctor"
+         _ -> fail "checkEvalMatrixAbel"
+  | otherwise = withScope $ fail $ "checkEvalMatrixAbel: not a valid matrix ctor " ++ show tm
 
 
 propEh :: Type ^ n -> TC n Bool

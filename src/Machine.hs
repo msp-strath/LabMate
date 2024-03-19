@@ -134,7 +134,7 @@ instance PrettyPrint MachineState where
   pprint st = do
     let (fz :<+>: fs) = position st
     lines <- pprint (fz <>> fs, problem st)
-    pure (show (metaStore st) : lines)
+    pure (show (metaStore st) : show (constraintStore st) : lines)
 
 type TERM = Term Chk ^ Z
 type TYPE = Type ^ Z
@@ -227,6 +227,7 @@ data ElabTask where
   LHSTask :: LHS' -> ElabTask
   ExprTask :: Expr' -> ElabTask
   Await :: NATTY n => ConstraintStatus -> Term Chk ^ n -> ElabTask
+  ConstrainTask :: NATTY n => (String, Constraint) -> Term Chk ^ n -> ElabTask
   Abandon :: ElabTask -> ElabTask
 deriving instance Show ElabTask
 
@@ -520,13 +521,29 @@ constrain s c@Constraint{..} =  case (traverse (traverse isHom) constraintCtx, c
     ty  <- normalise ctx (atom SType) ty
     lhs <- normalise ctx ty lhs
     rhs <- normalise ctx ty rhs
+    lhsFlexEh <- case lhs of
+       E :$ (M (x, n) :$ sig) :^ th
+         | Just meta@Meta{..} <- x `Map.lookup` ms
+         , Just Refl <- nattyEqEh n (vlen mctxt)
+         , Just Refl <- nattyEqEh n (vlen ctx) -> do
+           lhs' <- normalise mctxt mtype (nattily n (wrapMeta x))
+           pure (lhs == lhs')
+       _ -> pure False
+    rhsFlexEh <- case rhs of
+       E :$ (M (x, n) :$ sig) :^ th
+         | Just meta@Meta{..} <- x `Map.lookup` ms
+         , Just Refl <- nattyEqEh n (vlen mctxt)
+         , Just Refl <- nattyEqEh n (vlen ctx) -> do
+           rhs' <- normalise mctxt mtype (nattily n (wrapMeta x))
+           pure (rhs == rhs')
+       _ -> pure False
     case debug ("CONSTRAIN " ++ show lhs ++ " = " ++ show rhs) (lhs, rhs) of
       _ | debug "Checking syntactic equality?" (lhs == rhs) -> debug ("Passed syn eq for " ++ show lhs ++ " =?= " ++ show rhs) (pure $ SolvedIf [])
       (E :$ (M (x, n) :$ sig) :^ th, t :^ ph)
         | Just meta@Meta{..} <- x `Map.lookup` ms
         , Hoping <- mstat
-        , Right Refl <- idSubstEh sig
-        , Just ph <- ph `thicken` th
+        , lhsFlexEh
+        , Just Refl <- vlen mctxt `nattyEqEh` vlen ctx
         , x `Set.notMember` dependencies t ->
           case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
@@ -536,8 +553,8 @@ constrain s c@Constraint{..} =  case (traverse (traverse isHom) constraintCtx, c
       (t :^ ph, E :$ (M (x, n) :$ sig) :^ th)
         | Just meta@Meta{..} <- x `Map.lookup` ms
         , Hoping <- mstat
-        , Right Refl <- idSubstEh sig
-        , Just ph <- ph `thicken` th
+        , rhsFlexEh
+        , Just Refl <- vlen mctxt `nattyEqEh` vlen ctx
         , x `Set.notMember` dependencies t ->
           case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
@@ -591,7 +608,7 @@ constrain s c@Constraint{..} =  case (traverse (traverse isHom) constraintCtx, c
                       }
                     rowStat <- constrain s $ Constraint
                       { constraintCtx = constraintCtx
-                      , constraintType = mkConstraintType  (mk SList rowTy) rdeps (mk SList rowTy')
+                      , constraintType = mkConstraintType (mk SList rowTy) rdeps (mk SList rowTy')
                       , constraintStatus = Unstarted
                       , lhs = rs
                       , rhs = rs'
@@ -733,7 +750,11 @@ metaDefn x def = getMeta x >>= \case
       tick
       debug ("Meta Defn assigning" ++ show x) $
         modifyNearestStore (Map.insert x (Meta mctxt mtype (Just def) mstat))
-  _ -> error "metaDefn: check the status or the scope"
+  Meta{..} -> error . concat $
+    ["metaDefn: check the status or the scope of ", nattily (scopeOf def) $ show def
+    , " in scope ", show (scopeOf def)
+    , " for " , show x
+    , " in meta scope ", show (vlen mctxt)]
 
 invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
 invent x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
@@ -1085,52 +1106,39 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       colTy <- invent "colType" mctxt (atom SType)
 
       rx <- invent "rowX" mctxt (mk SList rowTy)
-      cx <- invent "colX" mctxt (mk SList midTy)
-      ry <- invent "rowY" mctxt (mk SList midTy)
+      cxry <- invent "colXrowY" mctxt (mk SList midTy)
       cy <- invent "colY" mctxt (mk SList colTy)
 
       cellXTy <- invent "cellX" (mctxt \\\ ("i", rowTy) \\\ ("j", wk midTy)) (atom SType)
       cellYTy <- invent "cellY" (mctxt \\\ ("j'", midTy) \\\ ("k", wk colTy)) (atom SType)
 
-      let xTy = mk SMatrix rowTy midTy (lam "i" . lam "j" $ cellXTy) rx cx
-      let yTy = mk SMatrix midTy colTy (lam "j'" . lam "k" $ cellYTy) ry cy
-      (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask <$> x)
-      (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask <$> y)
-      pushProblems [xProb, yProb]
-
-      cstat <- constrain "middle" $ Constraint
+      let xTy = mk SMatrix rowTy midTy (lam "i" . lam "j" $ cellXTy) rx cxry
+      let yTy = mk SMatrix midTy colTy (lam "j'" . lam "k" $ cellYTy) cxry cy
+      -- 1. Invent the cell type for the result
+      cellZTy <- invent "cellZ" (mctxt \\\ ("i", rowTy) \\\ ("k", wk colTy)) (atom SType)
+      -- 2. Construct the matrix type for the result
+      let zTy = mk SMatrix rowTy colTy (lam "i" . lam "k" $ cellZTy) rx cy
+      -- 3. Constrain it to the type we are checking against
+      zstat <- constrain "Zmatrix" $ Constraint
         { constraintCtx = fmap Hom <$> mctxt
-        , constraintType = Hom (mk SList midTy)
+        , constraintType = Hom (atom SType)
         , constraintStatus = Unstarted
-        , lhs = cx
-        , rhs = ry
+        , lhs = zTy
+        , rhs = mtype
         }
-      case cstat of
-        SolvedIf deps -> do
-          -- 1. Invent the cell type for the result
-          cellZTy <- invent "cellZ" (mctxt \\\ ("i", rowTy) \\\ ("k", wk colTy)) (atom SType)
-          -- 2. Construct the matrix type for the result
-          let zTy = mk SMatrix rowTy colTy (lam "i" . lam "k" $ cellZTy) rx cy
-          -- 3. Constrain it to the type we are checking against
-          zstat <- constrain "Zmatrix" $ Constraint
-            { constraintCtx = fmap Hom <$> mctxt
-            , constraintType = Hom (atom SType)
-            , constraintStatus = Unstarted
-            , lhs = zTy
-            , rhs = mtype
-            }
-          -- 4. Switch to the problem of ensuring the cell types are compatible
-          mulstat <- constrain "ZMultiplicable" $ Multiplicable
+      -- 4. Switch to the problem of ensuring the cell types are compatible
+      let mulConstraint = ("ZMultiplicable", Multiplicable
             { constraintCtx = fmap Hom <$> mctxt
             , constraintStatus = Unstarted
             , mulIndexTypes = (rowTy, midTy, colTy)
             , mulDataTypes = (cellXTy, cellYTy, cellZTy)
-            }
-          newProb . Elab sol $ Await (cstat <> zstat <> mulstat) (mk Smult xSol ySol)
-          run
-        _ -> do
-          newProb Whack
-          run
+            })
+      (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask <$> x)
+      (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask <$> y)
+      (zSol, zProb) <- elab' "mulZRet" mctxt zTy (ConstrainTask mulConstraint (E $^ MX $^ (R $^ xSol <&> xTy) <&> (R $^ ySol <&> yTy)))
+      pushProblems [xProb, yProb, zProb]
+      newProb . Elab sol $ Await zstat zSol
+      run
     TypeExprTask (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         cs <- constrain "IsChar" $ Constraint
@@ -1178,6 +1186,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       cstatus -> do
         newProb . Elab sol $ Await cstatus tm
         move winning
+    ConstrainTask (cname, constraint) tm -> do
+      cstatus <- constrain cname constraint
+      newProb . Elab sol $ Await cstatus tm
+      run
     _ -> move worried
 
 -- if move sees a Left fork, it should switch to Right and run
@@ -1300,7 +1312,7 @@ diagnosticRun = llup >>= \case
             ++ sty ++ [sym ",", spc 1, sym "but it does not"]
           ([], _) ->
             resp ++ [non en, spc 1, sym "should have type", spc 1]
-            ++ sty ++ [sym ",", spc 1, sym "and it might"{-, spc 1, sym (show (dependencies tm)), spc 1, sym (show statTm)-}]
+            ++ sty ++ [sym ",", spc 1, sym "and it might." {- , spc 1, sym (show (dependencies tm)), spc 1, sym (show statTm)-}]
           (_, _) | Crying `elem` statTy ->
             resp ++ [sym "There is no sensible type for", spc 1, non en]
           (_, _) ->

@@ -42,8 +42,10 @@ data Ctor (s :: Sort) (t :: Sort) where
   R :: Ctor (Prd Chk Chk) Syn
   -- tuples
   T :: Ctor (Prd Chk Chk) Chk
-  -- desctructors
+  -- unary destructors
   D :: Ctor (Prd Syn Chk) Syn
+  -- matrix mul destructor
+  MX :: Ctor (Prd Syn Syn) Syn
   -- metavar usage (these are unknowns, not schematic vars)
   M :: (Name, Natty k) -> Ctor (Sub k) Syn
   -- subst
@@ -114,6 +116,7 @@ cmpCtor E E = EQ' Refl
 cmpCtor R R = EQ' Refl
 cmpCtor T T = EQ' Refl
 cmpCtor D D = EQ' Refl
+cmpCtor MX MX = EQ' Refl
 cmpCtor (M (n, k)) (M (n', k')) = case truck ("MetaCmp " ++ show n ++" =?= " ++ show n') $ compare n n' of
   LT -> LT'
   GT -> GT'
@@ -129,7 +132,7 @@ cmpCtor t t' = case compare (helper t) (helper t') of
     helper = \case
       { A{} -> 1; I{} -> 2; E -> 3; R -> 4
       ; T -> 5; D -> 6; M{} -> 7; S0 -> 8
-      ; ST{} -> 9; SL{} -> 10; DL{} -> 11 }
+      ; ST{} -> 9; SL{} -> 10; DL{} -> 11; MX -> 12 }
 
 
 -- these instances should only be used for Norm
@@ -341,6 +344,8 @@ tmShow b (T :$ P tl u tr :^ th) ctx =
     s = tmShow False (tl :^ covl u -< th) ctx ++ tmShow True (tr :^ covr u -< th) ctx
 tmShow b (D :$ tm :^ th) ctx = let (a, d) = split (tm :^ th)
   in concat [barIf b, tmShow False a ctx, "(", tmShow False d ctx, ")"]
+tmShow b (MX :$ tm :^ th) ctx = let (a, d) = split (tm :^ th)
+  in concat [barIf b, "(", tmShow False a ctx, " * ", tmShow False d ctx, ")"]
 -- TODO : add the remaining cases
 
 barIf :: Bool -> String
