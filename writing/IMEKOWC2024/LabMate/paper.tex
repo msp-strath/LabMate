@@ -3,6 +3,7 @@
 %%%% Packages %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \usepackage[colorlinks=true]{hyperref}
 \usepackage{microtype}
+\usepackage{proof}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%%% Macros %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -13,6 +14,20 @@
 \newcommand{\rcb}{\texttt{\symbol{125}}}
 \newcommand{\lsb}{\texttt{\symbol{91}}}
 \newcommand{\rsb}{\texttt{\symbol{93}}}
+
+\newcommand{\istype}[1]{#1\ \textsf{type}}
+\newcommand{\isadd}[1]{#1\ \textsf{numeric}}
+\newcommand{\ismult}[3]{(#1, #2, #3)\ \textsf{multipliable}}
+
+\newcommand{\append}{+\!\!\!+}
+\newcommand{\hjux}[2]{{#1}|{#2}}
+\newcommand{\vjux}[2]{\frac{#1}{#2}}
+
+\newcommand{\One}{\mathbf{1}}
+\newcommand{\Matrix}[5]{\mathsf{Matrix}\,#1\,#2\,#3\,#4\,#5}
+\newcommand{\List}[1]{\mathsf{List}\,#1}
+
+
 
 \newcommand{\remph}{\emph}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -41,7 +56,136 @@
 
 \section{Types for matrices}
 
-% matrix types, and their motivation
+Under the hood, LabMate translates MATLAB expressions to typed
+expressions in its own core type theory.
+%
+Since matrices feature heavily in MATLAB code, the type of matrices
+play a central role in this type theory.
+%
+We make this type rather precise, by allowing the type of each entry
+in the matrix to vary according to the row and column of the entry:
+%
+we parameterise the type of matrices by a type $R$ associated with
+each row, a type $C$ associated with each column, and a type $E(x,y)$
+which might vary depending on the values of parameters $x : R$ and
+$y : C$, as well as two lists $rs : \List{R}$ and $\List{C}$ --- the
+idea being that the $i$th entry in the list $rs$ and the $j$th entry
+in the list $cs$ determines the type of the $(i, j)$ coordinate in the
+matrix.
+%
+Summarised as an inference rule, matrix types are thus formed as follows:
+%
+\[
+  \infer{\istype{\Matrix{R}{C}{E}{rs}{cs}}}
+  {
+    \istype{R}
+    &\quad
+    \istype{C}
+    &\quad
+    x : R, y : C \vdash \istype{E(x,y)}
+    &\quad
+    rs : \List{R}
+    &\quad
+    cs : \List{C}
+  }
+\]
+
+A notable special case is when both $R$ and $C$ are the unit type
+$R = C = \One$, that is, the type with exactly one element.
+%
+In this case, there is only one type of entries $E$ (because both $x$
+and $y$ must be the unique element of the unit type), and the only
+information available in the lists $rs : \List{\One}$ and
+$cs : \List{\One}$ is their length.
+%
+Thus, we have recovered $\Matrix{\One}{\One}{E}{m}{n}$ as the type of
+$m \times n$ matrices with entries of type $E$, where $n$ and $m$ are
+the unique lists over the unit type of length $n$ and $m$
+respectively.
+
+Another noteworthy special case which we want to support takes $R$ and
+$R$ to be types of physical dimensions, with $E(d_1, d_2)$ to be the
+type of physical quantities of dimension $d_1 \cdot d_2^{-1}$.
+%
+This way, we can reduce dimensional consistency checking \`a la
+Kennedy~\cite{kennedyUOM} also for programs involving matrices,
+following the work of Hart~\cite{hart}.
+%
+We will see in \sref{sec:example-revisited} how this can be helpful.
+
+Terms of matrix type in the core type theory are built up from
+$1 \times 1$ matrices and pasting matrices horizontally and vertically.
+%
+Singleton matrices have the following typing rule
+\[
+  \infer{[e] : \Matrix{R}{C}{E}{[r]}{[c]}}
+    {r : R
+      &\quad
+      c : C
+      &\quad
+      e : E(r, c)
+    }
+\]
+%
+while horizontal and vertical pasting horizontally have the following
+typing rules:
+\[
+  \infer{\hjux{A}{B} : \Matrix{R}{C}{E}{rs}{(cs_A \append cs_B)}}
+  {
+    A : \Matrix{R}{C}{E}{rs}{cs_A}
+    &\quad
+    B : \Matrix{R}{C}{E}{rs}{cs_B}
+  }
+\]
+\[
+  \infer{\vjux{A}{B} : \Matrix{R}{C}{E}{(rs_A \append rs_B)}{cs}}
+  {
+    A : \Matrix{R}{C}{E}{rs_A}{cs}
+    &\quad
+    B : \Matrix{R}{C}{E}{rs_B}{cs}
+  }
+\]
+When comparing matrices for equality, we reassociate horizontal and
+vertical pastings, so that $\hjux{\vjux{A}{C}}{\vjux{B}{D}}$ and
+$\vjux{\hjux{A}{B}}{\hjux{C}{D}}$ indeed are considered equal.
+
+Two matrices $A$ and $B$ can be added if all entry types $E(x, y)$ are
+numeric (for example integers, or floating point numbers), and if $A$
+and $B$ have the same matrix type:
+%
+\[
+  \infer{A + B : \Matrix{R}{C}{E}{rs}{cs}}
+  {
+    x : R, y : C \vdash \isadd{E(x, y)}
+    &\quad
+    A : \Matrix{R}{C}{E}{rs}{cs}
+    &\quad
+    B : \Matrix{R}{C}{E}{rs}{cs}
+  }
+\]
+%
+Matrix multiplication is trickier, because it does not demand that $A$
+and $B$ have the same type --- rather, it demands that $A$ and $B$
+have \remph{compatible} types:
+%
+\[
+  \infer{A * B : \Matrix{R}{C}{E''}{rs}{cs}}
+  {
+    \ismult{E}{E'}{E''}
+    &\quad
+    A : \Matrix{R}{C}{E}{rs}{ms}
+    &\quad
+    B : \Matrix{R}{C}{E'}{ms}{cs}
+  }
+\]
+The entry types $E$, $E'$, $E''$ are multipliable if for all $x$, $y$
+and $z$, we have that $E(x, y)$ and $E'(y, z)$ supports a
+multiplication operation with codomain $E''(x, z)$.
+%
+This is certainly the case if all entry types involved are simply
+integers or floating point numbers, but this constraint can also
+ensure that the physical units involved line up.
+
 
 % typechecking
 
@@ -54,6 +198,7 @@
 % Stack machine, with disjunctive problem solving
 
 \section{Supporting dimensional consistency}
+\label{sec:example-revisited}
 
 % matrix multiplication with units of measure
 
@@ -63,7 +208,7 @@
 
 
 \bibliographystyle{ws-procs9x6}
-%\bibliography{labmate}
+\bibliography{labmate}
 
 \end{document}
 
