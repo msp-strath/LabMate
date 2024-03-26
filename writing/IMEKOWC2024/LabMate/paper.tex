@@ -4,6 +4,7 @@
 \usepackage[colorlinks=true]{hyperref}
 \usepackage{microtype}
 \usepackage{proof}
+\usepackage{mathtools}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%%% Macros %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -30,6 +31,9 @@
 
 
 \newcommand{\remph}{\emph}
+
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{TODO: #1}}}
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{document}
@@ -53,6 +57,92 @@
 \section{LabMate in action}
 
 % simple matrix multiplication example
+
+Consider the problem of resistance calibration: \todo{explain here}.
+
+% $t_i$ time ($\mathsf{T}$; in seconds); $v_i$ voltage ($\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$; in volt)
+
+\[
+\begin{pmatrix*}
+  t_1 & 1 & -1 & 0 & 0 \\
+  t_2 & 1 & -1 & 0 & 0 \\
+  t_3 & 1 & -1 & 0 & 0 \\
+  t_4 & 1 & -1 & 0 & 0 \\
+  t_5 & 1 & -1 & 0 & 0 \\
+  t_6 & 0 & 0 & 1 & -1 \\
+  t_7 & 0 & 0 & 1 & -1 \\
+  t_8 & 0 & 0 & 1 & -1 \\
+  t_9 & 0 & 0 & 1 & -1 \\
+\end{pmatrix*}
+\times
+\begin{pmatrix}
+  m \\
+  c \\
+  a \\
+  c_{\text{offset}} \\
+  a_{\text{offset}}
+\end{pmatrix}
+=
+\begin{pmatrix}
+  v_1 \\
+  v_2 \\
+  v_3 \\
+  v_4 \\
+  v_5 \\
+  v_6 \\
+  v_7 \\
+  v_8 \\
+  v_9
+\end{pmatrix}
+\]
+
+This can be converted into a MATLAB problem with LabMate annotations as follows:
+\begin{verbatim}
+%> A :: [ 9 x 5 ] double
+A = [ t1 1 -1 0 0
+      t2 1 -1 0 0
+      t3 1 -1 0 0
+      t4 1 -1 0 0
+      t5 1 -1 0 0
+      t6 0 0 1 -1
+      t7 0 0 1 -1
+      t8 0 0 1 -1
+      t9 0 0 1 -1 ]
+
+%> B :: [ 5 x 1 ] double
+B = [ m c a cOffset aOffset ]
+
+C = A * B
+
+%> typeof C
+\end{verbatim}
+%
+\todo{Is computing C from A and B what we want?}
+The lines starting with `\texttt{\%>}' are interpreted as ordinary comments by MATLAB, but as \remph{input directives} by LabMate. LabMate acts by reading the source code and outputting it again, but possibly with some additional \remph{responses} to the directives added.
+
+Did you notice the error in the above code? The matrix \texttt{B} should be of size $5 \times 1$, but is erroneously of size $1 \times 5$ instead. LabMate detects this error and produces the following as output, where we have suppressed the same definition of \texttt{A} as above:
+\begin{verbatim}
+%> A :: [ 9 x 5 ] double
+A = ...
+
+%> B :: [ 5 x 1 ] double
+B = [ m c a cOffset aOffset ]
+
+C = A * B
+
+%> typeof C
+%< the type of C is quite a puzzle; unsolved constraints 5 =? 1, 1 =? 5
+\end{verbatim}
+%
+That is, LabMate says that for \texttt{C} to have a sensible type, we need the (impossible) constraints $5 = 1$ and $1 = 5$ to be true, arising from the fact that we have declared \texttt{B} to be a $5 \times 1$ matrix, but in fact it is a $1 \times 5$ matrix. Note that the original source code has been retained, but a response has been inserted to our \texttt{typeof} query. If we change \texttt{B} to
+\begin{verbatim}
+B = [ m; c; a; cOffset; aOffset ]
+\end{verbatim}
+instead, then LabMate responds
+\begin{verbatim}
+%< C :: [ 9 x 1 ] double
+\end{verbatim}
+This way, LabMate can detect matrix size errors at development time, rather than at runtime.
 
 \section{Types for matrices}
 
@@ -201,6 +291,9 @@ ensure that the physical units involved line up.
 \label{sec:example-revisited}
 
 % matrix multiplication with units of measure
+
+GravCalc example again: $t_i$ time ($\mathsf{T}$; in seconds); $v_i$ voltage ($\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$; in volt)
+
 
 \section{Conclusions}
 
