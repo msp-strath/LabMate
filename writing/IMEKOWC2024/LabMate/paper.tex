@@ -55,6 +55,7 @@
 
 
 \section{LabMate in action}
+\label{sec:example}
 
 % simple matrix multiplication example
 
@@ -292,7 +293,22 @@ ensure that the physical units involved line up.
 
 % matrix multiplication with units of measure
 
-GravCalc example again: $t_i$ time ($\mathsf{T}$; in seconds); $v_i$ voltage ($\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$; in volt)
+Coming back to the example from \sref{sec:example} again, we can give both \texttt{A} and \texttt{B} more precise types, also taking their physical dimensions into account:
+\begin{verbatim}
+%> A :: [ i <- 9,  j <- 5 ] (if j == 0 then Q T else Q 1)
+%> B :: [ Q TODO; Q TODO; Q TODO; Q TODO; Q TODO; Q TODO ]
+\end{verbatim}
+This says that the entries in the first column of \texttt{A} are quantities of dimension time $\mathsf{T}$, while all other entries are dimensionless quantities. Meanwhile the entries of \texttt{B} are quantities of dimension \todo{fill in} respectively. LabMate reports that the type of \texttt{C} should be
+\begin{verbatim}
+%< C :: [ 5 x 1 ] (Q (ML^2T^(-3)I^(-1)))
+\end{verbatim}
+that is a $5 \times 1$ matrix whose entries are all quantities of dimension $\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$. Another possible way to use LabMate is to instead declare that this is the expected type for \texttt{C}, and to leave the type of one of the entries in \texttt{B} as an unknown:
+\begin{verbatim}
+%> B :: [ Q TODO; Q TODO; ?aTy; Q TODO; Q TODO; Q TODO ]
+\end{verbatim}
+We can then ask LabMate to solve the \remph{meta variable} \texttt{?aTy}, to which LabMate responds that we must have \todo{\texttt{?aTy} = fill in}. This way the types of LabMate can be used to validate and experiment with the dimensional consistency of the quantities involved.
+
+%GravCalc example again: $t_i$ time ($\mathsf{T}$; in seconds); $v_i$ voltage ($\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$; in volt)
 
 
 \section{Conclusions}
