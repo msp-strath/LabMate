@@ -31,7 +31,7 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Control.Monad.Reader
 
-debug = const id --trace
+debug = trace
 debugCatch = const id --trace
 debugMatrix = trace
 
@@ -688,8 +688,8 @@ constrain s c = do
       Unstarted -> SolvedIf [s]
       _ -> constraintStatus c
 
-constrainEqualType :: TYPE -> TYPE -> Elab ()
-constrainEqualType lhs rhs = (() <$) . constrain "Q" $ Constraint
+constrainEqualType :: TYPE -> TYPE -> Elab ConstraintStatus
+constrainEqualType lhs rhs = constrain "Q" $ Constraint
   { constraintCtx   = VN
   , constraintType  = Hom (atom SType)
   , constraintStatus = Unstarted
@@ -709,7 +709,7 @@ findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} =
       Locale (FunctionLocale _) -> shup f >> go True -- we know we are in a function
       Declaration n u'@UserDecl{varTy = ty', currentName = old', seen = seen', newNames = news'} | old == old' -> do
         case ty of
-          Just ty -> constrainEqualType ty ty'
+          Just ty -> () <$ constrainEqualType ty ty'
           Nothing -> pure ()
         Just (n, ty') <$ push (Declaration n u'{seen = seen' || seen, newNames = news' ++ news})
       _ -> shup f >> go b
@@ -991,19 +991,26 @@ elab x ctx ty (etask :<=: src) =
   fmap (Sourced . (:<=: src)) <$> elab' x ctx ty etask
 
 
-ensureMatrixType :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, NmTy ^ n, Norm Chk ^ n, Norm Chk ^ n)
+ensureMatrixType :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, NmTy ^ n, Norm Chk ^ n, Norm Chk ^ n, ConstraintStatus)
 ensureMatrixType ctxt ty
   | Just (SMatrix, [rowTy, colTy, cellTy, rs, cs]) <- tagEh ty
   {- , Just cellTy <- lamEh cellTy
-  , Just cellTy <- lamEh cellTy -} = pure (rowTy, colTy, cellTy, rs, cs)
+  , Just cellTy <- lamEh cellTy -} = pure (rowTy, colTy, cellTy, rs, cs, mempty)
   | otherwise = nattily (vlen ctxt) $ do
       rowTy <- invent "rowType" ctxt (atom SType)
       colTy <- invent "colType" ctxt (atom SType)
       let ctxtRC = ctxt \\\ ("r", rowTy) \\\ ("c", wk colTy)
-      cellTy <- invent "cellType" ctxtRC (atom SType)
+      cellTy <- lam "r" . lam "c" <$> invent "cellType" ctxtRC (atom SType)
       rs <- invent "rs" ctxt (mk SList rowTy)
       cs <- invent "cs" ctxt (mk SList colTy)
-      pure (rowTy, colTy, lam "r" $ lam "c" cellTy, rs, cs)
+      cstat <- constrain "ensureMat" $ Constraint
+        { constraintCtx = fmap Hom <$> ctxt
+        , constraintType = Hom (atom SType)
+        , constraintStatus = Unstarted
+        , lhs = mk SMatrix rowTy colTy cellTy rs cs
+        , rhs = ty
+        }
+      pure (rowTy, colTy, cellTy, rs, cs, cstat)
 
 runElabTask
   :: Name
@@ -1040,18 +1047,20 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           move Whacked
         Just (x, xty) -> do
           y <- excursion . pullUntil () $ \_ fr -> case fr of
-                 Currently ty lhs rhs | lhs == FreeVar x -> Right rhs
+                 Currently ty lhs rhs | lhs == FreeVar x -> Right (ty, rhs)
                  _ -> Left ()
           case y of
             Nothing  -> cry sol
-            Just rhs -> metaDefn sol $ rhs -< no (vlen mctxt)
-          constrain "VarExpr" $ Constraint
-            { constraintCtx = fmap Hom <$> mctxt
-            , constraintType = Hom (atom SType)
-            , constraintStatus = Unstarted
-            , lhs = xty -< no natty
-            , rhs = mtype
-            }
+            Just (ty, rhs) -> do
+              xstat <- constrainEqualType ty xty
+              xstat <- fmap (<> xstat) <$> constrain "VarExpr" $ Constraint
+                { constraintCtx = fmap Hom <$> mctxt
+                , constraintType = Hom (atom SType)
+                , constraintStatus = Unstarted
+                , lhs = ty -< no natty
+                , rhs = mtype
+                }
+              pushProblems [Elab sol $ Await xstat (rhs -< no (vlen mctxt))]
           newProb . Done $ FreeVar x
           move winning
     TypeExprTask (TyNum k) -> case tagEh mtype of
@@ -1171,22 +1180,22 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         run
       _ -> move worried
     TypeExprTask (TyJux dir x y) -> do
-      (rowTy, colTy, cellTy, rs, cs) <- ensureMatrixType mctxt mtype
+      (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
       case dir of
         Vertical -> do
-          rs0 <- debugMatrix "VJUX matrix ####" $ invent "rs0" mctxt (mk SList rowTy)
+          rs0 <- debugMatrix ("VJUX matrix #### " ++ show mtype) $ invent "rs0" mctxt (mk SList rowTy)
           rs1 <- invent "rs1" mctxt (mk SList rowTy)
-          cstat <- constrain "SplitRs" $ Constraint
+          cstat <- fmap (<> tystat) $ constrain "SplitRs" $ Constraint
             { constraintCtx = fmap Hom <$> mctxt
             , constraintType = Hom (mk SList rowTy)
             , constraintStatus = Unstarted
-            , lhs = rs
-            , rhs = mk Splus rs0 rs1
+            , lhs = mk Splus rs0 rs1
+            , rhs = rs
             }
           (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask <$> x)
           (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask <$> y)
           pushProblems [xProb, yProb]
-          newProb . Elab sol $ Await cstat (mk Svjux xSol ySol)
+          newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat) cstat) $ debugMatrix "Hello!!!!!" (mk Svjux xSol ySol)
           run
         Horizontal -> move worried
     LHSTask lhs -> case lhs of

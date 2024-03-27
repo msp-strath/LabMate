@@ -576,7 +576,7 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
     (rm, ((_, cs1), (_, cs''))) <- checkEvalMatrixNF nf ty rt r
     pure (lm `hjux` rm,  ((rs', mk Splus cs0 cs1), (rs0, cs'')))
   | Just (Svjux, [t, b]) <- tagEh tm = withScope $ do
-    (tm, (lb@(_, cs0), (rs0, cs'))) <- checkEvalMatrixNF nf ty mx t
+    (tm, (lb@(_, cs0), (rs0, cs'))) <- track ("checkEval VJUX " ++ show tm) $ checkEvalMatrixNF nf ty mx t
     (bm, ((rs'', _), (rs1, _))) <- checkEvalMatrixNF nf ty lb b
     pure (tm `vjux` bm, ((rs'', cs0), (mk Splus rs0 rs1, cs')))
   | Just tm <- E $? tm = withScope $ do
@@ -585,7 +585,7 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
        Nothing -> checkEvalMatrixNF nf ty mx tm
        Just tm -> case tagEh ty' of
          Just (SMatrix, [_, _, _,  rs0, cs0]) -> do
-           rs1 <- prefixEh rowTy rs0 rs
+           rs1 <- track ("Are we here " ++ show tm) $ prefixEh rowTy rs0 rs
            cs1 <- prefixEh colTy cs0 cs
            h   <- nf rowTy rs0
            pure ([(h, [NFNeutral tm])], ((rs1, cs0), (rs0, cs1)))
