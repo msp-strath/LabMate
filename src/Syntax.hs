@@ -48,16 +48,32 @@ data TensorType'
   = Tensor ((String, TypeExpr), (String, TypeExpr)) TypeExpr
   deriving Show
 
+data VOrH = Vertical | Horizontal
+  deriving Show
+
 -- possibly incomplete list of type level expressions
 data TypeExpr'
   = TyVar String -- might also be constants, e.g. Double
   | TyNum Int
   | TyApp TypeExpr [TypeExpr]
-  | TyMat [[TypeExpr]]
+  -- | TyMat [[TypeExpr]]
+  | TyJux VOrH TypeExpr TypeExpr
+  | TyNil VOrH
   | TyBinaryOp BinOperator TypeExpr TypeExpr
   | TyUnaryOp UnOperator TypeExpr
   | TyStringLiteral String
   deriving Show
+
+tyMat :: [[TypeExpr]] -> TypeExpr'
+tyMat exps = what $ go Vertical (go Horizontal id) exps
+  where
+    jux _ e (TyNil _ :<=: _) = e
+    jux dir e e' = noSource $ TyJux dir e e'
+
+    nil dir = noSource $ TyNil dir
+
+    go :: VOrH -> (a -> TypeExpr) -> [a] -> TypeExpr
+    go dir pre = foldr (jux dir . pre) (nil dir)
 
 type Res = [Tok]
 
@@ -87,12 +103,14 @@ toTypeExpr' (Var x) = pure $ TyVar x
 toTypeExpr' (IntLiteral n) = pure $ TyNum n
 toTypeExpr' (StringLiteral s) = pure $ TyStringLiteral s
 toTypeExpr' (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
+toTypeExpr' (Mat exps) = do
+   exps <- traverse (traverse toTypeExpr) exps
+   pure $ tyMat exps
 -- FIXME : add more
 toTypeExpr' _ = Nothing
 
 toTypeExpr :: Expr -> Maybe TypeExpr
 toTypeExpr = traverse toTypeExpr'
-
 
 data LHS'
   = LVar String

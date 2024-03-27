@@ -33,6 +33,7 @@ import Control.Monad.Reader
 
 debug = const id --trace
 debugCatch = const id --trace
+debugMatrix = trace
 
 type Elab = State MachineState
 
@@ -209,7 +210,6 @@ winning = Winning True mempty
 worried :: Monoid a => Mood' a
 worried = Winning False mempty
 
-
 data DeclarationType a
   = UserDecl
   { varTy :: a             -- (eventual) type
@@ -339,13 +339,17 @@ postRight fs = pull >>= \case
     getStatus (Fork frk) = either fstatus fstatus frk
     getStatus _ = mempty
 
-
 switchFwrd :: ([Frame], Problem) -> Elab ([Frame], Problem)
 switchFwrd (fs', p') = do
   st@MS{..} <- get
   let fz :<+>: fs = position
   put $ st { position = fz :<+>: fs', problem = p' }
   pure (fs, problem)
+
+pushSource :: Source -> Elab ()
+pushSource src
+  | realSourceEh src = push $ Source src
+  | otherwise = pure ()
 
 prob :: Elab Problem
 prob = llup >>= \case
@@ -510,7 +514,7 @@ ctx \\\\ x = fmap (fmap wk) <$> ctx :# x
 
 normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
 normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
-  Left err -> error $ "normalise : TC error" ++ err
+  Left err -> nattily (vlen ctx) $ error . concat $ ["normalise: TC error ", err, " for ", show tm, "::", show ty]
   Right tm -> pure tm
 
 constrain :: String -> Constraint -> Elab ConstraintStatus
@@ -731,7 +735,7 @@ onNearestSource :: ([Tok] -> [Tok]) -> Elab ()
 onNearestSource f = excursion go where
   go = pull >>= \case
     Nothing -> error "Impossible: no enclosing Source frame"
-    Just (Source (n, Hide ts)) -> push $ Source (n, Hide $ f ts)
+    Just (Source (n, Hide ts)) -> pushSource (n, Hide $ f ts)
     Just f -> shup f >> go
 
 metaDecl :: Status -> String -> Context n -> Type ^ n -> Elab Name
@@ -809,16 +813,16 @@ run = prob >>= \case
       move winning
   Expression (App (f :<=: src) args) -> do
     pushProblems $ Sourced . fmap Expression <$> args
-    push $ Source src
+    pushSource src
     newProb $ FunCalled f
     run
   Expression (Brp (e :<=: src) args) -> do
     pushProblems $ Sourced . fmap Expression <$> args
-    push $ Source src
+    pushSource src
     newProb $ Expression e
     run
   Expression (Dot (e :<=: src) fld) -> do
-    push $ Source src
+    pushSource src
     newProb $ Expression e
     run
   Expression (Mat es) -> do
@@ -829,12 +833,12 @@ run = prob >>= \case
   Expression (DoubleLiteral d) -> newProb (Done $ lit d) >> move winning
   Expression (StringLiteral s) -> newProb (Done $ lit s) >> move winning
   Expression (UnaryOp op (e :<=: src)) -> do
-    push $ Source src
+    pushSource src
     newProb $ Expression e
     run
   Expression (BinaryOp op (e0 :<=: src0) e1) -> do
     pushProblems [Sourced (Expression <$> e1)]
-    push $ Source src0
+    pushSource src0
     newProb $ Expression e0
     run
   Expression ColonAlone -> newProb (Done $ atom ":") >> move winning
@@ -844,7 +848,7 @@ run = prob >>= \case
     [] -> newProb (Done nil) >> move winning
     (r :<=: src):rs -> do
       pushProblems (Sourced . fmap Expression <$> rs)
-      push $ Source src
+      pushSource src
       newProb $ Expression r
       run
   Command (Assign lhs rhs) -> do
@@ -856,7 +860,7 @@ run = prob >>= \case
     newProb rhsProb
     run
   Command (Direct rl (dir :<=: src)) -> do
-    push $ Source src
+    pushSource src
     runDirective rl dir
   Command (Function (lhs, fname :<=: _, args) cs) ->
     findDeclaration (UserDecl Nothing fname True [] False)  >>= \case
@@ -884,7 +888,7 @@ run = prob >>= \case
     move winning
   Command (For (x, e :<=: src) cs) -> do
     pushProblems $ (Sourced. fmap Command <$> cs) ++ [Sourced (LHS . LVar <$> x)]
-    push $ Source src
+    pushSource src
     newProb $ Expression e
     run
   Command (While e cs) -> do
@@ -925,7 +929,7 @@ run = prob >>= \case
     move worried
   Sourced (p :<=: src) -> do
     localNamespace . take 10 . filter isAlpha $ show p
-    push $ Source src
+    pushSource src
     newProb p
     run
   Problems [] -> do
@@ -940,7 +944,7 @@ run = prob >>= \case
 
 runDirective :: ResponseLocation -> Dir' -> Elab ()
 runDirective rl (dir :<=: src, body) = do
-  push $ Source src
+  pushSource src
   case dir of
     Rename old new -> do
       newProb $ RenameAction old new rl
@@ -985,6 +989,21 @@ elab
   -> Elab (Term Chk ^ n, Problem)
 elab x ctx ty (etask :<=: src) =
   fmap (Sourced . (:<=: src)) <$> elab' x ctx ty etask
+
+
+ensureMatrixType :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, NmTy ^ n, Norm Chk ^ n, Norm Chk ^ n)
+ensureMatrixType ctxt ty
+  | Just (SMatrix, [rowTy, colTy, cellTy, rs, cs]) <- tagEh ty
+  {- , Just cellTy <- lamEh cellTy
+  , Just cellTy <- lamEh cellTy -} = pure (rowTy, colTy, cellTy, rs, cs)
+  | otherwise = nattily (vlen ctxt) $ do
+      rowTy <- invent "rowType" ctxt (atom SType)
+      colTy <- invent "colType" ctxt (atom SType)
+      let ctxtRC = ctxt \\\ ("r", rowTy) \\\ ("c", wk colTy)
+      cellTy <- invent "cellType" ctxtRC (atom SType)
+      rs <- invent "rs" ctxt (mk SList rowTy)
+      cs <- invent "cs" ctxt (mk SList colTy)
+      pure (rowTy, colTy, lam "r" $ lam "c" cellTy, rs, cs)
 
 runElabTask
   :: Name
@@ -1151,6 +1170,25 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb . Elab sol $ Await cs (ixKI mtype (lit s))
         run
       _ -> move worried
+    TypeExprTask (TyJux dir x y) -> do
+      (rowTy, colTy, cellTy, rs, cs) <- ensureMatrixType mctxt mtype
+      case dir of
+        Vertical -> do
+          rs0 <- debugMatrix "VJUX matrix ####" $ invent "rs0" mctxt (mk SList rowTy)
+          rs1 <- invent "rs1" mctxt (mk SList rowTy)
+          cstat <- constrain "SplitRs" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (mk SList rowTy)
+            , constraintStatus = Unstarted
+            , lhs = rs
+            , rhs = mk Splus rs0 rs1
+            }
+          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask <$> x)
+          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask <$> y)
+          pushProblems [xProb, yProb]
+          newProb . Elab sol $ Await cstat (mk Svjux xSol ySol)
+          run
+        Horizontal -> move worried
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)

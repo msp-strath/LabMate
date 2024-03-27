@@ -150,7 +150,7 @@ ptypeexpr ci = go >>= more ci where
                _ -> mempty)
    <|> pws (TyStringLiteral <$> pstringlit)
   lhsstuff ci = (pws (TyVar <$> pnom) >>= lmore)
-            <|> pws (TyMat <$> pgrp (== Bracket Square) (many (prow ptypeexpr)))
+            <|> pws (tyMat <$> pgrp (== Bracket Square) (many (prow ptypeexpr)))
   lmore l = pcond
               (pws' (nonce l) (TyApp l <$ pcxspc ci <*> pargs Round (ptypeexpr topCI)))
               lmore

@@ -67,9 +67,9 @@ instance Monad (TC n) where
 instance MonadFail (TC n) where
   fail  = TC . const . const . Left
 
-must :: MonadFail m => Maybe a -> m a
-must (Just a) = pure a
-must Nothing = fail "must fails"
+must :: MonadFail m => String -> Maybe a -> m a
+must _ (Just a) = pure a
+must s Nothing = fail $ s ++ " must fail"
 
 typeOf :: (S Z <= n) -> TC n (Type ^ n)
 typeOf i = TC $ \_ -> Right . snd . vonly . (i ?^)
@@ -198,7 +198,7 @@ checkCanMatrixEh
 {-
      <------------cs------------>
 
- ^   X------------------cs1----->
+ ^   X-----------X------cs1----->
  |   |           |
  |   |           |
  |   |          rs0
@@ -285,11 +285,11 @@ prefixEh elty pr l = withScope $ propEh elty >>= \case
     True <- track ("NFAbel pr=" ++ show pr) $ pure True
     True <- track ("NFAbel  l=" ++ show l) $ pure True
     guard $ n <= m
-    nfAbelToTerm . NFAbel (m - n) <$> must (sub tns tms)
+    nfAbelToTerm . NFAbel (m - n) <$> must "prefixEh:nfAbelToTerm" (sub tns tms)
   False -> do
     pr <- termToNFList elty pr
     l  <- termToNFList elty l
-    nfListToTerm <$> must (stripPrefix pr l)
+    nfListToTerm <$> must "prefixEh:nfListToTerm" (stripPrefix pr l)
   where
     sub :: [(Norm Chk ^ n, Integer)]
         -> [(Norm Chk ^ n, Integer)]
@@ -468,7 +468,7 @@ evalSynth tm = withScope $ case tm of
   tm | Just tm <- MX $? tm, (lmx, rmx) <- split tm -> do
     (lmx, lmxTy) <- evalSynth lmx
     (rmx, rmxTy) <- evalSynth rmx
-    -- TODO: FIXME
+    -- TODO: FIXME, compute the cell type from lcellTy, rcellTy
     retTy <- case (tagEh lmxTy, tagEh rmxTy) of
       (Just (SMatrix, [rowTy, midTy, lcellTy, rs, _]), Just (SMatrix, [_, colTy, rcellTy, _, cs])) ->
         pure (mk SMatrix rowTy colTy lcellTy {- YIKES -} rs cs)
@@ -600,8 +600,9 @@ propEh ty = typeEval ty >>= \case
 
 -- TODO : do more subtyping
 
--- subtyping is not coercive, it is subsumptive, i.e.,any terms that
--- checks at the subtype must also check at the supertype unadulterated
+-- subtyping is not coercive, it is subsumptive, i.e., any terms that
+-- checks at the subtype must also check at the supertype
+-- unadulterated
 subtypeEh :: NmTy ^ n -> NmTy ^ n -> TC n ()
 subtypeEh got want = withScope $
   case (tagEh got, tagEh want) of
@@ -609,7 +610,7 @@ subtypeEh got want = withScope $
       let tyA = atom SAtom
       ngs <- termToNFList tyA gs
       nws <- termToNFList tyA ws
-      () <$ must (stripPrefix ngs nws)
+      () <$ must "Subtype" (stripPrefix ngs nws)
     (Just (SPi, [gs, gt]), Just (SPi, [ws, wt]))
       | Just gt' <- lamEh gt, Just (x, wt') <- lamNameEh wt -> do
         subtypeEh ws gs

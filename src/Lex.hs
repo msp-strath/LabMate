@@ -448,6 +448,10 @@ nonce = fst . source
 
 noSource :: a -> WithSource a
 noSource a = a :<=: (-1, Hide [])
+
+realSourceEh :: Source -> Bool
+realSourceEh (n, _) = n >= 0
+
 {-
 instance Show a => Show (WithSource a) where
   show (a :<=: (n, src)) = "$" ++ show n ++ " = `" ++ (src >>= showEaten) ++ "`" ++ show a
