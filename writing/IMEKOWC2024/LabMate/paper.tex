@@ -20,7 +20,7 @@
 \newcommand{\isadd}[1]{#1\ \textsf{numeric}}
 \newcommand{\ismult}[3]{(#1, #2, #3)\ \textsf{multipliable}}
 
-\newcommand{\append}{+\!\!\!+}
+\newcommand{\append}{+\!\!\!+} 
 \newcommand{\hjux}[2]{{#1}|{#2}}
 \newcommand{\vjux}[2]{\frac{#1}{#2}}
 
@@ -39,7 +39,7 @@
 \begin{document}
 
 \title{LabMate: supporting types for MATLAB}
-\author{Conor McBride, Georgi Nakov, Fredrik Nordvall Forsberg, Neil Ghani, Alasdair Forbes, Keith Lines, Ian Smith}
+\author{Neil Ghani, Conor McBride, Georgi Nakov, Fredrik Nordvall Forsberg, Alasdair Forbes, Keith Lines, Ian Smith}
 \address{University of Strathclyde, National Physical Laboratory}
 %TODO: Affiliations
 
@@ -47,12 +47,41 @@
 
 \section{Introduction}
 
-% types help
+MATLAB is a key workhorse in many scientific and engineering
+disciplines that are heavily reliant on numerical methods. It helps us
+do powerful things. However, as with all software, MATLAB code may
+contain implementation errors and bugs. In good programming practice
+for MATLAB developers, programmers use comments to make clear what
+physical systems their data concern and how the data should be
+interpreted, specifying, e.g., units of measure for
+quantities. Regrettably, none of this rich and often disciplined
+metadata is perceptible to MATLAB, which instead enforces the
+compatibility of producers and consumers of data by run-time checking
+of tags which indicate only machine representation, not any form of
+meaning. In reality, the programmers document meaning for each other's
+benefit but keep the machine in the dark.
 
-% at low cost  (ie: don't need to start from scratch)
-
-% Matlab popular etc
-
+To rectify this situation, we have developed LabMate, which is a tool
+to reify current virtuous engineering practices as a formal language
+of MATLAB comments. MATLAB remains in the dark, but LabMate reads,
+assesses, and transforms MATLAB programs in accordance with these
+comments.
+%
+Behind the scenes, LabMate is retrofitting an expressive type system
+to MATLAB, with the more of the meaning of programs recorded in their
+types.
+%
+This gives a lightweight and low-cost way for MATLAB programmers to
+express their intent, and in a language they are already working in,
+rather than starting over from scratch.
+%
+While type systems and their theory is a well established discipline
+of computer science, the development of LabMate has a several novel
+advances novel focus on the algebraic structure required to classify
+matrices and the meanings of the quantities therein, e.g., their
+physical dimensions. LabMate brings advanced type systems to
+effectiveness within, rather than instead of, existing scientific and
+engineering toolchains and practices.
 
 \section{LabMate in action}
 \label{sec:example}
@@ -311,10 +340,20 @@ We can then ask LabMate to solve the \remph{meta variable} \texttt{?aTy}, to whi
 %GravCalc example again: $t_i$ time ($\mathsf{T}$; in seconds); $v_i$ voltage ($\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$; in volt)
 
 
-\section{Conclusions}
+\section{Conclusions and future work}
 
-% future work etc
+We have demonstrated how LabMate can help write MATLAB programs that are correct both in the sense that they avoid runtime errors, as well as dimensional inconsistency for physical dimensions.
+%
+Getting an error for types not matching can sometimes feel like a stick, but there are also plenty of opportunities for carrots, for example where the specification encoded in the type of the program admits a single unique solution, which could be generated automatically by LabMate.
+%
+Similarly, LabMate already has support for generating MATLAB code for serialising and deserialising complex data formats to and from files, based on a more high-level description of the data format (for example also taking units of measure into account)~\cite{mgen}.
 
+So far, our focus has been on matrices, as this is what makes MATLAB
+unique as a programming language.
+%
+In the future, we would like to also extend our coverage to
+conditionals and loops, which might necessitate some approximation of
+what is known about program fragments at runtime.
 
 \bibliographystyle{ws-procs9x6}
 \bibliography{labmate}
