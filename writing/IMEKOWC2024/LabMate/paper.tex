@@ -311,11 +311,27 @@ ensure that the physical units involved line up.
 
 \section{Implementation}
 
-% transducer model
+In contrast to most other typecheckers, LabMate works using a
+\remph{transducer} model of interaction: it inputs MATLAB code with
+formal comments, and outputs a new version of its input, responding to
+the comments, as if it were a development collaborator.  It thus needs
+to make sure that it retains as much of the input formatting as
+possible.  Making sense of MATLAB code presented a significant reverse
+engineering challenge, as the MATLAB syntax is largely specified
+informally and by example.
 
-% elaboration into core type theory (with richer equational theory than state-of-the-art)
+LabMate elaborates MATLAB expressions and commands into terms of its own internal core type theory.
+%
+Because we want to ergonomically handle physical dimensions, matrices
+and their types, this type theory has a richer equational theory than
+other state-of-the-art type theories, which we achieve by a refined
+normalisation algorithm for free Abelian groups, and free monoids.
+%
+The actual typechecking is implemented as a stack based virtual machine which uses unification and a limited form of backtracking to solve typing constraints.
+%
+After the virtual machine has solved as many problems as it can, we analyse its final state to reconstruct the output source code, perhaps with inserted warnings and error messages, or additional responses to queries.
 
-% Stack machine, with disjunctive problem solving
+LabMate is under constant development; the latest version can be found at \url{https://github.com/msp-strath/LabMate/tree/devel}.
 
 \section{Supporting dimensional consistency}
 \label{sec:example-revisited}
