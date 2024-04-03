@@ -96,6 +96,7 @@ metaLookup s = TC $ \ st _ -> case s `Map.lookup` st of
 typeEh :: Term Chk ^ n -> TC n ()
 typeEh ty | Just cts <- tagEh ty = case cts of
   (SOne, [])   -> pure ()
+  (STwo, [])   -> pure ()
   (SAtom, [])  -> pure ()
   (SType, [])  -> pure ()
   (SChar, [])  -> pure ()
@@ -166,6 +167,7 @@ checkCanEh ty tm | Just x <- tagEh ty = withScope $ case x of
     nfs <- termToNFList (atom SAtom) as
     True <$ checkEnumEh nfs tm
   (SOne, []) -> pure True
+  (STwo, []) | Intg i <- tm, i == 0 || i == 1 -> pure True
   (SChar, []) | Intg i <- tm, i >= 0 && i <= 128 -> pure True
   (SAtom, []) | Atom _ <- tm -> pure True
   (SPi, [s, t]) | Just t' <- lamEh t, Just (x, tm') <- lamNameEh tm ->
@@ -367,6 +369,8 @@ checkNormEval wantTy tm | Just tm <- E $? tm = do
 checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   (SType, []) -> typeEval tm
   (SOne, []) -> pure nil
+  -- TODO: FIXME use reduced order BDD
+  (STwo, []) -> pure tm
   (SAtom, []) -> pure tm
   (SChar, []) -> pure tm
   (SAbel, [genTy]) -> nfAbelToTerm <$> termToNFAbel genTy tm
@@ -411,7 +415,7 @@ checkEval ty tm = do
 
 typeEval :: Type ^ n -> TC n (NmTy ^ n)
 typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
-  (x, []) | x `elem` [SAtom, SOne, SType, SChar] -> pure $ atom x
+  (x, []) | x `elem` [SAtom, SOne, STwo, SType, SChar] -> pure $ atom x
   (SAbel, [genTy]) -> mk SAbel <$> typeEval genTy
   (SList, [genTy]) -> mk SList <$> typeEval genTy
   (SEnum, [as]) -> mk SEnum <$> checkNormEval (mk SList (atom SAtom)) as

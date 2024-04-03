@@ -3,6 +3,7 @@ module MagicStrings where
 -- core types
 pattern SType = "Type"
 pattern SOne  = "One"
+pattern STwo  = "Two"
 pattern SAbel = "Abel"
 pattern SList = "List"
 pattern SAtom = "Atom"
