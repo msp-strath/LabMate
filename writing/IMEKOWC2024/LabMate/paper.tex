@@ -5,6 +5,13 @@
 \usepackage{microtype}
 \usepackage{proof}
 \usepackage{mathtools}
+% Added by Keith L 05/04/2024
+% Removed by FNF 06/04/2024 (incompatible with style file)
+%\usepackage[]{biblatex}
+%\addbibresource{ws-procs9x6.bib}
+\usepackage{graphics}
+%\usepackage{caption}
+\usepackage{floatrow}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%%% Macros %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -39,7 +46,7 @@
 \begin{document}
 
 \title{LabMate: supporting types for MATLAB}
-\author{Neil Ghani, Conor McBride, Georgi Nakov, Fredrik Nordvall Forsberg, Alasdair Forbes, Keith Lines, Ian Smith}
+\author{Conor McBride, Georgi Nakov, Fredrik Nordvall Forsberg, Alistair Forbes, Keith Lines}
 \address{University of Strathclyde, National Physical Laboratory}
 %TODO: Affiliations
 
@@ -76,7 +83,7 @@ express their intent, and in a language they are already working in,
 rather than starting over from scratch.
 %
 While type systems and their theory is a well established discipline
-of computer science, the development of LabMate has a several novel
+of computer science, the development of LabMate has several novel
 advances on the algebraic structure required to classify
 matrices and the meanings of the quantities therein, e.g., their
 physical dimensions. LabMate brings advanced type systems to
@@ -88,75 +95,98 @@ engineering toolchains and practices.
 
 % simple matrix multiplication example
 
-Consider the problem of resistance calibration: \todo{explain here}.
+The following greatly simplified, but still realistic, example from metrology  will help illustrate the principles of how LabMate will work. Consider one of the calculations required for measuring resistors using a cryogenic current comparator bridge~\cite{Williams_2010}.
+
+An electrical current with a known value (the applied signal) is passed through the resistor being measured, and a series of voltage readings are taken at fixed time intervals (the recorded output). After a specified number of readings are taken, the direction of the input signal must be reversed in order to separate the offset and drift from the voltage readings. Therefore, the applied signal (bridge energisation) is a square wave of {\em reversals}. A calibration factor is also applied, dividing the signal into two parts with different amplitudes.
+
+The recorded output follows the input signal, superimposed on a detector with noise, offset and drift. Figure~\ref{fig:rec_out} provides an example of recorded output, using simulated data.
+\begin{figure}[H]
+    \centering
+    \captionsetup{justification=centering}
+    \includegraphics[width=0.6\linewidth]{example_output.jpg}
+    \caption{Simulated example of recorded output}       
+    \label{fig:rec_out}
+\end{figure}
+
+The calculation of offset and drift is achieved using a least squares line fit calculated by solving a series of simultaneous equations, listed below. Note that although offset and drift differ for calibration and non-calibration parts of the input signal, the drift is the same in both cases.
 
 % $t_i$ time ($\mathsf{T}$; in seconds); $v_i$ voltage ($\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$; in volt)
 
 \[
 \begin{pmatrix*}
-  t_1 & 1 & -1 & 0 & 0 \\
-  t_2 & 1 & -1 & 0 & 0 \\
-  t_3 & 1 & -1 & 0 & 0 \\
-  t_4 & 1 & -1 & 0 & 0 \\
-  t_5 & 1 & -1 & 0 & 0 \\
-  t_6 & 0 & 0 & 1 & -1 \\
-  t_7 & 0 & 0 & 1 & -1 \\
-  t_8 & 0 & 0 & 1 & -1 \\
-  t_9 & 0 & 0 & 1 & -1 \\
+  d_{\textrm{nc}1} & d_{\textrm{c}1} & n_1 & c_1 & t_1  \\
+  d_{\textrm{nc}2} & d_{\textrm{c}2} & n_2 & c_2 & t_2  \\
+   & \vdots &  & & \\
+  d_{\textrm{nc}N} & d_{\textrm{c}N} & n_N & c_N & t_N  \\
 \end{pmatrix*}
 \times
 \begin{pmatrix}
-  m \\
-  c \\
   a \\
-  c_{\text{offset}} \\
-  a_{\text{offset}}
+  a_{cal} \\ 
+  c \\
+  c_{cal} \\ 
+  m
 \end{pmatrix}
 =
 \begin{pmatrix}
   v_1 \\
   v_2 \\
-  v_3 \\
-  v_4 \\
-  v_5 \\
-  v_6 \\
-  v_7 \\
-  v_8 \\
-  v_9
+  \vdots \\
+  v_N
 \end{pmatrix}
 \]
 
-This can be converted into a MATLAB problem with LabMate annotations as follows:
+Where in the matrix:
+\begin{itemize}
+    \item The values in the first four columns are purely numeric and have no associated dimension.
+    
+    \item The first column will contain either 1 or -1 for non-calibration voltage readings (i.e., those to which the calibration factor has not been applied) depending on the direction of the input signal. For calibration readings the value will be 0.
+
+    \item The second column contains equivalent values for voltage readings in which the calibration factor has been applied. I.e. 0 for non-calibration readings and 1 or -1 depending on the input signal direction for calibration readings.
+
+    \item The third column contains 1 for non-calibration readings and 0 for calibration.
+
+    \item The forth column is the opposite of the third.
+
+    \item The fifth columns contains time values.
+\end{itemize}
+
+The first row vector contains values to be calculated using the line fit. The second column vector contains voltage readings. The measured value of the resistor is calculated using the contents of the first row vector. Details of that calculation are beyond the scope of this paper.
+
+This calculation can be converted into a MATLAB problem with LabMate annotations as follows. Note that for reasons of space only twelve values are listed. A real measurement would contain considerably more values:
 \begin{verbatim}
-%> A :: [ 9 x 5 ] double
-A = [ t1 1 -1 0 0
-      t2 1 -1 0 0
-      t3 1 -1 0 0
-      t4 1 -1 0 0
-      t5 1 -1 0 0
-      t6 0 0 1 -1
-      t7 0 0 1 -1
-      t8 0 0 1 -1
-      t9 0 0 1 -1 ]
+%> A :: [ 12 x 5 ] double
+A = [ 1  0  1  0  t1
+      1  0  1  0  t2
+      1  0  1  0  t3
+     -1  0  1  0  t4
+     -1  0  1  0  t5
+     -1  0  1  0  t6
+      0  1  0  1  t7
+      0  1  0  1  t8
+      0  1  0  1  t9
+      0 -1  0  1  t10
+      0 -1  0  1  t11
+      0 -1  0  1  t12 ]
 
 %> B :: [ 5 x 1 ] double
-B = [ m c a cOffset aOffset ]
+B = [ a aCal c cCal m ]
 
 C = A * B
 
 %> typeof C
 \end{verbatim}
 %
-\todo{Is computing C from A and B what we want?}
+\todo{Is computing C from A and B what we want? \\ Keith 05/04/2024 ***No. We are computing B from A and C using a least squares line fit.*** }
 The lines starting with `\texttt{\%>}' are interpreted as ordinary comments by MATLAB, but as \remph{input directives} by LabMate. LabMate acts by reading the source code and outputting it again, but possibly with some additional \remph{responses} to the directives added.
 
 Did you notice the error in the above code? The matrix \texttt{B} should be of size $5 \times 1$, but is erroneously of size $1 \times 5$ instead. LabMate detects this error and produces the following as output, where we have suppressed the same definition of \texttt{A} as above:
 \begin{verbatim}
-%> A :: [ 9 x 5 ] double
+%> A :: [ 12 x 5 ] double
 A = ...
 
 %> B :: [ 5 x 1 ] double
-B = [ m c a cOffset aOffset ]
+B = [ a aCal c cCal m ]
 
 C = A * B
 
@@ -166,11 +196,11 @@ C = A * B
 %
 That is, LabMate says that for \texttt{C} to have a sensible type, we need the (impossible) constraints $5 = 1$ and $1 = 5$ to be true, arising from the fact that we have declared \texttt{B} to be a $5 \times 1$ matrix, but in fact it is a $1 \times 5$ matrix. Note that the original source code has been retained, but a response has been inserted to our \texttt{typeof} query. If we change \texttt{B} to
 \begin{verbatim}
-B = [ m; c; a; cOffset; aOffset ]
+B = [ a; aCal; c; cCal; m ]
 \end{verbatim}
 instead, then LabMate responds
 \begin{verbatim}
-%< C :: [ 9 x 1 ] double
+%< C :: [ 12 x 1 ] double
 \end{verbatim}
 This way, LabMate can detect matrix size errors at development time, rather than at runtime.
 
@@ -340,14 +370,14 @@ LabMate is under constant development; the latest version can be found at \url{h
 
 Coming back to the example from \sref{sec:example} again, we can give both \texttt{A} and \texttt{B} more precise types, also taking their physical dimensions into account:
 \begin{verbatim}
-%> A :: [ i <- 9,  j <- 5 ] (if j == 0 then Q T else Q 1)
-%> B :: [ Q TODO; Q TODO; Q TODO; Q TODO; Q TODO; Q TODO ]
+%> A :: [ i <- 12,  j <- 5 ] (if j == 4 then Q T else Q 1)
+%> B :: [ i <- 5 ] (if i == 4 then Q (ML^2T^(-4)I^(-1)) else Q (ML^2T^(-3)I^(-1)))
 \end{verbatim}
-This says that the entries in the first column of \texttt{A} are quantities of dimension time $\mathsf{T}$, while all other entries are dimensionless quantities. Meanwhile the entries of \texttt{B} are quantities of dimension \todo{fill in} respectively. LabMate reports that the type of \texttt{C} should be
+This says that the entries in the last column of \texttt{A} are quantities of dimension time $\mathsf{T}$, while all other entries are dimensionless quantities. Meanwhile the entries of \texttt{B} are quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$ (i.e., units V) for entries in the first three rows and $\mathsf{ML}^{2}\mathsf{T}^{-4}\mathsf{I}^{-1}$ (i.e., units V/s) respectively. LabMate reports that the type of \texttt{C} should be
 \begin{verbatim}
 %< C :: [ 5 x 1 ] (Q (ML^2T^(-3)I^(-1)))
 \end{verbatim}
-that is a $5 \times 1$ matrix whose entries are all quantities of dimension $\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$. Another possible way to use LabMate is to instead declare that this is the expected type for \texttt{C}, and to leave the type of one of the entries in \texttt{B} as an unknown:
+that is a $5 \times 1$ matrix whose entries are all quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$. Another possible way to use LabMate is to instead declare that this is the expected type for \texttt{C}, and to leave the type of one of the entries in \texttt{B} as an unknown:
 \begin{verbatim}
 %> B :: [ Q TODO; Q TODO; ?aTy; Q TODO; Q TODO; Q TODO ]
 \end{verbatim}
@@ -371,9 +401,15 @@ In the future, we would like to also extend our coverage to
 conditionals and loops, which might necessitate some approximation of
 what is known about program fragments at runtime.
 
+\section{Acknowledgements}
+
+This work was undertaken jointly by the Mathematically Structured Programming Group of the University of Strathclyde and the National Physical Laboratory’s Data Science department as part of Data Science’s Tools for Trustworthiness National Measurement System (NMS) project 2023 – 2024.
+
+Thanks to NPL colleague Nick Fletcher for his help and guidance providing the example from \sref{sec:example}. Thanks also to NPL colleagues Louise Wright and Ian Smith for reviewing this paper.
+
 \bibliographystyle{ws-procs9x6}
 \bibliography{labmate}
-
+%\printbibliography
 \end{document}
 
 %%% Local Variables:
