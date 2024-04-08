@@ -1,17 +1,20 @@
-\documentclass{ws-procs9x6}
+\documentclass{IMEKO2024}
 
 %%%% Packages %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{amsmath}
 \usepackage[colorlinks=true]{hyperref}
 \usepackage{microtype}
 \usepackage{proof}
 \usepackage{mathtools}
-% Added by Keith L 05/04/2024
-% Removed by FNF 06/04/2024 (incompatible with style file)
-%\usepackage[]{biblatex}
-%\addbibresource{ws-procs9x6.bib}
-\usepackage{graphics}
-%\usepackage{caption}
+\usepackage{graphicx}
+\usepackage{rotating}
+\usepackage{subcaption}
+%\usepackage{multirow}
+\usepackage{xkeyval}
+\usepackage[font=small,justification=centering]{caption}
+\captionsetup{labelsep = period}
 \usepackage{floatrow}
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%%% Macros %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -46,11 +49,19 @@
 \begin{document}
 
 \title{LabMate: supporting types for MATLAB}
-\author{Conor McBride, Georgi Nakov, Fredrik Nordvall Forsberg, Alistair Forbes, Keith Lines}
-\address{University of Strathclyde, National Physical Laboratory}
-%TODO: Affiliations
+\author{Conor McBride  \affiliationmark{1}, Georgi Nakov  \affiliationmark{1}, Fredrik Nordvall Forsberg  \affiliationmark{1}, Alistair Forbes  \affiliationmark{2}, Keith Lines  \affiliationmark{2}}
+\affiliation{%
+\affiliationmark{1}{\fontsize{11pt}{9pt} \selectfont University of Strathclyde , Glasgow, UK}  \\
+\affiliationmark{2}{\fontsize{11pt}{9pt} \selectfont National Physical Laboratory, Teddington, UK}}
 
-\bodymatter
+\maketitle
+
+\begin{abstract}
+  TODO
+\end{abstract}
+\begin{keywords}
+  TODO
+\end{keywords}
 
 \section{Introduction}
 
@@ -99,13 +110,14 @@ The following greatly simplified, but still realistic, example from metrology  w
 
 An electrical current with a known value (the applied signal) is passed through the resistor being measured, and a series of voltage readings are taken at fixed time intervals (the recorded output). After a specified number of readings are taken, the direction of the input signal must be reversed in order to separate the offset and drift from the voltage readings. Therefore, the applied signal (bridge energisation) is a square wave of {\em reversals}. A calibration factor is also applied, dividing the signal into two parts with different amplitudes.
 
-The recorded output follows the input signal, superimposed on a detector with noise, offset and drift. Figure~\ref{fig:rec_out} provides an example of recorded output, using simulated data.
+The recorded output follows the input signal, superimposed on a detector with noise, offset and drift. Figure~1%\ref{fig:rec_out}
+provides an example of recorded output, using simulated data.
 \begin{figure}[H]
-    \centering
-    \captionsetup{justification=centering}
+  \begin{center}
     \includegraphics[width=0.6\linewidth]{example_output.jpg}
-    \caption{Simulated example of recorded output}       
-    \label{fig:rec_out}
+    
+    \captionwide{Simulated example of recorded output.}
+  \end{center}
 \end{figure}
 
 The calculation of offset and drift is achieved using a least squares line fit calculated by solving a series of simultaneous equations, listed below. Note that although offset and drift differ for calibration and non-calibration parts of the input signal, the drift is the same in both cases.
@@ -261,7 +273,7 @@ This way, we can reduce dimensional consistency checking \`a la
 Kennedy~\cite{kennedyUOM} also for programs involving matrices,
 following the work of Hart~\cite{hart}.
 %
-We will see in \sref{sec:example-revisited} how this can be helpful.
+We will see in Section~\ref{sec:example-revisited} how this can be helpful.
 
 Terms of matrix type in the core type theory are built up from
 $1 \times 1$ matrices and pasting matrices horizontally and vertically.
@@ -368,7 +380,7 @@ LabMate is under constant development; the latest version can be found at \url{h
 
 % matrix multiplication with units of measure
 
-Coming back to the example from \sref{sec:example} again, we can give both \texttt{A} and \texttt{B} more precise types, also taking their physical dimensions into account:
+Coming back to the example from Section~\ref{sec:example} again, we can give both \texttt{A} and \texttt{B} more precise types, also taking their physical dimensions into account:
 \begin{verbatim}
 %> A :: [ i <- 12,  j <- 5 ] (if j == 4 then Q T else Q 1)
 %> B :: [ i <- 5 ] (if i == 4 then Q (ML^2T^(-4)I^(-1)) else Q (ML^2T^(-3)I^(-1)))
@@ -405,7 +417,7 @@ what is known about program fragments at runtime.
 
 This work was undertaken jointly by the Mathematically Structured Programming Group of the University of Strathclyde and the National Physical Laboratory’s Data Science department as part of Data Science’s Tools for Trustworthiness National Measurement System (NMS) project 2023 – 2024.
 
-Thanks to NPL colleague Nick Fletcher for his help and guidance providing the example from \sref{sec:example}. Thanks also to NPL colleagues Louise Wright and Ian Smith for reviewing this paper.
+Thanks to NPL colleague Nick Fletcher for his help and guidance providing the example from Section \ref{sec:example}. Thanks also to NPL colleagues Louise Wright and Ian Smith for reviewing this paper.
 
 \bibliographystyle{ws-procs9x6}
 \bibliography{labmate}
