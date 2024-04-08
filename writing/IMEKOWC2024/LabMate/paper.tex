@@ -13,6 +13,7 @@
 \usepackage{xkeyval}
 \usepackage[font=small,justification=centering]{caption}
 \captionsetup{labelsep = period}
+\usepackage{subcaption}
 \usepackage{floatrow}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -134,9 +135,9 @@ The calculation of offset and drift is achieved using a least squares line fit c
 \times
 \begin{pmatrix}
   a \\
-  a_{cal} \\ 
+  a_{cal} \\
   c \\
-  c_{cal} \\ 
+  c_{cal} \\
   m
 \end{pmatrix}
 =
@@ -237,22 +238,81 @@ idea being that the $i$th entry in the list $rs$ and the $j$th entry
 in the list $cs$ determines the type of the $(i, j)$ coordinate in the
 matrix.
 %
-Summarised as an inference rule, matrix types are thus formed as follows:
+Matrix types formation can thus be summarised as the inference rule given in Figure~\ref{fig:matrix_intro}.
+%\[
+%  \infer{\istype{\Matrix{R}{C}{E}{rs}{cs}}}
+%  {
+%    \istype{R}
+%    &\quad
+%    \istype{C}
+%    &\quad
+%    x : R, y : C \vdash \istype{E(x,y)}
+%    &\quad
+%    rs : \List{R}
+%    &\quad
+%    cs : \List{C}
+%  }
+%\]
 %
-\[
-  \infer{\istype{\Matrix{R}{C}{E}{rs}{cs}}}
-  {
-    \istype{R}
-    &\quad
-    \istype{C}
-    &\quad
-    x : R, y : C \vdash \istype{E(x,y)}
-    &\quad
-    rs : \List{R}
-    &\quad
-    cs : \List{C}
-  }
-\]
+\begin{figure*}[th]
+\begin{subfigure}{\textwidth}
+  \begin{center}
+    \[
+      \infer{\istype{\Matrix{R}{C}{E}{rs}{cs}}}
+      {
+        \istype{R}
+        &\quad
+        \istype{C}
+        &\quad
+        x : R, y : C \vdash \istype{E(x,y)}
+        &\quad
+        rs : \List{R}
+        &\quad
+        cs : \List{C}
+      }
+    \]
+  \end{center}
+  \caption{Type formation rule for matrix types}
+  \label{fig:matrix_intro}
+\end{subfigure}
+\hfill
+\begin{subfigure}{\textwidth}
+  \begin{center}
+    \[
+      \infer{A + B : \Matrix{R}{C}{E}{rs}{cs}}
+      {
+        x : R, y : C \vdash \isadd{E(x, y)}
+        &\quad
+        A : \Matrix{R}{C}{E}{rs}{cs}
+        &\quad
+        B : \Matrix{R}{C}{E}{rs}{cs}
+      }
+    \]
+  \end{center}
+  \caption{Addition rule for matrices}
+  \label{fig:matrix_add}
+\end{subfigure}
+\hfill
+\begin{subfigure}{\textwidth}
+  \begin{center}
+    \[
+      \infer{A * B : \Matrix{R}{C}{E''}{rs}{cs}}
+      {
+        \ismult{E}{E'}{E''}
+        &\quad
+        A : \Matrix{R}{C}{E}{rs}{ms}
+        &\quad
+        B : \Matrix{R}{C}{E'}{ms}{cs}
+      }
+    \]
+  \end{center}
+  \caption{Multiplication rule for matrices}
+  \label{fig:matrix_mul}
+\end{subfigure}
+% FIXME : \caption is broken
+\captionwide{Typing rules for matrices}
+\label{fig:matrix_rules}
+\end{figure*}
 
 A notable special case is when both $R$ and $C$ are the unit type
 $R = C = \One$, that is, the type with exactly one element.
@@ -313,35 +373,36 @@ When comparing matrices for equality, we reassociate horizontal and
 vertical pastings, so that $\hjux{\vjux{A}{C}}{\vjux{B}{D}}$ and
 $\vjux{\hjux{A}{B}}{\hjux{C}{D}}$ indeed are considered equal.
 
-Two matrices $A$ and $B$ can be added if all entry types $E(x, y)$ are
+The conditions for adding two matrices are given in Figure~\ref{fig:matrix_add} --- the matrices $A$ and $B$ can be added if all entry types $E(x, y)$ are
 numeric (for example integers, or floating point numbers), and if $A$
-and $B$ have the same matrix type:
+and $B$ have the same matrix type.
 %
-\[
-  \infer{A + B : \Matrix{R}{C}{E}{rs}{cs}}
-  {
-    x : R, y : C \vdash \isadd{E(x, y)}
-    &\quad
-    A : \Matrix{R}{C}{E}{rs}{cs}
-    &\quad
-    B : \Matrix{R}{C}{E}{rs}{cs}
-  }
-\]
+%\[
+%  \infer{A + B : \Matrix{R}{C}{E}{rs}{cs}}
+%  {
+%    x : R, y : C \vdash \isadd{E(x, y)}
+%    &\quad
+%    A : \Matrix{R}{C}{E}{rs}{cs}
+%    &\quad
+%    B : \Matrix{R}{C}{E}{rs}{cs}
+%  }
+%\]
 %
+
 Matrix multiplication is trickier, because it does not demand that $A$
 and $B$ have the same type --- rather, it demands that $A$ and $B$
-have \remph{compatible} types:
+have \remph{compatible} types, see Figure~\ref{fig:matrix_mul}.
 %
-\[
-  \infer{A * B : \Matrix{R}{C}{E''}{rs}{cs}}
-  {
-    \ismult{E}{E'}{E''}
-    &\quad
-    A : \Matrix{R}{C}{E}{rs}{ms}
-    &\quad
-    B : \Matrix{R}{C}{E'}{ms}{cs}
-  }
-\]
+%\[
+%  \infer{A * B : \Matrix{R}{C}{E''}{rs}{cs}}
+%  {
+%    \ismult{E}{E'}{E''}
+%    &\quad
+%    A : \Matrix{R}{C}{E}{rs}{ms}
+%    &\quad
+%    B : \Matrix{R}{C}{E'}{ms}{cs}
+%  }
+%\]
 The entry types $E$, $E'$, $E''$ are multipliable if for all $x$, $y$
 and $z$, we have that $E(x, y)$ and $E'(y, z)$ supports a
 multiplication operation with codomain $E''(x, z)$.
@@ -384,8 +445,12 @@ LabMate is under constant development; the latest version can be found at \url{h
 
 Coming back to the example from Section~\ref{sec:example} again, we can give both \texttt{A} and \texttt{B} more precise types, also taking their physical dimensions into account:
 \begin{verbatim}
-%> A :: [ i <- 12,  j <- 5 ] (if j == 4 then Q T else Q 1)
-%> B :: [ i <- 5 ] (if i == 4 then Q (ML^2T^(-4)I^(-1)) else Q (ML^2T^(-3)I^(-1)))
+% > A :: [ i <- 12,  j <- 5 ]
+      (if j == 4 then Q T else Q 1)
+% > B :: [ i <- 5 ]
+      (if i == 4
+         then Q (ML^2T^(-4)I^(-1))
+         else Q (ML^2T^(-3)I^(-1)))
 \end{verbatim}
 This says that the entries in the last column of \texttt{A} are quantities of dimension time $\mathsf{T}$, while all other entries are dimensionless quantities. Meanwhile the entries of \texttt{B} are quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$ (i.e., units V) for entries in the first three rows and $\mathsf{ML}^{2}\mathsf{T}^{-4}\mathsf{I}^{-1}$ (i.e., units V/s) respectively. LabMate reports that the type of \texttt{C} should be
 \begin{verbatim}
@@ -393,7 +458,8 @@ This says that the entries in the last column of \texttt{A} are quantities of di
 \end{verbatim}
 that is a $5 \times 1$ matrix whose entries are all quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$. Another possible way to use LabMate is to instead declare that this is the expected type for \texttt{C}, and to leave the type of one of the entries in \texttt{B} as an unknown:
 \begin{verbatim}
-%> B :: [ Q TODO; Q TODO; ?aTy; Q TODO; Q TODO; Q TODO ]
+% > B :: [ Q TODO; Q TODO; ?aTy;
+           Q TODO; Q TODO ]
 \end{verbatim}
 We can then ask LabMate to solve the \remph{meta variable} \texttt{?aTy}, to which LabMate responds that we must have \todo{\texttt{?aTy} = fill in}. This way the types of LabMate can be used to validate and experiment with the dimensional consistency of the quantities involved.
 
