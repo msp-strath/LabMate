@@ -115,8 +115,8 @@ provides an example of recorded output, using simulated data.
 \begin{figure}[H]
   \begin{center}
     \includegraphics[width=0.6\linewidth]{example_output.jpg}
-    
     \captionwide{Simulated example of recorded output.}
+    \label{fig:rec_out}
   \end{center}
 \end{figure}
 
@@ -147,20 +147,21 @@ The calculation of offset and drift is achieved using a least squares line fit c
   v_N
 \end{pmatrix}
 \]
-
-Where in the matrix:
+%
+The matrix on the left is made up of the following values:
+%
 \begin{itemize}
     \item The values in the first four columns are purely numeric and have no associated dimension.
-    
-    \item The first column will contain either 1 or -1 for non-calibration voltage readings (i.e., those to which the calibration factor has not been applied) depending on the direction of the input signal. For calibration readings the value will be 0.
 
-    \item The second column contains equivalent values for voltage readings in which the calibration factor has been applied. I.e. 0 for non-calibration readings and 1 or -1 depending on the input signal direction for calibration readings.
+    \item The first column will contain either $1$ or $-1$ for non-calibration voltage readings (i.e., those to which the calibration factor has not been applied) depending on the direction of the input signal. For calibration readings the value will be $0$.
 
-    \item The third column contains 1 for non-calibration readings and 0 for calibration.
+    \item The second column contains equivalent values for voltage readings in which the calibration factor has been applied, i.e., $0$ for non-calibration readings and $1$ or $-1$ depending on the input signal direction for calibration readings.
+
+    \item The third column contains $1$ for non-calibration readings and $0$ for calibration.
 
     \item The forth column is the opposite of the third.
 
-    \item The fifth columns contains time values.
+    \item The fifth column contains time values.
 \end{itemize}
 
 The first row vector contains values to be calculated using the line fit. The second column vector contains voltage readings. The measured value of the resistor is calculated using the contents of the first row vector. Details of that calculation are beyond the scope of this paper.
@@ -189,7 +190,7 @@ C = A * B
 %> typeof C
 \end{verbatim}
 %
-\todo{Is computing C from A and B what we want? \\ Keith 05/04/2024 ***No. We are computing B from A and C using a least squares line fit.*** }
+\todo{Is computing C from A and B what we want? \\ Keith 05/04/2024 ***No. We are computing B from A and C using a least squares line fit.*** \\ FNF 08/04/2024 Should the above be rewritten to do such a line fit, then?}
 The lines starting with `\texttt{\%>}' are interpreted as ordinary comments by MATLAB, but as \remph{input directives} by LabMate. LabMate acts by reading the source code and outputting it again, but possibly with some additional \remph{responses} to the directives added.
 
 Did you notice the error in the above code? The matrix \texttt{B} should be of size $5 \times 1$, but is erroneously of size $1 \times 5$ instead. LabMate detects this error and produces the following as output, where we have suppressed the same definition of \texttt{A} as above:
@@ -203,7 +204,8 @@ B = [ a aCal c cCal m ]
 C = A * B
 
 %> typeof C
-%< the type of C is quite a puzzle; unsolved constraints 5 =? 1, 1 =? 5
+%< the type of C is quite a puzzle;
+%<   unsolved constraints 5 =? 1, 1 =? 5
 \end{verbatim}
 %
 That is, LabMate says that for \texttt{C} to have a sensible type, we need the (impossible) constraints $5 = 1$ and $1 = 5$ to be true, arising from the fact that we have declared \texttt{B} to be a $5 \times 1$ matrix, but in fact it is a $1 \times 5$ matrix. Note that the original source code has been retained, but a response has been inserted to our \texttt{typeof} query. If we change \texttt{B} to
