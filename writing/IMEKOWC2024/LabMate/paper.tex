@@ -52,8 +52,8 @@
 \title{LabMate: supporting types for MATLAB}
 \author{Conor McBride  \affiliationmark{1}, Georgi Nakov  \affiliationmark{1}, Fredrik Nordvall Forsberg  \affiliationmark{1}, Alistair Forbes  \affiliationmark{2}, Keith Lines  \affiliationmark{2}}
 \affiliation{%
-\affiliationmark{1}{\fontsize{11pt}{9pt} \selectfont University of Strathclyde , Glasgow, UK}  \\
-\affiliationmark{2}{\fontsize{11pt}{9pt} \selectfont National Physical Laboratory, Teddington, UK}}
+\affiliationmark{1}{\fontsize{11pt}{9pt} \selectfont University of Strathclyde , UK}  \\
+\affiliationmark{2}{\fontsize{11pt}{9pt} \selectfont National Physical Laboratory, UK}}
 
 \maketitle
 
@@ -167,7 +167,7 @@ The matrix on the left is made up of the following values:
 
 The first row vector contains values to be calculated using the line fit. The second column vector contains voltage readings. The measured value of the resistor is calculated using the contents of the first row vector. Details of that calculation are beyond the scope of this paper.
 
-This calculation can be converted into a MATLAB problem with LabMate annotations as follows. Note that for reasons of space only twelve values are listed. A real measurement would contain considerably more values:
+This calculation can be converted into a MATLAB problem with LabMate annotations as follows, using MATLAB's builtin left division operator \texttt{A \textbackslash{} b} to compute a least squares fit. We then ask for the type of the resulting solution. Note that for reasons of space only twelve values are listed. A real measurement would contain considerably more values:
 \begin{verbatim}
 %> A :: [ 12 x 5 ] double
 A = [ 1  0  1  0  t1
@@ -183,41 +183,54 @@ A = [ 1  0  1  0  t1
       0 -1  0  1  t11
       0 -1  0  1  t12 ]
 
-%> B :: [ 5 x 1 ] double
-B = [ a aCal c cCal m ]
+%> b :: [ 12 x 1 ] double
+b = [ v1 v2 v3 v4 v5 v6 ...
+        v7 v8 v9 v10 v11 v12 ]
 
-C = A * B
+x = A \ b
 
-%> typeof C
+%> typeof x
 \end{verbatim}
 %
-\todo{Is computing C from A and B what we want? \\ Keith 05/04/2024 ***No. We are computing B from A and C using a least squares line fit.*** \\ FNF 08/04/2024 Should the above be rewritten to do such a line fit, then?}
 The lines starting with `\texttt{\%>}' are interpreted as ordinary comments by MATLAB, but as \remph{input directives} by LabMate. LabMate acts by reading the source code and outputting it again, but possibly with some additional \remph{responses} to the directives added.
 
-Did you notice the error in the above code? The matrix \texttt{B} should be of size $5 \times 1$, but is erroneously of size $1 \times 5$ instead. LabMate detects this error and produces the following as output, where we have suppressed the same definition of \texttt{A} as above:
+Did you notice the error in the above code? The vector \texttt{b} should be of size $12 \times 1$, but is erroneously of size $1 \times 12$ instead. LabMate detects this error and produces the following as output.
 \begin{verbatim}
 %> A :: [ 12 x 5 ] double
-A = ...
+A = [ 1  0  1  0  t1
+      1  0  1  0  t2
+      1  0  1  0  t3
+     -1  0  1  0  t4
+     -1  0  1  0  t5
+     -1  0  1  0  t6
+      0  1  0  1  t7
+      0  1  0  1  t8
+      0  1  0  1  t9
+      0 -1  0  1  t10
+      0 -1  0  1  t11
+      0 -1  0  1  t12 ]
 
-%> B :: [ 5 x 1 ] double
-B = [ a aCal c cCal m ]
+%> b :: [ 12 x 1 ] double
+%< unsolved constraints 12 =? 1, 1 =? 12
+b = [ v1 v2 v3 v4 v5 v6 ...
+        v7 v8 v9 v10 v11 v12 ]
 
-C = A * B
+x = A \ B
 
-%> typeof C
-%< the type of C is quite a puzzle;
-%<   unsolved constraints 5 =? 1, 1 =? 5
+%> typeof x
+%< the type of x is quite a puzzle
 \end{verbatim}
 %
-That is, LabMate says that for \texttt{C} to have a sensible type, we need the (impossible) constraints $5 = 1$ and $1 = 5$ to be true, arising from the fact that we have declared \texttt{B} to be a $5 \times 1$ matrix, but in fact it is a $1 \times 5$ matrix. Note that the original source code has been retained, but a response has been inserted to our \texttt{typeof} query. If we change \texttt{B} to
+That is, LabMate says that for \texttt{x} to have a sensible type, we need the (impossible) constraints $5 = 1$ and $1 = 5$ to be true, arising from the fact that we have declared \texttt{b} to be a $12 \times 1$ matrix, but in fact it is a $1 \times 12$ matrix. Note that the original source code has been retained exactly as is, including whitespace characters, but a response has been inserted to our \texttt{typeof} query. If we change \texttt{b} to
 \begin{verbatim}
-B = [ a; aCal; c; cCal; m ]
+b = [ v1 v2 v3 v4 v5 v6 ...
+        v7 v8 v9 v10 v11 v12 ]'
 \end{verbatim}
-instead, then LabMate responds
+using MATLAB's transpose operator instead, then LabMate responds
 \begin{verbatim}
-%< C :: [ 12 x 1 ] double
+%< x :: [ 5 x 1 ] double
 \end{verbatim}
-This way, LabMate can detect matrix size errors at development time, rather than at runtime.
+This way, LabMate can detect matrix size errors at development time, rather than at runtime --- running the original code would indeed crash with the error \textcolor{red}{\textbf{\texttt{Matrix dimensions must agree}}}.
 
 \section{Types for matrices}
 
