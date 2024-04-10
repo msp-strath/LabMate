@@ -25,6 +25,7 @@
 \newcommand{\lcb}{\texttt{\symbol{123}}}
 \newcommand{\rcb}{\texttt{\symbol{125}}}
 \newcommand{\lsb}{\texttt{\symbol{91}}}
+\newcommand{\bsl}{\texttt{\symbol{92}}}
 \newcommand{\rsb}{\texttt{\symbol{93}}}
 
 \newcommand{\istype}[1]{#1\ \textsf{type}}
@@ -179,93 +180,81 @@ value of the resistor by a calculation which is beyond the scope of
 this paper. The column vector right of $=$ contains voltage readings.
 
 This calculation can be converted into a MATLAB problem using the
-builtin left division operator \texttt{\textbackslash} to compute a
+builtin left division operator {\bsl} to compute a
 least squares fit. Let us step through how we intend to use LabMate to
 help us deliver this solution.
 
-We then ask for the type of the resulting solution. Note
-that for reasons of space only twelve values are listed. A real
-measurement would contain considerably more values:
+We begin by declaring the types of the input data: the \texttt{times} and the \texttt{voltages}. Our example calculation uses twelve time and voltage inputs, arranged as two rows to be read from a file. A real measurement would involve considerably larger datasets.
+\begin{verbatim}
+%> times    :: [ 1 x 12 ] double
+%> voltages :: [ 1 x 12 ] double
+\end{verbatim}
+Lines starting with `\texttt{\%>}' are interpreted as ordinary comments by MATLAB, but as \remph{directives} by LabMate, here giving us enough information not only to insist that the values of \texttt{times} and \texttt{voltages} \remph{conform} to the given sizes, but to determine \remph{how} to read them from a file. We would issue the further directive
+\begin{verbatim}
+%> readfrom "inputs.txt" times voltages
+\end{verbatim}
+LabMate is a program \remph{transducer}: its output is a modified version of its input, allowing it to respond to directives with information in comments or by generating code. Here we would expect to see something like
+\begin{verbatim}
+%> readfrom "inputs.txt" times voltages
+%<{
+h=fopen("inputs.txt");
+c=textscan(h,'%f');
+fclose(h);
+src = c{1};
+readPtr = 1;
+for i = 1:12
+  times[i] = src[readPtr];
+  readPtr = readPtr + 1;
+end
+for i = 1:12
+  voltages[i] = src[readPtr];
+  readPtr = readPtr + 1;
+end
+%<}
+\end{verbatim}
+where the comment lines `\pct\res\lcb' and `\pct\res\rcb' visually delimit the extent of the generated boilerplate code, so that humans may safely ignore it. LabMate knows enough about scope in MATLAB to ensure that auxiliary variable naming never creates conflict. We have kept to one datum per line for simplicity, but we are free to extend our format specification language as we see fit~\cite{mgen}.
+
+Next, let us build up the matrix in the calculation. The method gives the first four columns a pattern of blocks, pasted in a grid.
 \begin{verbatim}
 %> z3 :: [ 3 x 1 ] double
 z3 = [ 0; 0; 0 ]
 %> i3 :: [ 3 x 1 ] double
 i3 = [ 1; 1; 1 ]
-%> times :: [ 12 x 1 ] double
-% define times as a column vector
-  of time measurements
 
 ddnc = [ i3  z3  i3  z3
         -i3  z3  i3  z3
          z3  i3  z3  i3
          z3 -i3  z3  i3 ]
-A = [ ddnc times ]
-%> typeof A
-%< A :: [ 12 x 5 ] double
+\end{verbatim}
+LabMate will check that this pasting strategy delivers a rectangular matrix, well in advance of MATLAB runtime. Pasting on the measured times (transposed to a column) completes the matrix. Let us ask for its type. LabMate responds to information-seeking directives by writing comments of its own, beginning with `\pct\res'.
+\begin{verbatim}
+M = [ ddnc times' ]
+%> typeof M
+%< M :: [ 12 x 5 ] double
+\end{verbatim}
 
-%> b :: [ 12 x 1 ] double
-b = [ v1 v2 v3 v4 v5 v6 ...
-        v7 v8 v9 v10 v11 v12 ]
-
-x = A \ b
-
+Now that we have assembled the data, we may solve the equations and ask for the type of the solution.
+\begin{verbatim}
+x = M \ voltages
 %> typeof x
 \end{verbatim}
-%
-The lines starting with `\texttt{\%>}' are interpreted as ordinary comments by MATLAB, but as \remph{input directives} by LabMate. LabMate acts by reading the source code and outputting it again, but possibly with some additional \remph{responses} to the directives added.
-
-Did you notice the error in the above code? The vector \texttt{b} should be of size $12 \times 1$, but is erroneously of size $1 \times 12$ instead. LabMate detects this error and produces the following as output.
-
-%%> A :: [ 12 x 5 ] double
-%A = [ 1  0  1  0  t1
-%      1  0  1  0  t2
-%      1  0  1  0  t3
-%     -1  0  1  0  t4
-%     -1  0  1  0  t5
-%     -1  0  1  0  t6
-%      0  1  0  1  t7
-%      0  1  0  1  t8
-%      0  1  0  1  t9
-%      0 -1  0  1  t10
-%      0 -1  0  1  t11
-%      0 -1  0  1  t12 ]
+Did you notice the error in the above code? The vector \texttt{voltages} should be of size $12 \times 1$, but is erroneously of size $1 \times 12$ instead. LabMate detects this error and responds:
 
 \begin{verbatim}
-
-%> z3 :: [ 3 x 1 ] double
-z3 = [0; 0; 0]
-%> i3 :: [ 3 x 1 ] double
-i3 = [1; 1; 1]
-%> times :: [ 12 x 1 ] double
-ddnc = [ i3  z3  i3  z3
-        -i3  z3  i3  z3
-         z3  i3  z3  i3
-         z3 -i3  z3  i3 ]
-A = [ ddnc times ]
-%> typeof A
-%< A :: [ 12 x 5 ] double
-
-%> b :: [ 12 x 1 ] double
-%< unsolved constraints 12 =? 1, 1 =? 12
-b = [ v1 v2 v3 v4 v5 v6 ...
-        v7 v8 v9 v10 v11 v12 ]
-
-x = A \ b
-
+x = M \ voltages
+%< unsolved constraint 12 =? 1
 %> typeof x
 %< the type of x is quite a puzzle
 \end{verbatim}
 %
-That is, LabMate says that for \texttt{x} to have a sensible type, we need the (impossible) constraints $5 = 1$ and $1 = 5$ to be true, arising from the fact that we have declared \texttt{b} to be a $12 \times 1$ matrix, but in fact it is a $1 \times 12$ matrix. Note that the original source code has been retained exactly as is, including whitespace characters, but a response has been inserted to our \texttt{typeof} query. If we change \texttt{b} to
+That is, LabMate says that for \texttt{x} to have a sensible type, we need \texttt{M} and \texttt{voltages} to have the same number of rows. We forgot to transpose \texttt{voltages}! If we make the necessary repair, we should now see something more satisfying.
 \begin{verbatim}
-b = [ v1 v2 v3 v4 v5 v6 ...
-        v7 v8 v9 v10 v11 v12 ]'
-\end{verbatim}
-using MATLAB's transpose operator instead, then LabMate responds
-\begin{verbatim}
+x = M \ voltages'
+%> typeof x
 %< x :: [ 5 x 1 ] double
 \end{verbatim}
-This way, LabMate can detect matrix size errors at development time, rather than at runtime --- running the original code would indeed crash with the error \textcolor{red}{\textbf{\texttt{Matrix dimensions must agree}}}.
+This way, LabMate can detect matrix size errors at development time, rather than at runtime --- running the original code would indeed crash with the error:
+\[\textcolor{red}{\textbf{\texttt{Matrix dimensions must agree}}}\]
 
 \section{Types for matrices}
 
