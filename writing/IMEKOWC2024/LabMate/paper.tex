@@ -46,8 +46,8 @@
 
 \begin{document}
 
-\title{LabMate: supporting types for MATLAB}
-\author{Conor McBride  \affiliationmark{1}, Georgi Nakov  \affiliationmark{1}, Fredrik Nordvall Forsberg  \affiliationmark{1}, Alistair Forbes  \affiliationmark{2}, Keith Lines  \affiliationmark{2}}
+\title{LabMate: a prospectus for types for MATLAB}
+\author{Conor McBride  \affiliationmark{1}, Georgi Nakov  \affiliationmark{1}, Fredrik Nordvall Forsberg  \affiliationmark{1}, Andr\'e Videla  \affiliationmark{1}, Alistair Forbes  \affiliationmark{2}, Keith Lines  \affiliationmark{2}}
 \affiliation{%
 \affiliationmark{1}{\fontsize{11pt}{9pt} \selectfont University of Strathclyde , UK}  \\
 \affiliationmark{2}{\fontsize{11pt}{9pt} \selectfont National Physical Laboratory, UK}}
@@ -67,9 +67,10 @@
   principles behind LabMate, our current progress, and our future
   plans.
 \end{abstract}
-%\begin{keywords}
-%  MATLAB, software correctness, dimensional consistency, type theory
-%\end{keywords}
+
+\begin{keywords}
+  MATLAB, software correctness, dimensional consistency, type theory
+\end{keywords}
 
 \section{Introduction}
 
@@ -156,7 +157,7 @@ The calculation of offset and drift is achieved using a least squares line fit c
 \end{pmatrix}
 \]
 %
-The matrix on the left is made up of the following values:
+The matrix left of $\times$ is made up of the following values:
 %
 \begin{itemize}
     \item The values in the first four columns are purely numeric and have no associated dimension.
@@ -172,23 +173,35 @@ The matrix on the left is made up of the following values:
     \item The fifth column contains time values.
 \end{itemize}
 
-The first row vector contains values to be calculated using the line fit. The second column vector contains voltage readings. The measured value of the resistor is calculated using the contents of the first row vector. Details of that calculation are beyond the scope of this paper.
+The column vector right of $\times$ and left of $=$ contains values to
+be calculated using the line fit which then determine the measured
+value of the resistor by a calculation which is beyond the scope of
+this paper. The column vector right of $=$ contains voltage readings.
 
-This calculation can be converted into a MATLAB problem with LabMate annotations as follows, using MATLAB's builtin left division operator \texttt{A \textbackslash{} b} to compute a least squares fit. We then ask for the type of the resulting solution. Note that for reasons of space only twelve values are listed. A real measurement would contain considerably more values:
+This calculation can be converted into a MATLAB problem using the
+builtin left division operator \texttt{\textbackslash} to compute a
+least squares fit. Let us step through how we intend to use LabMate to
+help us deliver this solution.
+
+We then ask for the type of the resulting solution. Note
+that for reasons of space only twelve values are listed. A real
+measurement would contain considerably more values:
 \begin{verbatim}
-%> A :: [ 12 x 5 ] double
-A = [ 1  0  1  0  t1
-      1  0  1  0  t2
-      1  0  1  0  t3
-     -1  0  1  0  t4
-     -1  0  1  0  t5
-     -1  0  1  0  t6
-      0  1  0  1  t7
-      0  1  0  1  t8
-      0  1  0  1  t9
-      0 -1  0  1  t10
-      0 -1  0  1  t11
-      0 -1  0  1  t12 ]
+%> z3 :: [ 3 x 1 ] double
+z3 = [ 0; 0; 0 ]
+%> i3 :: [ 3 x 1 ] double
+i3 = [ 1; 1; 1 ]
+%> times :: [ 12 x 1 ] double
+% define times as a column vector
+  of time measurements
+
+ddnc = [ i3  z3  i3  z3
+        -i3  z3  i3  z3
+         z3  i3  z3  i3
+         z3 -i3  z3  i3 ]
+A = [ ddnc times ]
+%> typeof A
+%< A :: [ 12 x 5 ] double
 
 %> b :: [ 12 x 1 ] double
 b = [ v1 v2 v3 v4 v5 v6 ...
@@ -202,27 +215,42 @@ x = A \ b
 The lines starting with `\texttt{\%>}' are interpreted as ordinary comments by MATLAB, but as \remph{input directives} by LabMate. LabMate acts by reading the source code and outputting it again, but possibly with some additional \remph{responses} to the directives added.
 
 Did you notice the error in the above code? The vector \texttt{b} should be of size $12 \times 1$, but is erroneously of size $1 \times 12$ instead. LabMate detects this error and produces the following as output.
+
+%%> A :: [ 12 x 5 ] double
+%A = [ 1  0  1  0  t1
+%      1  0  1  0  t2
+%      1  0  1  0  t3
+%     -1  0  1  0  t4
+%     -1  0  1  0  t5
+%     -1  0  1  0  t6
+%      0  1  0  1  t7
+%      0  1  0  1  t8
+%      0  1  0  1  t9
+%      0 -1  0  1  t10
+%      0 -1  0  1  t11
+%      0 -1  0  1  t12 ]
+
 \begin{verbatim}
-%> A :: [ 12 x 5 ] double
-A = [ 1  0  1  0  t1
-      1  0  1  0  t2
-      1  0  1  0  t3
-     -1  0  1  0  t4
-     -1  0  1  0  t5
-     -1  0  1  0  t6
-      0  1  0  1  t7
-      0  1  0  1  t8
-      0  1  0  1  t9
-      0 -1  0  1  t10
-      0 -1  0  1  t11
-      0 -1  0  1  t12 ]
+
+%> z3 :: [ 3 x 1 ] double
+z3 = [0; 0; 0]
+%> i3 :: [ 3 x 1 ] double
+i3 = [1; 1; 1]
+%> times :: [ 12 x 1 ] double
+ddnc = [ i3  z3  i3  z3
+        -i3  z3  i3  z3
+         z3  i3  z3  i3
+         z3 -i3  z3  i3 ]
+A = [ ddnc times ]
+%> typeof A
+%< A :: [ 12 x 5 ] double
 
 %> b :: [ 12 x 1 ] double
 %< unsolved constraints 12 =? 1, 1 =? 12
 b = [ v1 v2 v3 v4 v5 v6 ...
         v7 v8 v9 v10 v11 v12 ]
 
-x = A \ B
+x = A \ b
 
 %> typeof x
 %< the type of x is quite a puzzle
@@ -258,7 +286,8 @@ idea being that the $i$th entry in the list $rs$ and the $j$th entry
 in the list $cs$ determines the type of the $(i, j)$ coordinate in the
 matrix.
 %
-Matrix types formation can thus be summarised as the inference rule given in Figure~\ref{fig:matrix_intro}.
+Matrix types formation can thus be summarised as the inference rule
+given in Figure~\ref{fig:matrix_intro}.
 %\[
 %  \infer{\istype{\Matrix{R}{C}{E}{rs}{cs}}}
 %  {
