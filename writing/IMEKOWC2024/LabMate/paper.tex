@@ -458,23 +458,28 @@ LabMate is under constant development; the latest version can be found at \url{h
 
 Coming back to the example from Section~\ref{sec:example} again, we can give both \texttt{A} and \texttt{B} more precise types, also taking their physical dimensions into account:
 \begin{verbatim}
-% > A :: [ i <- 12,  j <- 5 ]
-      (if j == 4 then Q T else Q 1)
-% > B :: [ i <- 5 ]
-      (if i == 4
-         then Q (ML^2T^(-4)I^(-1))
-         else Q (ML^2T^(-3)I^(-1)))
+%> A :: [ i <- 12,  j <- 5 ]
+          (if j == 4 then Q T else Q 1)
+
+%> b :: [ 5 x 1 ] (Q (ML^2T^(-3)I^(-1)))
 \end{verbatim}
-This says that the entries in the last column of \texttt{A} are quantities of dimension time $\mathsf{T}$, while all other entries are dimensionless quantities. Meanwhile the entries of \texttt{B} are quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$ (i.e., units V) for entries in the first three rows and $\mathsf{ML}^{2}\mathsf{T}^{-4}\mathsf{I}^{-1}$ (i.e., units V/s) respectively. LabMate reports that the type of \texttt{C} should be
+This says that the entries in the last column of \texttt{A} are quantities of dimension time $\mathsf{T}$, while all other entries are dimensionless quantities. Meanwhile all the entries of \texttt{b} are quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$. LabMate reports that the type of \texttt{x} should be
 \begin{verbatim}
-%< C :: [ 5 x 1 ] (Q (ML^2T^(-3)I^(-1)))
+%< x :: [ i <- 5 ]
+        (if i == 4
+           then Q (ML^2T^(-4)I^(-1))
+           else Q (ML^2T^(-3)I^(-1)))
 \end{verbatim}
-that is a $5 \times 1$ matrix whose entries are all quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$. Another possible way to use LabMate is to instead declare that this is the expected type for \texttt{C}, and to leave the type of one of the entries in \texttt{B} as an unknown:
+that is a $5 \times 1$ matrix whose entries are all quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$ (i.e., units V) for entries in the first four rows and $\mathsf{ML}^{2}\mathsf{T}^{-4}\mathsf{I}^{-1}$ (i.e., units V/s) in the final row.
+%
+Another possible way to use LabMate is to instead declare that this is the expected type for \texttt{x}, and to leave the type of some of the entries in \texttt{b} as an unknown
 \begin{verbatim}
-% > B :: [ Q TODO; Q TODO; ?aTy;
-           Q TODO; Q TODO ]
+%> b :: [ i <- 5 ]
+        (if i == 4
+           then ?bTy
+           else Q (ML^2T^(-3)I^(-1)))
 \end{verbatim}
-We can then ask LabMate to solve the \remph{meta variable} \texttt{?aTy}, to which LabMate responds that we must have \todo{\texttt{?aTy} = fill in}. This way the types of LabMate can be used to validate and experiment with the dimensional consistency of the quantities involved.
+We can then ask LabMate to solve the \remph{meta variable} \texttt{?bTy}, to which LabMate responds that we must also have \texttt{?aTy} = $\mathsf{Q}\,(\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1})$. This way the types of LabMate can be used to validate and experiment with the dimensional consistency of the quantities involved.
 
 %GravCalc example again: $t_i$ time ($\mathsf{T}$; in seconds); $v_i$ voltage ($\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$; in volt)
 
@@ -498,7 +503,7 @@ what is known about program fragments at runtime.
 
 This work was undertaken jointly by the Mathematically Structured Programming Group of the University of Strathclyde and the National Physical Laboratory’s Data Science department as part of Data Science’s Tools for Trustworthiness National Measurement System (NMS) project 2023 – 2024.
 
-Thanks to NPL colleague Nick Fletcher for his help and guidance providing the example from Section \ref{sec:example}. Thanks also to NPL colleagues Louise Wright and Ian Smith for reviewing this paper.
+Thanks to NPL colleague Nick Fletcher for his help and guidance providing the example from Section \ref{sec:example}. Thanks also to NPL colleagues Louise Wright and Ian Smith for reviewing this paper, and to Professor Neil Ghani for his support.
 
 \bibliographystyle{ws-procs9x6}
 \bibliography{labmate}
