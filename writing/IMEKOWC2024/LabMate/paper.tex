@@ -39,12 +39,9 @@
 \newcommand{\Matrix}[5]{\mathsf{Matrix}\,#1\,#2\,#3\,#4\,#5}
 \newcommand{\List}[1]{\mathsf{List}\,#1}
 
-
-
 \newcommand{\remph}{\emph}
 
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{TODO: #1}}}
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{document}
@@ -58,11 +55,21 @@
 \maketitle
 
 \begin{abstract}
-  TODO
+  Many computations in science and engineering are implemented in the
+  programming language MATLAB. However the high-level meaning of such
+  MATLAB programs stay informal, which can lead to implementation
+  errors and bugs, for example relating to incompatible units of
+  measure for quantities, or incompatible sizes of matrices at
+  runtime. We are in the process of developing LabMate, which is a
+  tool for reifying current informal programmer practices into a
+  language of formal comments. These comments are ignored by MATLAB,
+  but acted on and checked by LabMate. We outline the design
+  principles behind LabMate, our current progress, and our future
+  plans.
 \end{abstract}
-\begin{keywords}
-  TODO
-\end{keywords}
+%\begin{keywords}
+%  MATLAB, software correctness, dimensional consistency, type theory
+%\end{keywords}
 
 \section{Introduction}
 
