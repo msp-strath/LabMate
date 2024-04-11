@@ -272,7 +272,7 @@ play a central role in this theory.
 %
 In particular, we acknowledge that the rows and columns of a matrix might pertain to distinct individual entities, rather as the rows ans columns of a spreadsheet do.
 %
-A matrix type looks like
+Internally, a matrix type looks like
 \[\Matrix{R}{C}{E}{\rs}{\cs}
 \]
 %
@@ -294,7 +294,6 @@ To check that $\Matrix{R}{C}{E}{\rs}{\cs}$ is a valid type, LabMate must:
 \item check that $\rs\in\List{R}$ and $\cs\in\List{C}$
 \end{enumerate}
 
-
 A notable special case is when both $R$ and $C$ are the unit type $R = C = \One$, that is, the type with exactly one element.
 %
 $\List{\One}$ amounts to a mere `tally', counting indistinct things, which we allow to be written as a number in decimal notation.
@@ -308,9 +307,27 @@ Thus, we have recovered $\Matrix{\One}{\One}{E}{m}{n}$ as the type of
 $m \times n$ matrices with entries of type $E$, where $m$ and $n$ are
 the unique lists over the unit type of length $m$ and $n$
 respectively.
+%
+That is what we render in LabMate directives and responses as
+\[
+\lsb m \texttt{x} n \rsb E
+\]
+as in our \texttt{M :: [ 1 x 5 ] double} in Section~\ref{sec:example}.
 
-Matrix types formation can thus be summarised as the inference rule
-given in Figure~\ref{fig:matrix_intro}.
+\[\begin{array}{l}
+\begin{array}{r|c|c|}
+  & \cs_A & \cs_b \\
+\hline
+&&\\
+&A \in & B \in \\
+\rs &\Matrix{R}{C}{E}{\rs}{\cs_A} & \Matrix{R}{C}{E}{\rs}{\cs_B} \\
+&&\\
+\hline
+\end{array}\\
+\;\;\; \in \Matrix{R}{C}{E}{\rs}{(\cs_A\append\cs_B)}
+\end{array}\]
+
+%Matrix types formation can thus be summarised as the inference rule given in Figure~\ref{fig:matrix_intro}.
 %\[
 %  \infer{\istype{\Matrix{R}{C}{E}{rs}{\cs}}}
 %  {
@@ -327,27 +344,27 @@ given in Figure~\ref{fig:matrix_intro}.
 %\]
 %
 \begin{figure*}[th]
-\begin{subfigure}{\textwidth}
-  \begin{center}
-    \[
-      \infer{\istype{\Matrix{R}{C}{E}{\rs}{\cs}}}
-      {
-        \istype{R}
-        &\quad
-        \istype{C}
-        &\quad
-        x : R, y : C \vdash \istype{E(x,y)}
-        &\quad
-        \rs : \List{R}
-        &\quad
-        \cs : \List{C}
-      }
-    \]
-  \end{center}
-  \caption{Type formation rule for matrix types}
-  \label{fig:matrix_intro}
-\end{subfigure}
-\hfill
+%\begin{subfigure}{\textwidth}
+%  \begin{center}
+%    \[
+%      \infer{\istype{\Matrix{R}{C}{E}{\rs}{\cs}}}
+%      {
+%        \istype{R}
+%        &\quad
+%        \istype{C}
+%        &\quad
+%        x : R, y : C \vdash \istype{E(x,y)}
+%        &\quad
+%        \rs : \List{R}
+%        &\quad
+%        \cs : \List{C}
+%      }
+%    \]
+%  \end{center}
+%  \caption{Type formation rule for matrix types}
+%  \label{fig:matrix_intro}
+%\end{subfigure}
+%\hfill
 \begin{subfigure}{\textwidth}
   \begin{center}
     \[
