@@ -277,7 +277,7 @@ Internally, a matrix type looks like
 \]
 %
 We thus \param{} matrix types by two arbitrary `header' types $R$, for the individuals the rows concern, and $C$ for the columns. We may then give two lists, $\rs = [r_1,\ldots,r_m]\in\List{R}$ (so that each $r_i\in R$) and $\cs = [c_1,\ldots,c_n]\in\List{C}$ of those individuals. A \param{}d type $E(r,c)$ gives the type of entry for any combination of row and column individual, with $E(r_i,c_j)$ being the type of the entry $e_{i,j}$. In the diagram below, the $e$s inside the rectangle are the matrix entries computed by the MATLAB code. The $r$s and $c$s outside the rectangle are \remph{meta}data coming from the matrix type, known only to LabMate, and not available as data to MATLAB.
-\[\begin{array}{r|ccccc|}
+\[\begin{array}{@{}r|ccccc|}
 \; & c_1      & \cdots & c_j     & \cdots & c_n     \\
 \hline
 r_1    & e_{1,1}  &        & e_{1,j} &        & e_{1,n} \\
@@ -317,7 +317,7 @@ as in our \texttt{M :: [ 1 x 5 ] double} in Section~\ref{sec:example}.
 So much for what it is to be a valid matrix type: what does it mean to be a valid matrix \remph{in} such a type?
 
 Firstly, a singleton entry matrix must have singleton header lists $[r]$ and $[c]$.
-\[\begin{array}[b]{r|@{}c@{}|l}
+\[\begin{array}[b]{@{}r|@{}c@{}|l}
 \; & c \\
 \cline{1-2}
 r  & e\in E(r,c) & \quad \in \Matrix{R}{C}{E}{[r]}{[c]} \\
@@ -327,7 +327,7 @@ r  & e\in E(r,c) & \quad \in \Matrix{R}{C}{E}{[r]}{[c]} \\
 
 Secondly, to check a horizontal pasting of matrices, we must ensure that the header and entry types match, that the row headers are the same for left and right, and that the column headers can be split into a prefix for the left matrix and a suffix for the right. In other words, the column headers for the whole are the concatenation ($\append$) of the column headers for the parts.
 \[\begin{array}{l}
-\begin{array}{r|c|c|}
+\begin{array}{@{}r|c|c|}
   & \cs_A & \cs_b \\
 \hline
 &&\\
@@ -341,7 +341,7 @@ Secondly, to check a horizontal pasting of matrices, we must ensure that the hea
 
 Thirdly, vertical pasting is similar, except that it is the row headers which split into prefix and suffix while the column headers are shared.
 \[
-\begin{array}[c]{r|c|}
+\begin{array}[c]{@{}r|c|}
   & \cs \\
   \hline
   \;    & \\
@@ -368,7 +368,51 @@ To check if we may add matrices $A$ and $B$, LabMate must:
 \item check that $A$ and $B$ both have the \remph{same} matrix type $\Matrix{R}{C}{E}{\rs}{\cs}$;
 \item check that \remph{every} entry type $E(r,c)$ admits addition.
 \end{enumerate}
-In the short term, LabMate can get by with a hard-coded table of which types admit addition, but more flexible and general approaches to operator overloading (e.g., Haskell's `type classes'~\cite{wadler.blott}) are readily adoptable in due course.
+In the short term, LabMate can get by with a hard-coded table of which types (e.g. \texttt{double}) admit addition, but more flexible and general approaches to operator overloading (e.g., Haskell's `type classes'~\cite{wadler.blott}) are readily adoptable in due course.
+
+Multplication is rather more involved, of course. The usual requirement that the matrix sizes `meet in the middle' generalises straightforwardly to lists of headers,
+\[\begin{array}{@{}c@{}}
+\begin{array}[c]{@{}r|c|}
+  \;  & \ms \\
+  \hline
+  \;  &     \\
+  \;  &  A \in \\
+  \rs & \Matrix{R}{M}{E_1}{\rs}{\ms} \\
+  \;  & \\
+  \hline
+\end{array}
+  \times
+\begin{array}[c]{@{}r|c|}
+  \;  & \cs \\
+  \hline
+  \;  &     \\
+  \;  &     \\
+  \;  &  B \in \\
+  \ms & \Matrix{M}{C}{E_2}{\\ & \ms}{\cs} \\
+  \;  &     \\
+  \;  & \\
+  \hline
+\end{array}
+\bigskip\\
+\in \qquad
+\begin{array}[c]{@{}r|c|}
+  \;  & \cs \\
+  \hline
+  \;  &     \\
+  \rs & \Matrix{R}{C}{E_3}{\\ & \rs}{\cs} \\
+  \;  & \\
+  \hline
+\end{array}
+\end{array}
+\]
+but we must also check that the entry types are compatible. Specifically, LabMate must:
+\begin{enumerate}
+  \item check, for all $r$, $m$ and $c$, that if $a\in E_1(r,m)$ and $b\in E_2(m,c)$, then
+    $a\times b \in E_3(r,c)$;
+  \item check that \remph{every} entry type $E_3(r,c)$ admits addition.
+\end{enumerate}
+
+These conditions are straightforward in the special case where $R = C = \One$ and the $E$s are standard numerical types. There are, however, more motivating possibilities.
 
 
 %Matrix types formation can thus be summarised as the inference rule given in Figure~\ref{fig:matrix_intro}.
@@ -409,23 +453,23 @@ In the short term, LabMate can get by with a hard-coded table of which types adm
 %  \label{fig:matrix_intro}
 %\end{subfigure}
 %\hfill
-\begin{subfigure}{\textwidth}
-  \begin{center}
-    \[
-      \infer{A + B : \Matrix{R}{C}{E}{\rs}{\cs}}
-      {
-        x : R, y : C \vdash \isadd{E(x, y)}
-        &\quad
-        A : \Matrix{R}{C}{E}{\rs}{\cs}
-        &\quad
-        B : \Matrix{R}{C}{E}{\rs}{\cs}
-      }
-    \]
-  \end{center}
-  \caption{Addition rule for matrices}
-  \label{fig:matrix_add}
-\end{subfigure}
-\hfill
+%\begin{subfigure}{\textwidth}
+%  \begin{center}
+%    \[
+%      \infer{A + B : \Matrix{R}{C}{E}{\rs}{\cs}}
+%      {
+%        x : R, y : C \vdash \isadd{E(x, y)}
+%        &\quad
+%        A : \Matrix{R}{C}{E}{\rs}{\cs}
+%        &\quad
+%        B : \Matrix{R}{C}{E}{\rs}{\cs}
+%      }
+%    \]
+%  \end{center}
+%  \caption{Addition rule for matrices}
+%  \label{fig:matrix_add}
+%\end{subfigure}
+%\hfill
 \begin{subfigure}{\textwidth}
   \begin{center}
     \[
