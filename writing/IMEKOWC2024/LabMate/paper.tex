@@ -32,7 +32,7 @@
 \newcommand{\isadd}[1]{#1\ \textsf{numeric}}
 \newcommand{\ismult}[3]{(#1, #2, #3)\ \textsf{multipliable}}
 
-\newcommand{\append}{+\!\!\!+}
+\newcommand{\append}{\mathop{+\!\!+}}
 \newcommand{\hjux}[2]{{#1}|{#2}}
 \newcommand{\vjux}[2]{\frac{#1}{#2}}
 
@@ -289,9 +289,9 @@ r_m    & e_{m,1}  &        & e_{m,j} &        & e_{m,n}  \\
 \end{array}\]
 To check that $\Matrix{R}{C}{E}{\rs}{\cs}$ is a valid type, LabMate must:
 \begin{enumerate}
-\item check that $R$ and $C$ are both valid types
-\item check that $E(r,c)$ is a valid type whenever $r\in R$ and $c\in C$
-\item check that $\rs\in\List{R}$ and $\cs\in\List{C}$
+\item check that $R$ and $C$ are both valid types;
+\item check that $E(r,c)$ is a valid type whenever $r\in R$ and $c\in C$;
+\item check that $\rs\in\List{R}$ and $\cs\in\List{C}$.
 \end{enumerate}
 
 A notable special case is when both $R$ and $C$ are the unit type $R = C = \One$, that is, the type with exactly one element.
@@ -317,7 +317,7 @@ as in our \texttt{M :: [ 1 x 5 ] double} in Section~\ref{sec:example}.
 So much for what it is to be a valid matrix type: what does it mean to be a valid matrix \remph{in} such a type?
 
 Firstly, a singleton entry matrix must have singleton header lists $[r]$ and $[c]$.
-\[\begin{array}[b]{r|c|l}
+\[\begin{array}[b]{r|@{}c@{}|l}
 \; & c \\
 \cline{1-2}
 r  & e\in E(r,c) & \quad \in \Matrix{R}{C}{E}{[r]}{[c]} \\
@@ -360,6 +360,15 @@ Thirdly, vertical pasting is similar, except that it is the row headers which sp
 \Matrix{R}{C}{E}{\\ \quad (\rs_A\append\rs_B)}{\cs}
 \end{array}
 \]
+
+Now that we have matrices, we must explain how to typecheck matrix operations.
+
+To check if we may add matrices $A$ and $B$, LabMate must:
+\begin{enumerate}
+\item check that $A$ and $B$ both have the \remph{same} matrix type $\Matrix{R}{C}{E}{\rs}{\cs}$;
+\item check that \remph{every} entry type $E(r,c)$ admits addition.
+\end{enumerate}
+In the short term, LabMate can get by with a hard-coded table of which types admit addition, but more flexible and general approaches to operator overloading (e.g., Haskell's `type classes'~\cite{wadler.blott}) are readily adoptable in due course.
 
 
 %Matrix types formation can thus be summarised as the inference rule given in Figure~\ref{fig:matrix_intro}.
@@ -448,45 +457,10 @@ following the work of Hart~\cite{hart}.
 %
 We will see in Section~\ref{sec:example-revisited} how this can be helpful.
 
-Terms of matrix type in the core type theory are built up from
-$1 \times 1$ matrices and pasting matrices horizontally and vertically.
-%
-Singleton matrices have the following typing rule
-\[
-  \infer{[e] : \Matrix{R}{C}{E}{[r]}{[c]}}
-    {r : R
-      &\quad
-      c : C
-      &\quad
-      e : E(r, c)
-    }
-\]
-%
-while horizontal and vertical pasting horizontally have the following
-typing rules:
-\[
-  \infer{\hjux{A}{B} : \Matrix{R}{C}{E}{\rs}{(cs_A \append cs_B)}}
-  {
-    A : \Matrix{R}{C}{E}{\rs}{cs_A}
-    &\quad
-    B : \Matrix{R}{C}{E}{\rs}{cs_B}
-  }
-\]
-\[
-  \infer{\vjux{A}{B} : \Matrix{R}{C}{E}{(\rs_A \append \rs_B)}{cs}}
-  {
-    A : \Matrix{R}{C}{E}{\rs_A}{cs}
-    &\quad
-    B : \Matrix{R}{C}{E}{\rs_B}{cs}
-  }
-\]
 When comparing matrices for equality, we reassociate horizontal and
 vertical pastings, so that $\hjux{\vjux{A}{C}}{\vjux{B}{D}}$ and
 $\vjux{\hjux{A}{B}}{\hjux{C}{D}}$ indeed are considered equal.
 
-The conditions for adding two matrices are given in Figure~\ref{fig:matrix_add} --- the matrices $A$ and $B$ can be added if all entry types $E(x, y)$ are
-numeric (for example integers, or floating point numbers), and if $A$
-and $B$ have the same matrix type.
 %
 %\[
 %  \infer{A + B : \Matrix{R}{C}{E}{rs}{cs}}
