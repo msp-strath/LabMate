@@ -414,6 +414,17 @@ but we must also check that the entry types are compatible. Specifically, LabMat
 
 These conditions are straightforward in the special case where $R = C = \One$ and the $E$s are standard numerical types. There are, however, more motivating possibilities.
 
+Of particular interest is the case when the header types, $R$ and
+$C$, are types of physical dimensions, with $E(r, c)$ being the
+type of physical quantities of dimension $r^{-1}\cdot c$.
+%
+Such quantities admit addition only if the dimensions match. Meanwhile, their multiplication correspondingly multiplies the dimensions.
+%
+This way, we can reduce dimensional consistency checking \`a la
+Kennedy~\cite{kennedyUOM} to typechecking, but also for programs involving matrices of non-uniform dimension, following the work of Hart~\cite{hart}.
+%
+We will see in Section~\ref{sec:example-revisited} how this can be helpful.
+
 
 %Matrix types formation can thus be summarised as the inference rule given in Figure~\ref{fig:matrix_intro}.
 %\[
@@ -431,7 +442,7 @@ These conditions are straightforward in the special case where $R = C = \One$ an
 %  }
 %\]
 %
-\begin{figure*}[th]
+%\begin{figure*}[th]
 %\begin{subfigure}{\textwidth}
 %  \begin{center}
 %    \[
@@ -470,40 +481,49 @@ These conditions are straightforward in the special case where $R = C = \One$ an
 %  \label{fig:matrix_add}
 %\end{subfigure}
 %\hfill
-\begin{subfigure}{\textwidth}
-  \begin{center}
-    \[
-      \infer{A * B : \Matrix{R}{C}{E''}{\rs}{\cs}}
-      {
-        \ismult{E}{E'}{E''}
-        &\quad
-        A : \Matrix{R}{C}{E}{\rs}{\ms}
-        &\quad
-        B : \Matrix{R}{C}{E'}{\ms}{\cs}
-      }
-    \]
-  \end{center}
-  \caption{Multiplication rule for matrices}
-  \label{fig:matrix_mul}
-\end{subfigure}
-% FIXME : \caption is broken
-\captionwide{Typing rules for matrices}
-\label{fig:matrix_rules}
-\end{figure*}
+%\begin{subfigure}{\textwidth}
+%  \begin{center}
+%    \[
+%      \infer{A * B : \Matrix{R}{C}{E''}{\rs}{\cs}}
+%      {
+%        \ismult{E}{E'}{E''}
+%        &\quad
+%        A : \Matrix{R}{C}{E}{\rs}{\ms}
+%        &\quad
+%        B : \Matrix{R}{C}{E'}{\ms}{\cs}
+%      }
+%    \]
+%  \end{center}
+%  \caption{Multiplication rule for matrices}
+%  \label{fig:matrix_mul}
+%\end{subfigure}
+%% FIXME : \caption is broken
+%\captionwide{Typing rules for matrices}
+%\label{fig:matrix_rules}
+%\end{figure*}
 
-Another noteworthy special case which we want to support takes $R$ and
-$C$ to be types of physical dimensions, with $E(d_1, d_2)$ to be the
-type of physical quantities of dimension $d_1 \cdot d_2^{-1}$.
-%
-This way, we can reduce dimensional consistency checking \`a la
-Kennedy~\cite{kennedyUOM} also for programs involving matrices,
-following the work of Hart~\cite{hart}.
-%
-We will see in Section~\ref{sec:example-revisited} how this can be helpful.
+Checking the compatibility between operations and data boils down to checking equality of types. LabMate types are \remph{dependent} types, in the style of the state-of-the-art functional programming languages Agda and Idris~\cite{ydtm,agdathing,idristhing}. Dependent types express the reality that data validity is often a \remph{relative} notion, with the compatibility requirements for matrix multiplication being a standard example. Types which mention (hence depend on) some values (e.g., our header lists) are used to classify other values (e.g., our matrices) with respect to them.
 
-When comparing matrices for equality, we reassociate horizontal and
-vertical pastings, so that $\hjux{\vjux{A}{C}}{\vjux{B}{D}}$ and
-$\vjux{\hjux{A}{B}}{\hjux{C}{D}}$ indeed are considered equal.
+Equality of types therefore demands some notion of equality for the values they mention. We equip every type in our core theory with an algorithmic decision procedure testing when two expressions in the type are sufficiently obviously equal to guarantee compatibility of types. Languages like Agda and Idris generate their notion of expression equality by extending the evaluation rules used to compute with values at runtime to cope with expressions involving variables by getting stuck whenever a variable prevents a condition from being tested. In MATLAB, the matrix pastings \texttt{[[A B] C]} and \texttt{[A [B C]]} both mean the same thing as \texttt{[A B C]}, but for us to see that requires \remph{algebraic} properties of the $\append$ operator for our header lists. The state-of-the-art languages turn up to this algebra fight armed only with arithmetic! They force their programmers to give explicit proofs of type compatibility, doing the algebra by hand. We would not dream of inflicting this bureaucracy on LabMate users, especially when the small amount of algebra we need is perfectly straightforward~\cite{nueqns}.
+
+We incorporate the specific algebraic theories we need to manage matrices and dimensions into LabMate's expression equality. Indeed, we also consider when \remph{matrix} expressions are equal. We reassociate horizontal and vertical pastings, so that
+\[\begin{array}[c]{|c|@{}c@{}|c|}
+\cline{1-1} \cline{3-3}
+A &\;& B \\
+\cline{1-1} \cline{3-3}
+C &\;& D \\
+\cline{1-1} \cline{3-3}
+\end{array}
+\quad = \quad
+\begin{array}[c]{|c|c|}
+  \hline
+  A & B \\
+  \hline
+  \hline
+  C & D \\
+  \hline
+\end{array}
+\]
 
 %
 %\[
@@ -518,9 +538,9 @@ $\vjux{\hjux{A}{B}}{\hjux{C}{D}}$ indeed are considered equal.
 %\]
 %
 
-Matrix multiplication is trickier, because it does not demand that $A$
-and $B$ have the same type --- rather, it demands that $A$ and $B$
-have \remph{compatible} types, see Figure~\ref{fig:matrix_mul}.
+%Matrix multiplication is trickier, because it does not demand that $A$
+%and $B$ have the same type --- rather, it demands that $A$ and $B$
+%have \remph{compatible} types, see Figure~\ref{fig:matrix_mul}.
 %
 %\[
 %  \infer{A * B : \Matrix{R}{C}{E''}{rs}{cs}}
@@ -532,13 +552,13 @@ have \remph{compatible} types, see Figure~\ref{fig:matrix_mul}.
 %    B : \Matrix{R}{C}{E'}{ms}{cs}
 %  }
 %\]
-The entry types $E$, $E'$, $E''$ are multipliable if for all $x$, $y$
-and $z$, we have that $E(x, y)$ and $E'(y, z)$ supports a
-multiplication operation with codomain $E''(x, z)$.
+%The entry types $E$, $E'$, $E''$ are multipliable if for all $x$, $y$
+%and $z$, we have that $E(x, y)$ and $E'(y, z)$ supports a
+%multiplication operation with codomain $E''(x, z)$.
 %
-This is certainly the case if all entry types involved are simply
-integers or floating point numbers, but this constraint can also
-ensure that the physical units involved line up.
+%This is certainly the case if all entry types involved are simply
+%integers or floating point numbers, but this constraint can also
+%ensure that the physical units involved line up.
 
 
 % typechecking
