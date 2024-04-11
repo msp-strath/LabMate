@@ -43,6 +43,8 @@
 \newcommand{\remph}{\emph}
 
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{TODO: #1}}}
+
+\newcommand{\param}{parametrize}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{document}
@@ -262,16 +264,34 @@ This way, LabMate can detect matrix size errors at development time, rather than
 \newcommand{\ms}{\mathit{ms}}
 \newcommand{\cs}{\mathit{cs}}
 
-Under the hood, LabMate translates MATLAB expressions to typed
-expressions in its own core type theory.
+Under the hood, LabMate translates selected well behaved MATLAB expressions
+to typed expressions in its own core theory of types and values.
 %
-Since matrices feature heavily in MATLAB code, the type of matrices
-plays a central role in this type theory.
+As matrices feature heavily in MATLAB code, the types of matrices
+play a central role in this theory.
 %
+In particular, we acknowledge that the rows and columns of a matrix might pertain to distinct individual entities, rather as the rows ans columns of a spreadsheet do.
+%
+A matrix type looks like
+\[\Matrix{R}{C}{E}{\rs}{\cs}
+\]
+%
+We thus \param{} matrix types by two arbitrary types $R$, for the individuals the rows concern, and $C$ for the columns. We may then give two lists, $\rs = [r_1,\ldots,r_m]\in\List{R}$ and $\cs = [c_1,\ldots,c_n]\in\List{C}$ of those individuals. A \param{}d type $E(r,c)$ gives the type of entry for any combination of row and column individual, with $E(r_i,c_j)$ being the type of the entry with coordinates $(i,j)$.
+\[\begin{array}{r|ccccc|}
+\;     & c_1      & \cdots & c_j     & \cdots & \multicolumn{1}{c}{c_n}     \\
+\hline
+r_1    & e_{1,1}  &        & e_{1,j} &        & e_{1,n} \\
+\vdots &          &        &         &        &         \\
+r_i    & e_{i,1}  &        & e_{i,j} &        & e_{i,n} \\
+\vdots &          &        &         &        &         \\
+r_m    & e_{m,1}  &        & e_{m,j} &        & e_{m,n}  \\
+      \cline{2-6}
+\end{array}\]
+
 We make this type rather precise, by allowing the type of each entry
 in the matrix to vary according to the row and column of the entry:
 %
-we parameterise the type of matrices by a type $R$ associated with
+we \param{} the type of matrices by a type $R$ associated with
 each row, a type $C$ associated with each column, and a type $E(x,y)$
 which might vary depending on the values of parameters $x : R$ and
 $y : C$, as well as two lists $\rs : \List{R}$ and $\List{C}$ --- the
