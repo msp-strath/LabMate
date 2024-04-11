@@ -276,16 +276,16 @@ Internally, a matrix type looks like
 \[\Matrix{R}{C}{E}{\rs}{\cs}
 \]
 %
-We thus \param{} matrix types by two arbitrary types $R$, for the individuals the rows concern, and $C$ for the columns. We may then give two lists, $\rs = [r_1,\ldots,r_m]\in\List{R}$ (so that each $r_i\in R$) and $\cs = [c_1,\ldots,c_n]\in\List{C}$ of those individuals. A \param{}d type $E(r,c)$ gives the type of entry for any combination of row and column individual, with $E(r_i,c_j)$ being the type of the entry $e_{i,j}$. In the diagram below, the $e$s inside the rectangle are the matrix entries computed by the MATLAB code, while the $r$s and $c$s outside the rectangle are `metadata' coming from the matrix type.
+We thus \param{} matrix types by two arbitrary `header' types $R$, for the individuals the rows concern, and $C$ for the columns. We may then give two lists, $\rs = [r_1,\ldots,r_m]\in\List{R}$ (so that each $r_i\in R$) and $\cs = [c_1,\ldots,c_n]\in\List{C}$ of those individuals. A \param{}d type $E(r,c)$ gives the type of entry for any combination of row and column individual, with $E(r_i,c_j)$ being the type of the entry $e_{i,j}$. In the diagram below, the $e$s inside the rectangle are the matrix entries computed by the MATLAB code. The $r$s and $c$s outside the rectangle are \remph{meta}data coming from the matrix type, known only to LabMate, and not available as data to MATLAB.
 \[\begin{array}{r|ccccc|}
-\multicolumn{1}{c}{\;} & c_1      & \cdots & c_j     & \cdots & \multicolumn{1}{c}{c_n}     \\
-      \cline{2-6}
+\; & c_1      & \cdots & c_j     & \cdots & c_n     \\
+\hline
 r_1    & e_{1,1}  &        & e_{1,j} &        & e_{1,n} \\
 \vdots &          &        &         &        &         \\
 r_i    & e_{i,1}  &        & e_{i,j} &        & e_{i,n} \\
 \vdots &          &        &         &        &         \\
 r_m    & e_{m,1}  &        & e_{m,j} &        & e_{m,n}  \\
-      \cline{2-6}
+\hline
 \end{array}\]
 To check that $\Matrix{R}{C}{E}{\rs}{\cs}$ is a valid type, LabMate must:
 \begin{enumerate}
@@ -310,9 +310,21 @@ respectively.
 %
 That is what we render in LabMate directives and responses as
 \[
-\lsb m \texttt{x} n \rsb E
+\lsb \;m \;\texttt{x}\; n\; \rsb\; E
 \]
 as in our \texttt{M :: [ 1 x 5 ] double} in Section~\ref{sec:example}.
+
+So much for what it is to be a valid matrix type: what does it mean to be a valid matrix \remph{in} such a type?
+%
+Firstly, a singleton entry matrix must have singleton header lists $[r]$ and $[c]$.
+\[\begin{array}[b]{r|c|l}
+\; & c \\
+\cline{1-2}
+r  & e\in E(r,c) & \quad \in \Matrix{R}{C}{E}{[r]}{[c]} \\
+\cline{1-2}
+\end{array} 
+\]
+
 
 \[\begin{array}{l}
 \begin{array}{r|c|c|}
