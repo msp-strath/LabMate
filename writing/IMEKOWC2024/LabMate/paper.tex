@@ -276,7 +276,7 @@ A matrix type looks like
 \[\Matrix{R}{C}{E}{\rs}{\cs}
 \]
 %
-We thus \param{} matrix types by two arbitrary types $R$, for the individuals the rows concern, and $C$ for the columns. We may then give two lists, $\rs = [r_1,\ldots,r_m]\in\List{R}$ (so that each $r_i\in R$) and $\cs = [c_1,\ldots,c_n]\in\List{C}$ of those individuals. A \param{}d type $E(r,c)$ gives the type of entry for any combination of row and column individual, with $E(r_i,c_j)$ being the type of the entry $e_{i,j}$.
+We thus \param{} matrix types by two arbitrary types $R$, for the individuals the rows concern, and $C$ for the columns. We may then give two lists, $\rs = [r_1,\ldots,r_m]\in\List{R}$ (so that each $r_i\in R$) and $\cs = [c_1,\ldots,c_n]\in\List{C}$ of those individuals. A \param{}d type $E(r,c)$ gives the type of entry for any combination of row and column individual, with $E(r_i,c_j)$ being the type of the entry $e_{i,j}$. In the diagram below, the $e$s inside the rectangle are the matrix entries computed by the MATLAB code, while the $r$s and $c$s outside the rectangle are `metadata' coming from the matrix type.
 \[\begin{array}{r|ccccc|}
 \multicolumn{1}{c}{\;} & c_1      & \cdots & c_j     & \cdots & \multicolumn{1}{c}{c_n}     \\
       \cline{2-6}
@@ -287,7 +287,28 @@ r_i    & e_{i,1}  &        & e_{i,j} &        & e_{i,n} \\
 r_m    & e_{m,1}  &        & e_{m,j} &        & e_{m,n}  \\
       \cline{2-6}
 \end{array}\]
+To check that $\Matrix{R}{C}{E}{\rs}{\cs}$ is a valid type, LabMate must:
+\begin{enumerate}
+\item check that $R$ and $C$ are both valid types
+\item check that $E(r,c)$ is a valid type whenever $r\in R$ and $c\in C$
+\item check that $\rs\in\List{R}$ and $\cs\in\List{C}$
+\end{enumerate}
+
+
+A notable special case is when both $R$ and $C$ are the unit type $R = C = \One$, that is, the type with exactly one element.
 %
+$\List{\One}$ amounts to a mere `tally', counting indistinct things, which we allow to be written as a number in decimal notation.
+%
+In this case, there is only one type of entries $E(r,c)$ (because both $r$
+and $c$ must be the unique element of the unit type), and the only
+information available in the lists $\rs : \List{\One}$ and
+$\cs : \List{\One}$ are their lengths.
+%
+Thus, we have recovered $\Matrix{\One}{\One}{E}{m}{n}$ as the type of
+$m \times n$ matrices with entries of type $E$, where $m$ and $n$ are
+the unique lists over the unit type of length $m$ and $n$
+respectively.
+
 Matrix types formation can thus be summarised as the inference rule
 given in Figure~\ref{fig:matrix_intro}.
 %\[
@@ -364,19 +385,6 @@ given in Figure~\ref{fig:matrix_intro}.
 \captionwide{Typing rules for matrices}
 \label{fig:matrix_rules}
 \end{figure*}
-
-A notable special case is when both $R$ and $C$ are the unit type
-$R = C = \One$, that is, the type with exactly one element.
-%
-In this case, there is only one type of entries $E$ (because both $x$
-and $y$ must be the unique element of the unit type), and the only
-information available in the lists $\rs : \List{\One}$ and
-$\cs : \List{\One}$ is their length.
-%
-Thus, we have recovered $\Matrix{\One}{\One}{E}{m}{n}$ as the type of
-$m \times n$ matrices with entries of type $E$, where $n$ and $m$ are
-the unique lists over the unit type of length $n$ and $m$
-respectively.
 
 Another noteworthy special case which we want to support takes $R$ and
 $C$ to be types of physical dimensions, with $E(d_1, d_2)$ to be the
