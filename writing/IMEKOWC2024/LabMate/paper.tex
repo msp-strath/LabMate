@@ -27,6 +27,7 @@
 \newcommand{\lsb}{\texttt{\symbol{91}}}
 \newcommand{\bsl}{\texttt{\symbol{92}}}
 \newcommand{\rsb}{\texttt{\symbol{93}}}
+\newcommand{\crt}{\texttt{\symbol{94}}}
 
 \newcommand{\istype}[1]{#1\ \textsf{type}}
 \newcommand{\isadd}[1]{#1\ \textsf{numeric}}
@@ -250,7 +251,7 @@ Now that we have assembled the data, we may solve the equations and ask for the 
 x = M \ voltages
 %> typeof x
 \end{verbatim}
-Did you notice the error in the above code? The vector \texttt{voltages} should be of size $12 \times 1$, but is erroneously of size $1 \times 12$ instead. LabMate detects this error and responds:
+Did you notice the error in the above code? The vector \texttt{voltages} should be of size $12 \times 1$, but is erroneously of size $1 \times 12$ instead. LabMate will detect this error and respond:
 
 \begin{verbatim}
 x = M \ voltages
@@ -259,7 +260,7 @@ x = M \ voltages
 %< the type of x is quite a puzzle
 \end{verbatim}
 %
-That is, LabMate says that for \texttt{x} to have a sensible type, we need \texttt{M} and \texttt{voltages} to have the same number of rows. We forgot to transpose \texttt{voltages}! If we make the necessary repair, we should now see something more satisfying.
+That is, for \texttt{x} to have a sensible type, we need \texttt{M} and \texttt{voltages} to have the same number of rows. We forgot to transpose \texttt{voltages}! If we make the necessary repair, we should now see something more satisfying.
 \begin{verbatim}
 x = M \ voltages'
 %> typeof x
@@ -322,7 +323,7 @@ That is what we render in LabMate directives and responses as
 \[
 \lsb \;m \;\texttt{x}\; n\; \rsb\; E
 \]
-as in our \texttt{M :: [ 1 x 5 ] double} in Section~\ref{sec:example}.
+as in our \texttt{M :: [ 12 x 5 ] double} in Section~\ref{sec:example}.
 
 So much for what it is to be a valid matrix type: what does it mean to be a valid matrix \remph{in} such a type?
 
@@ -630,34 +631,61 @@ After the virtual machine has solved as many problems as it can, we analyse its 
 
 % matrix multiplication with units of measure
 
-Coming back to the example from Section~\ref{sec:example} again, we can give both \texttt{A} and \texttt{B} more precise types, also taking their physical dimensions into account:
+Coming back to the example from Section~\ref{sec:example} again, we aim to give both \texttt{M} and \texttt{voltages} more precise types, also taking their physical dimensions into account,
 \begin{verbatim}
-%> A :: [ i <- 12,  j <- 5 ]
-          (if j == 4 then Q T else Q 1)
+%> M :: [ 12 x i::D<-[{},{},{},{},T] ] Q(i)
+%> voltages :: [ 1 x 12 ] Q(V)
+\end{verbatim}
+  but we had better unpack what we mean.
 
-%> b :: [ 5 x 1 ] (Q (ML^2T^(-3)I^(-1)))
-\end{verbatim}
-This says that the entries in the last column of \texttt{A} are quantities of dimension time $\mathsf{T}$, while all other entries are dimensionless quantities. Meanwhile all the entries of \texttt{b} are quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$. LabMate reports that the type of \texttt{x} should be
+Firstly, \texttt{M}'s row header type remains $\One$, so our row header list is still abbreviated by a number.
+
+Secondly, we see \texttt{Q(}$d$\texttt{)} as the type of \remph{quantities} with physical dimension $d$, represented in MATLAB as a mere \texttt{double} with standardised units. We shall define a type $\texttt{D}$ of dimensions presently. The notation
 \begin{verbatim}
-%< x :: [ i <- 5 ]
-        (if i == 4
-           then Q (ML^2T^(-4)I^(-1))
-           else Q (ML^2T^(-3)I^(-1)))
+i::D<-[{},{},{},{},T]
 \end{verbatim}
-that is a $5 \times 1$ matrix whose entries are all quantities of dimension $\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1}$ (i.e., units V) for entries in the first four rows and $\mathsf{ML}^{2}\mathsf{T}^{-4}\mathsf{I}^{-1}$ (i.e., units V/s) in the final row.
+will tell LabMate that the column header type is $\texttt{D}$, and that the matrix entry type \texttt{Q(i)} varies in accordance with the header, locally named \texttt{i}, which is drawn from the given list of dimensions.
 %
-Another possible way to use LabMate is to instead declare that this is the expected type for \texttt{x}, and to leave the type of some of the entries in \texttt{b} as an unknown
+But what type is \texttt{D}? We will have defined, in LabMate directives, rather than MATLAB,
 \begin{verbatim}
-%> b :: [ i <- 5 ]
-        (if i == 4
-           then ?bTy
-           else Q (ML^2T^(-3)I^(-1)))
+%{>
+Base =
+  ['Time, 'Length, 'Mass, 'Current,
+   'Temperature, 'Amount, 'Luminosity]
+D = Abel(Enum(Base))
+%}
 \end{verbatim}
-We can then ask LabMate to solve the \remph{meta variable} \texttt{?bTy}, to which LabMate responds that we must also have \texttt{?aTy} = $\mathsf{Q}\,(\mathsf{ML}^{2}\mathsf{T}^{-3}\mathsf{I}^{-1})$. This way the types of LabMate can be used to validate and experiment with the dimensional consistency of the quantities involved.
+where \texttt{Base} is a list of symbolic constants standing for base dimensions, \texttt{Enum} converts any such list to a finite enumeration type, and \texttt{Abel} constructs the free Abelian group on any type of generators, with unit \lcb\rcb, singleton generators \lcb$g$\rcb, multiplication \texttt{*}, division \texttt{/}, and exponentiation by integer constants \crt. We further define
+\begin{verbatim}
+%{>
+T = {'Time}
+V = {'Mass}*{'Length}^2/T^3/{'Current}
+%}
+\end{verbatim}
+and \texttt{voltages} becomes a row vector uniformly containing quantities in \texttt{Q(V)}.
 
-%GravCalc example again: $t_i$ time ($\mathsf{T}$; in seconds); $v_i$ voltage ($\mathsf{ML}^2\mathsf{T}^{-3}\mathsf{I}^{-1}$; in volt)
+With this refinement in place
+\begin{verbatim}
+x = M \ voltages'
+%> typeof x
+\end{verbatim}
+will yield
+\begin{verbatim}
+%< x :: [ i::D<-[{},{},{},{},T] ] Q(V/i)
+\end{verbatim}
 
+In other words, \texttt{x} is a column vector comprising four quantities in \texttt{Q(V)} and a fifth in \texttt{Q(V/T)}.
+LabMate has thus propagated the dimensional variation from the type of \texttt{M} to the type of \texttt{x}, while retaining the uniformity of \texttt{V} in the type of \texttt{voltages}. Checking multiplicability for matrices of quantities \texttt{Q(}$d(i,j)$\texttt{)} and
+\texttt{Q(}$d(j,k)$\texttt{)} amounts to checking that $d(i,j)\texttt{*}d(j,k)$ is independent of $j$. In our example, there is no dimensional variation in the `middle' of the inputs, so multiplicability is evident. There is a degree of freedom to multiply headers by an arbitrary dimension and compensate in the entry type, but we avoid ambiguity by sticking to Hart's discipline~\cite{hart}, namely
+\begin{enumerate}
+\item ensure any list of dimensions starts with the unit, \lcb\rcb;
+\item divide by dimensions coming from a row header;
+\item multiply by dimensions coming from a column header.
+\end{enumerate}
+Valid operations which respect Hart's discipline will always have header lists which meet in the middle exactly and yield outputs which retain Hart's discipline~\cite{dimTypes}.
 
+  
+  
 \section{Conclusions and future work}
 
 We have demonstrated how LabMate can help write MATLAB programs that are correct both in the sense that they avoid runtime errors, as well as dimensional inconsistency for physical dimensions.
