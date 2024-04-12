@@ -113,6 +113,16 @@ physical dimensions. LabMate brings advanced type systems to
 effectiveness within, rather than instead of, existing scientific and
 engineering toolchains and practices.
 
+LabMate is under constant development; the latest version can be found at \url{https://github.com/msp-strath/LabMate/tree/devel}.
+%
+At time of writing, the necessary core type system is in place: we are busily extending the variety of MATLAB expressions it can make sense of, and the constraints it can solve.
+%
+We are close to covering the examples in this paper, but not quite there yet.
+%
+We aim to eliminate the speculative future tense from our examples before camera-ready copy is required.
+%
+This paper effectively documents how far we have come, and the roadmap to our next milestone.
+
 \section{LabMate in action}
 \label{sec:example}
 
@@ -584,8 +594,6 @@ normalisation algorithm for free Abelian groups, and free monoids.
 The actual typechecking is implemented as a stack based virtual machine which uses unification and a limited form of backtracking to solve typing constraints.
 %
 After the virtual machine has solved as many problems as it can, we analyse its final state to reconstruct the output source code, perhaps with inserted warnings and error messages, or additional responses to queries.
-
-LabMate is under constant development; the latest version can be found at \url{https://github.com/msp-strath/LabMate/tree/devel}.
 
 \section{Supporting dimensional consistency}
 \label{sec:example-revisited}
