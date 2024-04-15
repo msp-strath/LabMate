@@ -688,18 +688,41 @@ Valid operations which respect Hart's discipline will always have header lists w
   
 \section{Conclusions and future work}
 
-We have demonstrated how LabMate can help write MATLAB programs that are correct both in the sense that they avoid runtime errors, as well as dimensional inconsistency for physical dimensions.
+We have illustrated our prospectus for LabMate, a third-party programming assistant for MATLAB.
 %
-Getting an error for types not matching can sometimes feel like a stick, but there are also plenty of opportunities for carrots, for example where the specification encoded in the type of the program admits a single unique solution, which could be generated automatically by LabMate.
+Its type system offers expressivity well beyond the dynamic type tagging that MATLAB does itself.
 %
-Similarly, LabMate already has support for generating MATLAB code for serialising and deserialising complex data formats to and from files, based on a more high-level description of the data format (for example also taking units of measure into account)~\cite{mgen}.
+Typechecking with LabMate is no ironclad guarantee of complete correctness, but it is relatively lightweight and has the potential to rule out large classes of silly mistake, including dimensional inconsistency.
 
-So far, our focus has been on matrices, as this is what makes MATLAB
+However, if all LabMate does is complain about mistakes, it will not appeal to programmers in a hurry.
+%
+We have already shown a simple example where LabMate does not merely check but rather generates boilerplate code using its types as specification.
+%
+There is considerable potential to push further in this direction, little by little.
+%
+For example, we could equip LabMate with its own expression language for calculating with quantities which have not only dimensions but \remph{units}, compiling to MATLAB with appropriate conversion factors correctly inserted.
+%
+Our mission is, ever so gently, to tilt the balance towards programming at a higher level of structure and meaning in LabMate's directive language.
+
+So far, our focus has been on calculation with matrices, as this is what makes MATLAB
 unique as a programming language.
 %
 In the future, we would like to also extend our coverage to
 conditionals and loops, which might necessitate some approximation of
 what is known about program fragments at runtime.
+%
+We also have our work cut out to retrofit LabMate types to MATLAB \remph{libraries}.
+
+Inspired again by Kennedy's work --- his gradualist reformation of PHP~\cite{hack} ---
+we have set out on this journey to bring the benefits of expressive type systems to scientists and engineers \remph{where they are}.
+%
+It would be unrealistic of us to expect practitioners to abandon their existing toolchains and learn whole new programming styles and languages that, in any case, exist only as academic research prototypes.
+%
+Moreover, it has very much \remph{not} turned out that, in addressing MATLAB, we were merely \remph{applying} type system research already well established.
+%
+This project has pushed us in new directions and generated raised expectations of the \remph{algebra} to be done by the typechecker.
+%
+There is so much to learn outside our ivory tower!
 
 \section{Acknowledgements}
 
