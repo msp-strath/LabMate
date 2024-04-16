@@ -54,14 +54,14 @@
 \author{Conor McBride  \affiliationmark{1}, Georgi Nakov  \affiliationmark{1}, Fredrik Nordvall Forsberg  \affiliationmark{1}, Andr\'e Videla  \affiliationmark{1}, Alistair Forbes  \affiliationmark{2}, Keith Lines  \affiliationmark{2}}
 \affiliation{%
 \affiliationmark{1}{\fontsize{11pt}{9pt} \selectfont University of Strathclyde , UK}  \\
-\affiliationmark{2}{\fontsize{11pt}{9pt} \selectfont National Physical Laboratory, UK}}
-
+\affiliationmark{2}{\fontsize{11pt}{9pt} \selectfont National Physical Laboratory, UK}} % \\
+%\affiliationmark{*}{Corresponding author. Email address: \url{fredrik.nordvall-forsberg@strath.ac.uk}}}
 \maketitle
 
 \begin{abstract}
   Many computations in science and engineering are implemented in the
   programming language MATLAB. However the high-level meaning of such
-  MATLAB programs stay informal, which can lead to implementation
+  MATLAB programs stays informal, which can lead to implementation
   errors and bugs, for example relating to incompatible units of
   measure for quantities, or incompatible sizes of matrices at
   runtime. We are in the process of developing LabMate, which is a
@@ -92,14 +92,14 @@ of tags which indicate only machine representation, not any form of
 meaning. In reality, the programmers document meaning for each other's
 benefit but keep the machine in the dark.
 
-To rectify this situation, we have developed LabMate, which is a tool
+To rectify this situation, we are developing LabMate, which is a tool
 to reify current virtuous engineering practices as a formal language
 of MATLAB comments. MATLAB remains in the dark, but LabMate reads,
 assesses, and transforms MATLAB programs in accordance with these
 comments.
 %
 Behind the scenes, LabMate is retrofitting an expressive type system
-to MATLAB, with the more of the meaning of programs recorded in their
+to MATLAB, with more of the meaning of programs recorded in their
 types.
 %
 This gives a lightweight and low-cost way for MATLAB programmers to
@@ -114,10 +114,10 @@ physical dimensions. LabMate brings advanced type systems to
 effectiveness within, rather than instead of, existing scientific and
 engineering toolchains and practices.
 
-LabMate is under constant development; the latest version can be found at \url{https://github.com/msp-strath/LabMate/tree/devel}.
+ LabMate is under constant development; we encourage interested readers to get in touch for access to the latest version.
+ At time of writing, the necessary core type system is in place: we are busily extending the variety of MATLAB expressions it can make sense of, and the constraints it can solve.
 %
-At time of writing, the necessary core type system is in place: we are busily extending the variety of MATLAB expressions it can make sense of, and the constraints it can solve.
-%
+% LabMate is under constant development; the necessary core type system is in place: we are extending the variety of MATLAB expressions it can make sense of, and the constraints it can solve.
 We are close to covering the examples in this paper, but not quite there yet.
 %
 We aim to eliminate the speculative future tense from our examples before camera-ready copy is required.
@@ -131,9 +131,9 @@ This paper effectively documents how far we have come, and the roadmap to our ne
 
 The following greatly simplified, but still realistic, example from metrology  will help illustrate the principles of how LabMate will work. Consider one of the calculations required for measuring resistors using a cryogenic current comparator bridge~\cite{Williams_2010}.
 
-An electrical current with a known value (the applied signal) is passed through the resistor being measured, and a series of voltage readings are taken at fixed time intervals (the recorded output). After a specified number of readings are taken, the direction of the input signal must be reversed in order to separate the offset and drift from the voltage readings. Therefore, the applied signal (bridge energisation) is a square wave of {\em reversals}. A calibration factor is also applied, dividing the signal into two parts with different amplitudes.
+An electric current with a known value (the applied signal) is passed through the resistor being measured, and a series of voltage readings are taken at fixed time intervals (the recorded output). After a specified number of readings are taken, the direction of the input signal must be reversed in order to separate the offset and drift from the voltage readings. Therefore, the applied signal (bridge energisation) is a square wave of {\em reversals}. A calibration factor is also applied, dividing the signal into two parts with different amplitudes.
 
-The recorded output follows the input signal, superimposed on a detector with noise, offset and drift. Figure~1%\ref{fig:rec_out}
+The recorded output follows the input signal, superimposed on a detector with noise, offset and drift. Figure~1 %\ref{fig:rec_out}
 provides an example of recorded output, using simulated data.
 \begin{figure}[H]
   \begin{center}
@@ -216,16 +216,16 @@ fclose(h);
 src = c{1};
 readPtr = 1;
 for i = 1:12
-  times[i] = src[readPtr];
+  times(i) = src(readPtr);
   readPtr = readPtr + 1;
 end
 for i = 1:12
-  voltages[i] = src[readPtr];
+  voltages(i) = src(readPtr);
   readPtr = readPtr + 1;
 end
 %<}
 \end{verbatim}
-where the comment lines `\pct\res\lcb' and `\pct\res\rcb' visually delimit the extent of the generated boilerplate code, so that humans may safely ignore it. LabMate knows enough about scope in MATLAB to ensure that auxiliary variable naming never creates conflict. We have kept to one datum per line for simplicity, but we are free to extend our format specification language as we see fit~\cite{mgen}.
+where the comment lines `\pct\res\lcb' and `\pct\res\rcb' visually delimit the extent of the code generated by LabMate, so that humans may safely ignore it. LabMate knows enough about scope in MATLAB to ensure that auxiliary variable naming never creates conflict. We have kept to one datum per line for simplicity, but we are free to extend our format specification language as we see fit~\cite{mgen}.
 
 Next, let us build up the matrix in the calculation. The method gives the first four columns a pattern of blocks, pasted in a grid.
 \begin{verbatim}
@@ -281,7 +281,7 @@ to typed expressions in its own core theory of types and values.
 As matrices feature heavily in MATLAB code, the types of matrices
 play a central role in this theory.
 %
-In particular, we acknowledge that the rows and columns of a matrix might pertain to distinct individual entities, rather as the rows ans columns of a spreadsheet do.
+In particular, we acknowledge that the rows and columns of a matrix might pertain to distinct individual entities, rather as the rows and columns of a spreadsheet do.
 %
 Internally, a matrix type looks like
 \[\Matrix{R}{C}{E}{\rs}{\cs}
@@ -333,7 +333,7 @@ Firstly, a singleton entry matrix must have singleton header lists $[r]$ and $[c
 \cline{1-2}
 r  & e\in E(r,c) & \quad \in \Matrix{R}{C}{E}{[r]}{[c]} \\
 \cline{1-2}
-\end{array} 
+\end{array}
 \]
 
 Secondly, to check a horizontal pasting of matrices, we must ensure that the header and entry types match, that the row headers are the same for left and right, and that the column headers can be split into a prefix for the left matrix and a suffix for the right. In other words, the column headers for the whole are the concatenation ($\append$) of the column headers for the parts.
@@ -606,7 +606,7 @@ For example, if \texttt{A} is $i\times j$ and \texttt{B} is $i\times k$, then
 [ A B
   B A ]
 \end{verbatim}
-should be a valid matrix pasting, because $j+k = k+j$. Our notion of equality for numbers thus induces commutative monoid structure.
+should be a valid matrix pasting, because $j+k = k+j$. Our notion of equality for numbers thus includes tacit applications of commutative and associative laws. % induces commutative monoid structure.
 %
 Physical dimensions are modelled as the free Abelian group generated by some base set of dimensions~\cite{dim.group}, so we decide that theory, too.
 %
@@ -633,7 +633,7 @@ After the virtual machine has solved as many problems as it can, we analyse its 
 
 Coming back to the example from Section~\ref{sec:example} again, we aim to give both \texttt{M} and \texttt{voltages} more precise types, also taking their physical dimensions into account,
 \begin{verbatim}
-%> M :: [ 12 x i::D<-[{},{},{},{},T] ] Q(i)
+%> M :: [ 12 x k::D<-[{},{},{},{},T] ] Q(k)
 %> voltages :: [ 1 x 12 ] Q(V)
 \end{verbatim}
   but we had better unpack what we mean.
@@ -642,9 +642,9 @@ Firstly, \texttt{M}'s row header type remains $\One$, so our row header list is 
 
 Secondly, we see \texttt{Q(}$d$\texttt{)} as the type of \remph{quantities} with physical dimension $d$, represented in MATLAB as a mere \texttt{double} with standardised units. We shall define a type $\texttt{D}$ of dimensions presently. The notation
 \begin{verbatim}
-i::D<-[{},{},{},{},T]
+k::D<-[{},{},{},{},T]
 \end{verbatim}
-will tell LabMate that the column header type is $\texttt{D}$, and that the matrix entry type \texttt{Q(i)} varies in accordance with the header, locally named \texttt{i}, which is drawn from the given list of dimensions.
+will tell LabMate that the column header type is $\texttt{D}$, and that the matrix entry type \texttt{Q(k)} varies in accordance with the header, locally named \texttt{k}, which is drawn from the given list of dimensions.
 %
 But what type is \texttt{D}? We will have defined, in LabMate directives, rather than MATLAB,
 \begin{verbatim}
@@ -671,7 +671,7 @@ x = M \ voltages'
 \end{verbatim}
 will yield
 \begin{verbatim}
-%< x :: [ i::D<-[{},{},{},{},T] ] Q(V/i)
+%< x :: [ k::D<-[{},{},{},{},T] ] Q(V/k)
 \end{verbatim}
 
 In other words, \texttt{x} is a column vector comprising four quantities in \texttt{Q(V)} and a fifth in \texttt{Q(V/T)}.
@@ -684,8 +684,8 @@ LabMate has thus propagated the dimensional variation from the type of \texttt{M
 \end{enumerate}
 Valid operations which respect Hart's discipline will always have header lists which meet in the middle exactly and yield outputs which retain Hart's discipline~\cite{dimTypes}.
 
-  
-  
+
+
 \section{Conclusions and future work}
 
 We have illustrated our prospectus for LabMate, a third-party programming assistant for MATLAB.
@@ -696,7 +696,7 @@ Typechecking with LabMate is no ironclad guarantee of complete correctness, but 
 
 However, if all LabMate does is complain about mistakes, it will not appeal to programmers in a hurry.
 %
-We have already shown a simple example where LabMate does not merely check but rather generates boilerplate code using its types as specification.
+We have already shown a simple example where LabMate does not merely check but rather generates code using its types as specification.
 %
 There is considerable potential to push further in this direction, little by little.
 %
@@ -722,13 +722,13 @@ Moreover, it has very much \remph{not} turned out that, in addressing MATLAB, we
 %
 This project has pushed us in new directions and generated raised expectations of the \remph{algebra} to be done by the typechecker.
 %
-There is so much to learn outside our ivory tower!
+There is so much to learn from applications of dependent types in the wild!
 
 \section{Acknowledgements}
 
 This work was undertaken jointly by the Mathematically Structured Programming Group of the University of Strathclyde and the National Physical Laboratory’s Data Science department as part of Data Science’s Tools for Trustworthiness National Measurement System (NMS) project 2023 – 2024.
 
-Thanks to NPL colleague Nick Fletcher for his help and guidance providing the example from Section \ref{sec:example}. Thanks also to NPL colleagues Louise Wright and Ian Smith for reviewing this paper, and to Professor Neil Ghani for his support.
+Thanks to NPL colleague Nick Fletcher for his help and guidance providing the example from Section \ref{sec:example}. Thanks also to NPL colleagues Peter Harris, Louise Wright and Ian Smith for reviewing this paper, and to Professor Neil Ghani for his support.
 
 %\bibliographystyle{ws-procs9x6}
 \bibliographystyle{plain}
@@ -740,3 +740,5 @@ Thanks to NPL colleague Nick Fletcher for his help and guidance providing the ex
 %%% mode: latex
 %%% TeX-master: t
 %%% End:
+
+% LocalWords:  Idris
