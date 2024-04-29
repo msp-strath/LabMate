@@ -883,8 +883,8 @@ run = prob >>= \case
     (ltm, lhsProb) <- elab "AssignLHS" emptyContext (mk SDest ty) (LHSTask <$> lhs)
     (rtm, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask <$> rhs)
     excursion $ postRight [Currently ty ltm rtm]
-    pushProblems [lhsProb]
-    newProb rhsProb
+    pushProblems [rhsProb]
+    newProb lhsProb
     run
   Command (Direct rl (dir :<=: src)) -> do
     pushSource src
