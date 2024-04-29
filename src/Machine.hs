@@ -592,10 +592,10 @@ solveConstraint s c@Constraint{..} = case (traverse (traverse isHom) constraintC
       _ | Just (lt, ls) <- tagEh lhs
         , Just (rt, rs) <- tagEh rhs
         , lt == rt -> case (lt, ls, rs) of
-          (SDest, [lty], [rty]) -> constrain "dest" $ Constraint
+          (tag, [lty], [rty]) | tag `elem` [SDest, SList, SAbel] -> constrain "dest" $ Constraint
             { constraintCtx = constraintCtx
             , constraintType = constraintType
-            , constraintStatus = constraintStatus
+            , constraintStatus = Unstarted
             , lhs = lty
             , rhs = rty
             }
@@ -643,6 +643,20 @@ solveConstraint s c@Constraint{..} = case (traverse (traverse isHom) constraintC
                       }
                     pure $ mconcat [rstat, cstat, cellStat, rowStat, colStat]
                   _ -> pure Impossible
+          (Sone, [x], [y]) -> case tagEh ty of
+            Just (tag, [elty]) | tag `elem` [SList, SAbel] -> constrain "singleton" $ Constraint
+              { constraintCtx = constraintCtx
+              , constraintType = Hom elty
+              , constraintStatus = Unstarted
+              , lhs = x
+              , rhs = y
+              }
+            _ -> do
+              debug ("Push Constraint n-6 " ++ show c) $ push $ ConstraintFrame s c
+              pure $ case constraintStatus of
+                Blocked   -> SolvedIf [s]
+                Unstarted -> SolvedIf [s]
+                _ -> constraintStatus
           _ -> do
             debug ("Push Constraint n-4 " ++ show c) $ push $ ConstraintFrame s c
             pure $ case constraintStatus of
@@ -762,9 +776,9 @@ metaDefn :: Name -> Term Chk ^ n -> Elab ()
 metaDefn x def = getMeta x >>= \case
   Meta{..}
     | Just Refl <- scopeOf def `nattyEqEh` vlen mctxt
-    , mstat `elem` [Waiting, Hoping] -> do
+    , mstat `elem` [Waiting, Hoping] -> nattily (scopeOf def) $ do
       tick
-      debug ("Meta Defn assigning" ++ show x) $
+      debug (concat ["Meta Defn ", show x, " := ", show def]) $
         modifyNearestStore (Map.insert x (Meta mctxt mtype (Just def) mstat))
   Meta{..} -> error . concat $
     ["metaDefn: check the status or the scope of ", nattily (scopeOf def) $ show def
@@ -864,6 +878,7 @@ run = prob >>= \case
       newProb $ Expression r
       run
   Command (Assign lhs rhs) -> do
+    -- TODO: optimise for the case when we know the LHS type
     ty <- invent "assignTy" emptyContext (atom SType)
     (ltm, lhsProb) <- elab "AssignLHS" emptyContext (mk SDest ty) (LHSTask <$> lhs)
     (rtm, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask <$> rhs)
@@ -1123,7 +1138,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           pushProblems [cellProb]
           newProb . Elab sol $ Await (rcs <> ccs) (mk Sone cellSol)
           run
-      _ -> move worried
+      _ -> debug ("Unresolved overloading of numerical constant " ++ show k)$ move worried
     TypeExprTask (TyBinaryOp Plus x y) -> do
       -- TODO:
       -- 1. make sure `mtype` admits plus
@@ -1207,7 +1222,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask <$> x)
           (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask <$> y)
           pushProblems [xProb, yProb]
-          newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat) cstat) $ debugMatrix "Hello!!!!!" (mk Svjux xSol ySol)
+          newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat) cstat) $ debugMatrix "Making vjux..." (mk Svjux xSol ySol)
           run
         Horizontal -> move worried
     LHSTask lhs -> case lhs of

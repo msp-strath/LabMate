@@ -477,7 +477,7 @@ evalSynth tm = withScope $ case tm of
       (Just (SMatrix, [rowTy, midTy, lcellTy, rs, _]), Just (SMatrix, [_, colTy, rcellTy, _, cs])) ->
         pure (mk SMatrix rowTy colTy lcellTy {- YIKES -} rs cs)
     pure (E $^ MX $^ (R $^ lmx <&> lmxTy) <&> (R $^ rmx <&> rmxTy), retTy)
-  M (x, n) :$ sig :^ th -> metaLookup x >>= \case
+  tm@(M (x, n) :$ sig :^ th) -> metaLookup x >>= \case
     Meta {..}
       | Just Refl <- nattyEqEh (vlen mctxt) n ->
         let ty = mtype //^ (sig :^ th)
@@ -485,7 +485,8 @@ evalSynth tm = withScope $ case tm of
           Nothing -> do
             sig <- evalSubst (fmap (//^ (sig :^ th)) <$> mctxt) (sig :^ th)
             pure (E $^ M (x, n) $^ sig, ty)
-          Just defn -> evalSynth (R $^ (defn //^ (sig :^ th)) <&> ty)
+          Just defn -> let rad = R $^ (defn //^ (sig :^ th)) <&> ty
+                       in track (concat ["Yay! ", show tm, " = ", show rad]) $ evalSynth rad
       | otherwise -> fail "evalSynth: usage of a metavariable at wrong arity"
   _ -> fail "evalSynthEh: no"
 
