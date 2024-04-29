@@ -508,7 +508,7 @@ getConstraintStatus :: Name -> Elab ConstraintStatus
 getConstraintStatus x = do
   cstore <- gets constraintStore
   case constraintStatus <$> Map.lookup x cstore of
-    Nothing -> pure Impossible
+    Nothing -> debug "constraint not found in store, returning `Impossible`" $ pure Impossible
     Just Blocked -> pure $ SolvedIf [x]
     Just (SolvedIf xs) -> mconcat <$> traverse getConstraintStatus xs
     Just cstatus -> pure cstatus
@@ -588,7 +588,7 @@ solveConstraint s c@Constraint{..} = case (traverse (traverse isHom) constraintC
         , Just (s2, []) <- tagEh rhs
         , s1 /= s2 -> do
             debug ("Push Constraint n-5 " ++ show c) $ push $ ConstraintFrame s c{ constraintStatus = Impossible }
-            pure Impossible
+            debug ("Unifying different atoms") $ pure Impossible
       _ | Just (lt, ls) <- tagEh lhs
         , Just (rt, rs) <- tagEh rhs
         , lt == rt -> case (lt, ls, rs) of
@@ -642,7 +642,7 @@ solveConstraint s c@Constraint{..} = case (traverse (traverse isHom) constraintC
                       , rhs = cs'
                       }
                     pure $ mconcat [rstat, cstat, cellStat, rowStat, colStat]
-                  _ -> pure Impossible
+                  _ -> debug "RowTy/ColTy constraints - bad solution" $ pure Impossible
           _ -> do
             debug ("Push Constraint n-4 " ++ show c) $ push $ ConstraintFrame s c
             pure $ case constraintStatus of
@@ -1233,14 +1233,15 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       _ -> do  -- switch to being a scoping problem
         newProb $ Expression e
         run
-    Await cstatus tm -> updateConstraintStatus cstatus >>= \case
+    -- FIXME : updateConstraintStatus
+    Await cstatus tm -> {- updateConstraintStatus -} pure cstatus >>= \case
       SolvedIf [] -> do
         metaDefn sol tm
         newProb $ Done nil
         move winning
       Impossible -> do
         cry sol
-        newProb . Elab sol $ Abandon etask
+        debug ("Found `Impossible`, switching to `Abandon`") $ newProb . Elab sol $ Abandon etask
         move Whacked
       cstatus -> do
         newProb . Elab sol $ Await cstatus tm
