@@ -295,7 +295,7 @@ prefixEh elty pr l = withScope $ propEh elty >>= \case
   where
     sub :: [(Norm Chk ^ n, Integer)]
         -> [(Norm Chk ^ n, Integer)]
-        -> Maybe [(Norm Chk^ n, Integer)]
+        -> Maybe [(Norm Chk ^ n, Integer)]
     sub [] = pure
     sub ((t, n) : tns) = go
       where
@@ -370,7 +370,7 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   (SType, []) -> typeEval tm
   (SOne, []) -> pure nil
   -- TODO: FIXME use reduced order BDD
-  (STwo, []) -> pure tm
+  (STwo, []) -> nfBoolToTerm <$> termToNFBool tm
   (SAtom, []) -> pure tm
   (SChar, []) -> pure tm
   (SAbel, [genTy]) -> nfAbelToTerm <$> termToNFAbel genTy tm
@@ -557,6 +557,16 @@ termToNFAbel ty tm
   | Just [Intg i, t] <- tupEh tm =
       if i == 0 then pure mempty else fmap (i *) <$> termToNFAbel ty t
   | otherwise = error "termToNFAbel: no"
+
+termToNFBool :: Term Chk ^ n -> TC n (NFBool (Norm Syn ^ n))
+termToNFBool tm
+  | Just tm <- E $? tm = evalSynth tm >>= \(tm, _) -> case E $? tm of
+     Just tm -> pure $ AND [tm]
+     Nothing -> termToNFBool tm
+  | Intg 0  <- tm = pure FALSE
+  | Intg 1  <- tm = pure mempty
+  | Just (Sand, [s, t]) <- tagEh tm = (<>) <$> termToNFBool s <*> termToNFBool t
+  | otherwise = error "termToNFBool: no"
 
 checkEvalMatrixNF
   :: (Eq h, Monoid h, Show h)

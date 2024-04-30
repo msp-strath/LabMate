@@ -23,6 +23,7 @@ pattern Sone = "one"
 pattern Shjux = "hjux"
 pattern Svjux = "vjux"
 
+pattern Sand = "and"
 
 -- Labmate user types
 pattern Lint = "int"

@@ -140,6 +140,7 @@ instance PrettyPrint MachineState where
 
 type TERM = Term Chk ^ Z
 type TYPE = Type ^ Z
+type BOOL = Norm Chk ^ Z
 
 data DiagnosticData
   = SynthD
@@ -228,7 +229,11 @@ data ElabTask where
   TypeExprTask :: TypeExpr' -> ElabTask
   LHSTask :: LHS' -> ElabTask
   ExprTask :: Expr' -> ElabTask
-  Await :: NATTY n => ConstraintStatus -> Term Chk ^ n -> ElabTask
+  Await :: NATTY n
+    => BOOL          -- the closed Boolean value we hope will become true
+    -> Term Chk ^ n  -- the scoped solution we will commit if the
+                     -- Boolean becomes true
+    -> ElabTask
   ConstrainTask :: NATTY n => (String, Constraint) -> Term Chk ^ n -> ElabTask
   Abandon :: ElabTask -> ElabTask
 deriving instance Show ElabTask
@@ -361,7 +366,7 @@ prob = llup >>= \case
     push $ LocalNamespace oldNs
     prob
   Just (ConstraintFrame name c) -> do
-    debug ("`prob` attempting to solve constrain " ++ show c) $ solveConstraint name c
+    debug ("`prob` attempting to solve constraint " ++ show c) $ solveConstraint name c
     prob
   Just f  -> do
     f <- normaliseFrame f
@@ -419,10 +424,9 @@ tick =  modify $ \st@MS{..} -> st { clock = clock + 1 }
 
 data ConstraintType' t
   = Hom t
-  -- heterogenous constraint will become homogenous as soon as the
-  -- named constraints have been solved
-  -- TODO: replace the list of names with a closed Boolean term
-  | Het t [Name] t
+  -- heterogeneous constraint will become homogeneous as soon as the
+  -- Boolean value in the middle becomes true
+  | Het t BOOL t
   deriving (Show, Functor)
 
 type ConstraintType n = ConstraintType' (Type ^ n)
@@ -443,7 +447,7 @@ isHom _ = Nothing
 
 -- TODO: use boolean metavariables instead, updating the
 -- status then boils down to a call to `normalise`
-data ConstraintStatus
+{- data ConstraintStatus
   = Impossible
   | Blocked
   | SolvedIf [Name] -- the constraints has been reduced to the
@@ -464,20 +468,18 @@ instance Monoid ConstraintStatus where
   mappend Unstarted y  = Unstarted
   mappend x Unstarted  = Unstarted
   mappend (SolvedIf xs) (SolvedIf ys) = SolvedIf $ xs `union` ys
-
+-}
 type ConstraintContext n = Vec n (String, ConstraintType n)
 
 data Constraint = forall n . Constraint
   { constraintCtx   :: ConstraintContext n
   , constraintType  :: ConstraintType n
-  , constraintStatus :: ConstraintStatus
   , lhs :: Term Chk ^ n
   , rhs :: Term Chk ^ n
   }
   -- TODO: actually use it
   | forall n. Multiplicable
   { constraintCtx :: ConstraintContext n
-  , constraintStatus :: ConstraintStatus
   , mulIndexTypes :: (Type ^ n, Type ^ n, Type ^ n)
   , mulDataTypes :: (Type ^ S (S n), Type ^ S (S n), Type ^ S (S n))
   }
@@ -486,23 +488,22 @@ instance Show Constraint where
   show Constraint{..} = nattily (vlen constraintCtx) $ concat
     [ "{ constraintCtx = ", show constraintCtx
     , ", constraintType = ", show constraintType
-    , ", status = ", show constraintStatus
     , ", lhs = ", show lhs
     , ", rhs = ", show rhs
     , " }"
     ]
   show Multiplicable{..} = nattily (vlen constraintCtx) $ concat
     [ "{ constraintCtx = ", show constraintCtx
-    , ", status = ", show constraintStatus
     , ", mulIndexTypes = ", show mulIndexTypes
     , ", mulDataTypes = ", show mulDataTypes
     , " }"
     ]
 
-mkConstraintType :: Type ^ n -> [Name] -> Type ^ n -> ConstraintType n
-mkConstraintType lty [] rty = Hom lty
-mkConstraintType lty names rty = Het lty names rty
+mkConstraintType :: Type ^ n -> BOOL -> Type ^ n -> ConstraintType n
+mkConstraintType lty (Intg 1) rty = Hom lty
+mkConstraintType lty status rty = Het lty status rty
 
+{-
 -- TODO: purge away
 getConstraintStatus :: Name -> Elab ConstraintStatus
 getConstraintStatus x = do
@@ -518,26 +519,48 @@ updateConstraintStatus :: ConstraintStatus -> Elab ConstraintStatus
 updateConstraintStatus (SolvedIf xs) =
   mconcat <$> traverse getConstraintStatus xs
 updateConstraintStatus cs = pure cs
+-}
 
 infixl 5 \\\\
 (\\\\) :: ConstraintContext n -> (String, ConstraintType n) -> ConstraintContext (S n)
 ctx \\\\ x = fmap (fmap wk) <$> ctx :# x
+
+alive :: BOOL -> Bool
+alive (Intg 0) = False
+alive _ = True
+
+conjunction :: [BOOL] -> BOOL
+conjunction nfs = case partition isLit nfs of
+  (lits, stuck) -> case [() | Intg 0 <- lits] of
+    [] -> pack $ Data.List.nub (sort stuck)
+    _  -> lit (0 :: Integer)
+  where
+    pack [] = lit (1 :: Integer)
+    pack [nf] = nf
+    pack (nf : nfs) = mk Sand nf (pack nfs)
+
+    isLit (Intg _) = True
+    isLit _ = False
 
 normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
 normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
   Left err -> nattily (vlen ctx) $ error . concat $ ["normalise: TC error ", err, " for ", show tm, "::", show ty]
   Right tm -> pure tm
 
-constrain :: String -> Constraint -> Elab ConstraintStatus
+constraintStatus :: Name -> Elab BOOL
+constraintStatus name = normalise VN (atom STwo) (wrapMeta name)
+
+constrain :: String -> Constraint -> Elab (Name, BOOL)
 constrain s c | debug ("Constrain call " ++ s ++ " constraint = " ++ show c) False = undefined
 constrain s c = do
-  s <- metaDecl Hoping s emptyContext (atom STwo)
-  solveConstraint s c
+  name <- metaDecl Hoping s emptyContext (atom STwo)
+  solveConstraint name c
+  (name,) <$> constraintStatus name
 
 -- gets a dismounted frame, tries to solve it, remounts it
-solveConstraint :: Name -> Constraint -> Elab ConstraintStatus
-solveConstraint s c | debug ("Solve constrain call " ++ show s ++ " constraint = " ++ show c) False = undefined
-solveConstraint s c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
+solveConstraint :: Name -> Constraint -> Elab ()
+solveConstraint name c | debug ("Solve constrain call " ++ show name ++ " constraint = " ++ show c) False = undefined
+solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms  <- gets metaStore
     ty  <- normalise ctx (atom SType) ty
@@ -560,7 +583,8 @@ solveConstraint s c@Constraint{..} = case (traverse (traverse isHom) constraintC
            pure (rhs == rhs')
        _ -> pure False
     case debug ("CONSTRAIN " ++ show lhs ++ " = " ++ show rhs) (lhs, rhs) of
-      _ | debug "Checking syntactic equality?" (lhs == rhs) -> debug ("Passed syn eq for " ++ show lhs ++ " =?= " ++ show rhs) (pure $ SolvedIf [])
+      _ | debug "Checking syntactic equality?" (lhs == rhs) -> do
+            debug ("Passed syn eq for " ++ show lhs ++ " =?= " ++ show rhs) $ metaDefn name (I 1 :$ U :^ no Zy)
       (E :$ (M (x, n) :$ sig) :^ th, t :^ ph)
         | Just meta@Meta{..} <- x `Map.lookup` ms
         , Hoping <- mstat
@@ -570,7 +594,7 @@ solveConstraint s c@Constraint{..} = case (traverse (traverse isHom) constraintC
           case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
               metaDefn x (t :^ ph)
-              pure $ SolvedIf []
+              metaDefn name (I 1 :$ U :^ no Zy)
             _ -> error "constrain: different context lengths"
       (t :^ ph, E :$ (M (x, n) :$ sig) :^ th)
         | Just meta@Meta{..} <- x `Map.lookup` ms
@@ -581,101 +605,83 @@ solveConstraint s c@Constraint{..} = case (traverse (traverse isHom) constraintC
           case nattyEqEh n (vlen mctxt) of
             Just Refl -> do
               metaDefn x (t :^ ph)
-              pure $ SolvedIf []
+              metaDefn name (I 1 :$ U :^ no Zy)
             _ -> error "constrain: different context lengths"
       -- different atoms are never unifiable, raise the constraint as impossible
       _ | Just (s1, []) <- tagEh lhs
         , Just (s2, []) <- tagEh rhs
         , s1 /= s2 -> do
-            debug ("Push Constraint n-5 " ++ show c) $ push $ ConstraintFrame s c{ constraintStatus = Impossible }
-            debug ("Unifying different atoms") $ pure Impossible
+            debug ("Push Constraint n-5 " ++ show c) $ push $ ConstraintFrame name c
+            debug (concat ["Unifying different atoms: ", s1, " and ", s2, "."]) $ metaDefn name (I 0 :$ U :^ no Zy)
       _ | Just (lt, ls) <- tagEh lhs
         , Just (rt, rs) <- tagEh rhs
         , lt == rt -> case (lt, ls, rs) of
-          (tag, [lty], [rty]) | tag `elem` [SDest, SList, SAbel] -> constrain "dest" $ Constraint
-            { constraintCtx = constraintCtx
-            , constraintType = constraintType
-            , constraintStatus = Unstarted
-            , lhs = lty
-            , rhs = rty
-            }
+          (tag, [lty], [rty]) | tag `elem` [SDest, SList, SAbel] -> do
+            (_, stat) <- constrain "dest" $ Constraint
+              { constraintCtx = constraintCtx
+              , constraintType = constraintType
+              , lhs = lty
+              , rhs = rty
+              }
+            metaDefn name stat
           (SMatrix, [rowTy, colTy, cellTy, rs, cs], [rowTy', colTy', cellTy', rs', cs'])
             | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
             , Just (r', cellTy') <- lamNameEh cellTy', Just (c', cellTy') <- lamNameEh cellTy' -> do
-                rstat <- constrain "rowTy" $ Constraint
+                (_, rstat) <- constrain "rowTy" $ Constraint
                   { constraintCtx = constraintCtx
                   , constraintType = Hom (atom SType)
-                  , constraintStatus = Unstarted
                   , lhs = rowTy
                   , rhs = rowTy'
                   }
-                cstat <- constrain "colTy" $ Constraint
+                (_, cstat) <- constrain "colTy" $ Constraint
                   { constraintCtx = constraintCtx
                   , constraintType = Hom (atom SType)
-                  , constraintStatus = Unstarted
                   , lhs = colTy
                   , rhs = colTy'
                   }
-                case (rstat, cstat) of
-                  (SolvedIf rdeps, SolvedIf cdeps) -> do
-                    cellStat <- constrain "cell" $ Constraint
+                if alive rstat && alive cstat
+                  then do
+                    (_, cellStat) <- constrain "cell" $ Constraint
                       { constraintCtx = constraintCtx
-                                        \\\\ (r, mkConstraintType rowTy rdeps rowTy')
-                                        \\\\ (c, mkConstraintType (wk colTy) cdeps (wk colTy'))
-                      , constraintType = mkConstraintType (atom SType) (rdeps <> cdeps) (atom SType)
-                      , constraintStatus = Unstarted
+                                        \\\\ (r, mkConstraintType rowTy rstat rowTy')
+                                        \\\\ (c, mkConstraintType (wk colTy) cstat (wk colTy'))
+                      , constraintType = mkConstraintType (atom SType) (conjunction [rstat, cstat]) (atom SType)
                       , lhs = cellTy
                       , rhs = cellTy'
                       }
-                    rowStat <- constrain "row" $ Constraint
+                    (_, rowStat) <- constrain "row" $ Constraint
                       { constraintCtx = constraintCtx
-                      , constraintType = mkConstraintType (mk SList rowTy) rdeps (mk SList rowTy')
-                      , constraintStatus = Unstarted
+                      , constraintType = mkConstraintType (mk SList rowTy) rstat (mk SList rowTy')
                       , lhs = rs
                       , rhs = rs'
                       }
-                    colStat <- constrain "col" $ Constraint
+                    (_, colStat) <- constrain "col" $ Constraint
                       { constraintCtx = constraintCtx
-                      , constraintType = mkConstraintType  (mk SList colTy) cdeps (mk SList colTy')
-                      , constraintStatus = Unstarted
+                      , constraintType = mkConstraintType  (mk SList colTy) cstat (mk SList colTy')
                       , lhs = cs
                       , rhs = cs'
                       }
-                    pure $ mconcat [rstat, cstat, cellStat, rowStat, colStat]
-                  _ -> debug "RowTy/ColTy constraints - bad solution" $ pure Impossible
+                    metaDefn name $ conjunction [rstat, cstat, cellStat, rowStat, colStat]
+                  else
+                    debug "RowTy/ColTy constraints - bad solution" $ metaDefn name (I 0 :$ U :^ no Zy)
           (Sone, [x], [y]) -> case tagEh ty of
-            Just (tag, [elty]) | tag `elem` [SList, SAbel] -> constrain "singleton" $ Constraint
-              { constraintCtx = constraintCtx
-              , constraintType = Hom elty
-              , constraintStatus = Unstarted
-              , lhs = x
-              , rhs = y
-              }
+            Just (tag, [elty]) | tag `elem` [SList, SAbel] -> do
+              (_, cstat) <- constrain "singleton" $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType = Hom elty
+                , lhs = x
+                , rhs = y
+                }
+              metaDefn name cstat
             _ -> do
-              debug ("Push Constraint n-6 " ++ show c) $ push $ ConstraintFrame s c
-              pure $ case constraintStatus of
-                Blocked   -> SolvedIf [s]
-                Unstarted -> SolvedIf [s]
-                _ -> constraintStatus
+              debug ("Push Constraint n-6 " ++ show c) $ push $ ConstraintFrame name c
           _ -> do
-            debug ("Push Constraint n-4 " ++ show c) $ push $ ConstraintFrame s c
-            pure $ case constraintStatus of
-              Blocked   -> SolvedIf [s]
-              Unstarted -> SolvedIf [s]
-              _ -> constraintStatus
+            debug ("Push Constraint n-4 " ++ show c) $ push $ ConstraintFrame name c
       _ -> do
-       debug ("Push Constraint n-3 " ++ show c) $ push $ ConstraintFrame s c
-       pure $ case constraintStatus of
-         Blocked   -> SolvedIf [s]
-         Unstarted -> SolvedIf [s]
-         _ -> constraintStatus
+       debug ("Push Constraint n-3 " ++ show c) $ push $ ConstraintFrame name c
   _ -> do
-    debug ("Push Constraint n-2 " ++ show c) $ push $ ConstraintFrame s c
-    pure $ case constraintStatus of
-      Blocked   -> SolvedIf [s]
-      Unstarted -> SolvedIf [s]
-      _ -> constraintStatus
-solveConstraint s c@Multiplicable{mulDataTypes = (x, y, z), mulIndexTypes = (i, j, k), ..}
+    debug ("Push Constraint n-2 " ++ show c) $ push $ ConstraintFrame name c
+solveConstraint name c@Multiplicable{mulDataTypes = (x, y, z), mulIndexTypes = (i, j, k), ..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
      i <- normalise ctx (atom SType) i
      j <- normalise ctx (atom SType) j
@@ -686,39 +692,26 @@ solveConstraint s c@Multiplicable{mulDataTypes = (x, y, z), mulIndexTypes = (i, 
      debug ("MULTIPLICABLE #####################" ++ show [x, y, z]) $ case (tagEh x, tagEh y, tagEh z) of
        -- TODO: matching for `No No` does not account for metavariables
        (Just (SAbel, [x' :^ (No (No th))]), Just (SAbel, [y' :^ (No (No ph))]), _) -> do
-         xystat <- constrain "xy" $ Constraint
+         (_, xystat) <- constrain "xy" $ Constraint
            { constraintCtx = constraintCtx
            , constraintType = Hom (atom SType)
-           , constraintStatus = Unstarted
            , lhs = x' :^ th
            , rhs = y' :^ ph
            }
-         zstat <- constrain "zx" $ Constraint
+         (_, zstat) <- constrain "zx" $ Constraint
            { constraintCtx = constraintCtx \\\\ ("i", Hom i) \\\\ ("k", Hom $ wk k)
            , constraintType = Hom (atom SType)
-           , constraintStatus = Unstarted
            , lhs = z
            , rhs = x
            }
-         pure $ xystat <> zstat
-       _ -> do
-         debug ("Push Constraint n-1" ++ show c) $ push $ ConstraintFrame s c
-         pure $ case constraintStatus of
-           Blocked   -> SolvedIf [s]
-           Unstarted -> SolvedIf [s]
-           _ -> constraintStatus
-solveConstraint s c = do
-  debug ("Push Constraint n " ++ show c) $ push $ ConstraintFrame s c
-  pure $ case constraintStatus c of
-    Blocked   -> SolvedIf [s]
-    Unstarted -> SolvedIf [s]
-    _ -> constraintStatus c
+         metaDefn name (conjunction [xystat, zstat])
+       _ -> debug ("Push Constraint n-1" ++ show c) $ push $ ConstraintFrame name c
+solveConstraint name c = debug ("Push Constraint n " ++ show c) $ push $ ConstraintFrame name c
 
-constrainEqualType :: TYPE -> TYPE -> Elab ConstraintStatus
+constrainEqualType :: TYPE -> TYPE -> Elab (Name, BOOL)
 constrainEqualType lhs rhs = constrain "Q" $ Constraint
   { constraintCtx   = VN
   , constraintType  = Hom (atom SType)
-  , constraintStatus = Unstarted
   , lhs = lhs
   , rhs = rhs
   }
@@ -1018,11 +1011,11 @@ elab x ctx ty (etask :<=: src) =
   fmap (Sourced . (:<=: src)) <$> elab' x ctx ty etask
 
 
-ensureMatrixType :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, NmTy ^ n, Norm Chk ^ n, Norm Chk ^ n, ConstraintStatus)
+ensureMatrixType :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, NmTy ^ n, Norm Chk ^ n, Norm Chk ^ n, BOOL)
 ensureMatrixType ctxt ty
   | Just (SMatrix, [rowTy, colTy, cellTy, rs, cs]) <- tagEh ty
   {- , Just cellTy <- lamEh cellTy
-  , Just cellTy <- lamEh cellTy -} = pure (rowTy, colTy, cellTy, rs, cs, mempty)
+  , Just cellTy <- lamEh cellTy -} = pure (rowTy, colTy, cellTy, rs, cs, conjunction [])
   | otherwise = nattily (vlen ctxt) $ do
       rowTy <- invent "rowType" ctxt (atom SType)
       colTy <- invent "colType" ctxt (atom SType)
@@ -1030,10 +1023,9 @@ ensureMatrixType ctxt ty
       cellTy <- lam "r" . lam "c" <$> invent "cellType" ctxtRC (atom SType)
       rs <- invent "rs" ctxt (mk SList rowTy)
       cs <- invent "cs" ctxt (mk SList colTy)
-      cstat <- constrain "ensureMat" $ Constraint
+      (_, cstat) <- constrain "ensureMat" $ Constraint
         { constraintCtx = fmap Hom <$> ctxt
         , constraintType = Hom (atom SType)
-        , constraintStatus = Unstarted
         , lhs = mk SMatrix rowTy colTy cellTy rs cs
         , rhs = ty
         }
@@ -1079,23 +1071,21 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           case y of
             Nothing  -> cry sol
             Just (ty, rhs) -> do
-              xstat <- constrainEqualType ty xty
-              xstat <- fmap (<> xstat) <$> constrain "VarExpr" $ Constraint
+              (_, xstat) <- constrainEqualType ty xty
+              (_, vstat) <- constrain "VarExpr" $ Constraint
                 { constraintCtx = fmap Hom <$> mctxt
                 , constraintType = Hom (atom SType)
-                , constraintStatus = Unstarted
                 , lhs = ty -< no natty
                 , rhs = mtype
                 }
-              pushProblems [Elab sol $ Await xstat (rhs -< no (vlen mctxt))]
+              pushProblems [Elab sol $ Await (conjunction [xstat, vstat]) (rhs -< no (vlen mctxt))]
           newProb . Done $ FreeVar x
           move winning
     TypeExprTask (TyNum k) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
-        cs <- constrain "IsOne" $ Constraint
+        (_, cs) <- constrain "IsOne" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
           , constraintType = Hom (atom SType)
-          , constraintStatus = Unstarted
           , lhs = genTy
           , rhs = atom SOne
           }
@@ -1107,10 +1097,9 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             newProb . Elab sol $ Abandon etask
         run
       Just (SAbel, [genTy]) -> do
-        cs <- constrain "IsOne" $ Constraint
+        (_, cs) <- constrain "IsOne" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
           , constraintType = Hom (atom SType)
-          , constraintStatus = Unstarted
           , lhs = genTy
           , rhs = atom SOne
           }
@@ -1120,23 +1109,21 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
           r <- invent r mctxt rowTy
           c <- invent c mctxt colTy
-          rcs <- constrain "IsSingletonR" $ Constraint
+          (_, rcs) <- constrain "IsSingletonR" $ Constraint
             { constraintCtx = fmap Hom <$> mctxt
             , constraintType = Hom (mk SList rowTy)
-            , constraintStatus = Unstarted
             , lhs = mk Sone r
             , rhs = rs
             }
-          ccs <- constrain "IsSingletonC" $ Constraint
+          (_, ccs) <- constrain "IsSingletonC" $ Constraint
             { constraintCtx = fmap Hom <$> mctxt
             , constraintType = Hom (mk SList colTy)
-            , constraintStatus = Unstarted
             , lhs = mk Sone c
             , rhs = cs
             }
           (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
           pushProblems [cellProb]
-          newProb . Elab sol $ Await (rcs <> ccs) (mk Sone cellSol)
+          newProb . Elab sol $ Await (conjunction [rcs, ccs]) (mk Sone cellSol)
           run
       _ -> debug ("Unresolved overloading of numerical constant " ++ show k)$ move worried
     TypeExprTask (TyBinaryOp Plus x y) -> do
@@ -1174,17 +1161,15 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       -- 2. Construct the matrix type for the result
       let zTy = mk SMatrix rowTy colTy (lam "i" . lam "k" $ cellZTy) rx cy
       -- 3. Constrain it to the type we are checking against
-      zstat <- constrain "Zmatrix" $ Constraint
+      (_, zstat) <- constrain "Zmatrix" $ Constraint
         { constraintCtx = fmap Hom <$> mctxt
         , constraintType = Hom (atom SType)
-        , constraintStatus = Unstarted
         , lhs = zTy
         , rhs = mtype
         }
       -- 4. Switch to the problem of ensuring the cell types are compatible
       let mulConstraint = ("ZMultiplicable", Multiplicable
             { constraintCtx = fmap Hom <$> mctxt
-            , constraintStatus = Unstarted
             , mulIndexTypes = (rowTy, midTy, colTy)
             , mulDataTypes = (cellXTy, cellYTy, cellZTy)
             })
@@ -1196,10 +1181,9 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       run
     TypeExprTask (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
-        cs <- constrain "IsChar" $ Constraint
+        (_, cs) <- constrain "IsChar" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
           , constraintType = Hom (atom SType)
-          , constraintStatus = Unstarted
           , lhs = genTy
           , rhs = atom SChar
           }
@@ -1212,26 +1196,26 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         Vertical -> do
           rs0 <- debugMatrix ("VJUX matrix #### " ++ show mtype) $ invent "rs0" mctxt (mk SList rowTy)
           rs1 <- invent "rs1" mctxt (mk SList rowTy)
-          cstat <- fmap (<> tystat) $ constrain "SplitRs" $ Constraint
+          (_, cstat) <- constrain "SplitRs" $ Constraint
             { constraintCtx = fmap Hom <$> mctxt
             , constraintType = Hom (mk SList rowTy)
-            , constraintStatus = Unstarted
             , lhs = mk Splus rs0 rs1
             , rhs = rs
             }
           (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask <$> x)
           (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask <$> y)
           pushProblems [xProb, yProb]
-          newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat) cstat) $ debugMatrix "Making vjux..." (mk Svjux xSol ySol)
+          let cstat' = conjunction [tystat, cstat]
+          newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
+            debugMatrix "Making vjux..." (mk Svjux xSol ySol)
           run
         Horizontal -> move worried
     LHSTask lhs -> case lhs of
       LVar x -> do
-        (x, ty) <- debug ("Lvar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
-        ccs <- constrain "IsLHSTy" $ Constraint
+        (x, ty) <- debug ("LVar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
+        (_, ccs) <- constrain "IsLHSTy" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
           , constraintType = Hom (atom SType)
-          , constraintStatus = Unstarted
           , lhs = mk SDest (ty -< no (vlen mctxt))
           , rhs = mtype
           }
@@ -1248,21 +1232,20 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       _ -> do  -- switch to being a scoping problem
         newProb $ Expression e
         run
-    -- FIXME : updateConstraintStatus
-    Await cstatus tm -> {- updateConstraintStatus -} pure cstatus >>= \case
-      SolvedIf [] -> do
+    Await cstatus tm -> normalise VN (atom STwo) cstatus >>= \case
+      Intg 1 -> do
         metaDefn sol tm
         newProb $ Done nil
         move winning
-      Impossible -> do
+      Intg 0 -> do
         cry sol
-        debug ("Found `Impossible`, switching to `Abandon`") $ newProb . Elab sol $ Abandon etask
+        debug "Found `Impossible`, switching to `Abandon`" $ newProb . Elab sol $ Abandon etask
         move Whacked
       cstatus -> do
         newProb . Elab sol $ Await cstatus tm
         move winning
-    ConstrainTask (cname, constraint) tm -> do
-      cstatus <- constrain cname constraint
+    ConstrainTask (s, constraint) tm -> do
+      (_, cstatus) <- constrain s constraint
       newProb . Elab sol $ Await cstatus tm
       run
     _ -> move worried

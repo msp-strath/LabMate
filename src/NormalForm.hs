@@ -144,3 +144,30 @@ hjux lrs rrs = post B0  (accum mempty lrs) (accum mempty rrs)
    jux [(h, lcs)] r          = (h, lcs ++ [NFCompound r])
    jux l          [(h, rcs)] = (h, NFCompound l : rcs)
    jux l          r          = (foldMap fst l, [NFCompound l, NFCompound r])
+
+data NFBool tm
+  = FALSE
+  | AND [tm]
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+instance Ord tm => Semigroup (NFBool tm) where
+  (<>) = mappend
+
+instance Ord tm => Monoid (NFBool tm) where
+  mempty = AND []
+  mappend FALSE _ = FALSE
+  mappend _ FALSE = FALSE
+  mappend (AND xs) (AND ys) = AND $ nubmerge xs ys
+    where
+      nubmerge [] ys = ys
+      nubmerge xs [] = xs
+      nubmerge (x:xs) (y:ys) = case compare x y of
+        LT -> x : nubmerge xs (y:ys)
+        EQ -> x : nubmerge xs ys
+        GT -> y : nubmerge (x:xs) ys
+
+nfBoolToTerm :: NATTY n => NFBool (Norm Syn ^ n) -> Norm Chk ^ n
+nfBoolToTerm FALSE = lit (0 :: Int)
+nfBoolToTerm (AND []) = lit (1 :: Int)
+nfBoolToTerm (AND [tm]) = E $^ tm
+nfBoolToTerm (AND (tm : tms)) = mk Sand (E $^ tm) $ nfBoolToTerm (AND tms)
