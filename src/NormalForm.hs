@@ -23,6 +23,10 @@ data NFAbel'
 -- NFAbel is closed under Plus (via merging)
 type NFAbel n = NFAbel' (Norm Chk ^ n) Integer
 
+nonZeroCons :: (Num i, Eq i) => (x, i) -> [(x, i)] -> [(x, i)]
+nonZeroCons (_, 0) xis = xis
+nonZeroCons xi xis = xi : xis
+
 instance (Ord t, Num i, Eq i) => Semigroup (NFAbel' t i) where
   (<>) = mappend
 
@@ -37,9 +41,7 @@ instance (Ord t, Num i, Eq i) => Monoid (NFAbel' t i) where
       go xtis [] = xtis
       go x@(xh@(xt, xi) : xtis) y@(yh@(yt, yi) : ytis) = case compare xt yt of
         LT -> xh : go xtis y
-        EQ -> ($ go xtis ytis) $ case xi + yi of
-          0 -> id
-          k -> ((xt, k) :)
+        EQ -> nonZeroCons (xt, xi + yi) $ go xtis ytis
         GT -> yh : go x ytis
 
 nfAbelToTerm :: NATTY n => NFAbel n -> Norm Chk ^ n
@@ -56,6 +58,30 @@ nfAbelToTerm NFAbel{..} = case (nfConst, nfStuck) of
     mu i = mk (lit i)
 
 -- termToNFAbel has to be in CoreTT
+
+type Canceller x = (x, x) -> (x, x)
+type CancellerM m x = (x, x) -> m (x, x)
+
+cancelNFAbel :: (Ord t, Num i, Eq i) => Canceller i -> Canceller (NFAbel' t i)
+cancelNFAbel f (NFAbel{nfConst = i, nfStuck = xs}, NFAbel{nfConst = j, nfStuck = ys})
+  = (NFAbel{nfConst = i', nfStuck = xs'}, NFAbel{nfConst = j', nfStuck = ys'})
+  where
+    (i', j') = f (i, j)
+    (xs', ys') = go xs ys
+
+    go xs@((x, i):xs') ys@((y, j):ys') = case compare x y of
+      LT -> bimap ((x, i):) id $ go xs' ys
+      EQ -> let (i', j') = f (i, j)
+                (xs'', ys'') = go xs' ys'
+            in (nonZeroCons (x, i') xs'', nonZeroCons (x, j') ys'')
+      GT -> bimap id ((y, j):) $ go xs ys'
+    go xs ys = (xs, ys)
+
+cancelNat :: Canceller Integer
+cancelNat (x, y) = case compare x y of
+  LT -> (0, y - x)
+  EQ -> (0, 0)
+  GT -> (x - y, 0)
 
 -- num instance for debugging
 instance NATTY n => Num (Term Chk ^ n) where

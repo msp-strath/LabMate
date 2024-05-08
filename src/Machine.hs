@@ -129,7 +129,7 @@ instance PrettyPrint Frame where
    where
      blat t | Non n <- kin t = '$': show n
      blat t = raw t
-  pprint (ConstraintFrame n c) = pure ["!!!!!CONSTRAINT FRAME!!!!!", show n ++ "  " ++ show c]
+  pprint (ConstraintFrame n c) = pure ["!CONSTRAINT FRAME!", show n ++ "  " ++ show c]
   pprint fr = pure [show fr]
 
 instance PrettyPrint MachineState where
@@ -444,31 +444,6 @@ isHom :: ConstraintType n -> Maybe (Type ^ n)
 isHom (Hom ty) = Just ty
 isHom _ = Nothing
 
-
--- TODO: use boolean metavariables instead, updating the
--- status then boils down to a call to `normalise`
-{- data ConstraintStatus
-  = Impossible
-  | Blocked
-  | SolvedIf [Name] -- the constraints has been reduced to the
-                    -- conjuction of the named constraints
-  | Unstarted
-  deriving Show
-
-instance Semigroup ConstraintStatus where
-  (<>) = mappend
-
-instance Monoid ConstraintStatus where
-  mempty = SolvedIf []
-
-  mappend Impossible _ = Impossible
-  mappend _ Impossible = Impossible
-  mappend Blocked _    = Blocked
-  mappend _ Blocked    = Blocked
-  mappend Unstarted y  = Unstarted
-  mappend x Unstarted  = Unstarted
-  mappend (SolvedIf xs) (SolvedIf ys) = SolvedIf $ xs `union` ys
--}
 type ConstraintContext n = Vec n (String, ConstraintType n)
 
 data Constraint = forall n . Constraint
@@ -502,24 +477,6 @@ instance Show Constraint where
 mkConstraintType :: Type ^ n -> BOOL -> Type ^ n -> ConstraintType n
 mkConstraintType lty (Intg 1) rty = Hom lty
 mkConstraintType lty status rty = Het lty status rty
-
-{-
--- TODO: purge away
-getConstraintStatus :: Name -> Elab ConstraintStatus
-getConstraintStatus x = do
-  cstore <- gets constraintStore
-  case constraintStatus <$> Map.lookup x cstore of
-    Nothing -> debug "constraint not found in store, returning `Impossible`" $ pure Impossible
-    Just Blocked -> pure $ SolvedIf [x]
-    Just (SolvedIf xs) -> mconcat <$> traverse getConstraintStatus xs
-    Just cstatus -> pure cstatus
-
--- TODO: purge away
-updateConstraintStatus :: ConstraintStatus -> Elab ConstraintStatus
-updateConstraintStatus (SolvedIf xs) =
-  mconcat <$> traverse getConstraintStatus xs
-updateConstraintStatus cs = pure cs
--}
 
 infixl 5 \\\\
 (\\\\) :: ConstraintContext n -> (String, ConstraintType n) -> ConstraintContext (S n)
@@ -560,6 +517,7 @@ constrain s c = do
 -- gets a dismounted frame, tries to solve it, remounts it
 solveConstraint :: Name -> Constraint -> Elab ()
 solveConstraint name c | debug ("Solve constrain call " ++ show name ++ " constraint = " ++ show c) False = undefined
+-- TODO: must check if previously heterogeneous constraint has become homogeneous
 solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms  <- gets metaStore
@@ -677,6 +635,19 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
               debug ("Push Constraint n-6 " ++ show c) $ push $ ConstraintFrame name c
           _ -> do
             debug ("Push Constraint n-4 " ++ show c) $ push $ ConstraintFrame name c
+      _ | Just (SList, [elty])  <- tagEh ty
+        , Just (SOne, []) <- tagEh elty -> elabTC ctx (natTermCancel (lhs,rhs)) >>= \case
+            Left err -> error err
+            Right (lhs', rhs') -> if lhs == lhs'
+              then push $ ConstraintFrame name c
+              else do
+                (_, cstat) <- constrain "cancellation" $ Constraint
+                  { constraintCtx = constraintCtx
+                  , constraintType = Hom ty
+                  , lhs = lhs'
+                  , rhs = rhs'
+                  }
+                metaDefn name cstat
       _ -> do
        debug ("Push Constraint n-3 " ++ show c) $ push $ ConstraintFrame name c
   _ -> do
@@ -779,8 +750,8 @@ metaDefn x def = getMeta x >>= \case
     , " for " , show x
     , " in meta scope ", show (vlen mctxt)]
 
-invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
-invent x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
+invent' :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
+invent' stat x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
   ty
     | Just (SOne, []) <- tagEh ty ->
       pure nil
@@ -790,7 +761,10 @@ invent x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
         a <- invent x ctx s
         d <- invent x ctx (t //^ sub0 (R $^ a <&> s))
         pure (T $^ a <&> d)
-  ty -> wrapMeta <$> metaDecl Hoping x ctx ty
+  ty -> wrapMeta <$> metaDecl stat x ctx ty
+
+invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
+invent = invent' Hoping
 
 ensureType :: DeclarationType (Maybe TYPE) -> Elab (DeclarationType TYPE)
 ensureType dt@UserDecl{varTy, currentName} = do
@@ -819,7 +793,10 @@ run = prob >>= \case
     move winning
   FormalParam x -> do
     ty <- invent (x ++ "Type") emptyContext (atom SType)
+    val <- invent' Abstract (x ++ "Val") emptyContext ty
     (x, _) <- makeDeclaration (UserDecl ty x True [] False)
+    -- TODO: should this be `postLeft`?
+    excursion $ postRight [Currently ty (FreeVar x) val]
     newProb . Done $ FreeVar x
     move winning
   Expression (Var x) ->
@@ -1036,6 +1013,7 @@ runElabTask
   -> Meta -- meta which carries the solution for T
   -> ElabTask -- T
   -> Elab ()
+runElabTask _ meta task | debug (concat ["Elaborating ", show meta, " for task ", show task]) False  = undefined
 runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
   mtype <- normalise mctxt (atom SType) mtype
   case etask of
@@ -1065,13 +1043,18 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           cry sol
           move Whacked
         Just (x, xty) -> do
+          (_, xstat) <- constrain "VarExpr" $ Constraint
+                { constraintCtx = fmap Hom <$> mctxt
+                , constraintType = Hom (atom SType)
+                , lhs = xty -< no natty
+                , rhs = mtype
+                }
           y <- excursion . pullUntil () $ \_ fr -> case fr of
                  Currently ty lhs rhs | lhs == FreeVar x -> Right (ty, rhs)
                  _ -> Left ()
           case y of
             Nothing  -> cry sol
             Just (ty, rhs) -> do
-              (_, xstat) <- constrainEqualType ty xty
               (_, vstat) <- constrain "VarExpr" $ Constraint
                 { constraintCtx = fmap Hom <$> mctxt
                 , constraintType = Hom (atom SType)
@@ -1209,7 +1192,22 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
             debugMatrix "Making vjux..." (mk Svjux xSol ySol)
           run
-        Horizontal -> move worried
+        Horizontal -> do
+          cs0 <- debugMatrix ("HJUX matrix #### " ++ show mtype) $ invent "cs0" mctxt (mk SList colTy)
+          cs1 <- invent "cs1" mctxt (mk SList colTy)
+          (_, cstat) <- constrain "SplitRs" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (mk SList colTy)
+            , lhs = mk Splus cs0 cs1
+            , rhs = cs
+            }
+          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowTy colTy cellTy rs cs0) (TypeExprTask <$> x)
+          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowTy colTy cellTy rs cs1) (TypeExprTask <$> y)
+          pushProblems [xProb, yProb]
+          let cstat' = conjunction [tystat, cstat]
+          newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
+            debugMatrix "Making hjux..." (mk Shjux xSol ySol)
+          run
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("LVar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)

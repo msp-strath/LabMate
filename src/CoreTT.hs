@@ -558,6 +558,14 @@ termToNFAbel ty tm
       if i == 0 then pure mempty else fmap (i *) <$> termToNFAbel ty t
   | otherwise = error "termToNFAbel: no"
 
+-- the input terms (s, t) better be of type [List One]
+natTermCancel :: CancellerM (TC n) (Term Chk ^ n)
+natTermCancel (s, t) = withScope $ do
+  s <- termToNFAbel (atom SOne) s
+  t <- termToNFAbel (atom SOne) t
+  let (s', t') = cancelNFAbel cancelNat (s, t)
+  pure (nfAbelToTerm s', nfAbelToTerm t')
+
 termToNFBool :: Term Chk ^ n -> TC n (NFBool (Norm Syn ^ n))
 termToNFBool tm
   | Just tm <- E $? tm = evalSynth tm >>= \(tm, _) -> case E $? tm of
