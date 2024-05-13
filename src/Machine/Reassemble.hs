@@ -59,7 +59,7 @@ renamePass ms = inbound ms
   where
     inbound :: MachineState -> Writer RenameProblems MachineState
     inbound ms@(MS { position = fz :<+>: fs, problem = p }) =
-      case (outsource (fz <>< fs :<+>: []), p) of
+      case outsource (fz <>< fs :<+>: [], p) of
         (fz :< Source (n, Hide [t]) :<+>: fs, Done (FreeVar x)) | kin t == Nom -> do
           ~True <- track ("HIT" ++ show (x, n)) $ pure True
           x' <- renamer fz x False
@@ -75,11 +75,20 @@ renamePass ms = inbound ms
               }
         (cur, p) -> outbound mempty ms{ position = cur }
 
-    outsource :: Cursor Frame -> Cursor Frame
-    outsource cur@(_ :< Source _ :<+>: _) = cur
-    outsource cur@(_ :< Fork{} :<+>: _) = cur -- do not cross Fork borders
-    outsource (fz :< f :<+>: fs) = outsource (fz :<+>: f : fs)
-    outsource cur@(B0 :<+>: _) = cur
+    outsource :: (Cursor Frame, Problem) -> (Cursor Frame, Problem)
+    outsource cur@(_ :< Source _ :<+>: _, _) = cur
+    -- our expectations of where `Done (Freevar x)` is w.r.t to the
+    -- Source Frame have become more liberal,
+    outsource cur@(fz :< Fork (Left MkFork{..}) :<+>: fs, p)
+      | any sourceFrameEh fframes = cur
+      | p'@(Done (FreeVar x)) <- fprob = outsource (fz :<+>: Fork -- TODO: worry about fstatus
+                                                    (Right MkFork{fprob = p, fframes = fs, fstatus = mempty}) : fframes, p')
+    outsource cur@(fz :< Fork (Right MkFork{..}) :<+>: fs, p)
+      | any sourceFrameEh fframes = cur
+      | p'@(Done (FreeVar x)) <- fprob = outsource (fz :<+>: Fork -- TODO: worry about fstatus
+                                                    (Left MkFork{fprob = p, fframes = fs, fstatus = mempty}) : fframes, p')
+    outsource (fz :< f :<+>: fs, p) = outsource (fz :<+>: f : fs, p)
+    outsource cur@(B0 :<+>: _, _) = cur
 
     outbound :: ForkCompleteStatus -> MachineState -> Writer RenameProblems MachineState
     outbound stat ms@(MS { position = B0 :<+>: _ }) = pure ms
@@ -90,6 +99,10 @@ renamePass ms = inbound ms
       Fork (Right MkFork{..}) -> outbound (fstatus <> stat) ms{ position = fz :<+>: Fork (Left MkFork{fstatus = stat, fframes = fs, fprob= p}) : fframes
                                             , problem = fprob }
       _ -> outbound stat ms { position = fz :<+>: f : fs }
+
+    sourceFrameEh :: Frame -> Bool
+    sourceFrameEh (Source _) = True
+    sourceFrameEh _ = False
 
     renamer
       :: Bwd Frame
