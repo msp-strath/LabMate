@@ -1403,7 +1403,7 @@ diagnosticRun = llup >>= \case
             resp ++ [sym "There is no sensible type for", spc 1, non en]
           (_, _) ->
             resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is quite a puzzle"]
-      _ -> pure [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Goodbye" Nom dump]
+      -- _ -> pure [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Goodbye" Nom dump]
 
 metaStatus :: Name -> Elab Status
 metaStatus x = do
