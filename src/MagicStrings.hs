@@ -11,8 +11,9 @@ pattern SChar = "Char"
 pattern SEnum = "Enum"
 pattern SPi   = "Pi"
 pattern SSig  = "Sigma"
-pattern SMatrix = "Matrix"
-pattern SDest = "Destination"
+pattern SDest     = "Destination"
+pattern SMatrix   = "Matrix"
+pattern SQuantity = "Quantity"
 
 -- eliminators
 pattern Sfst  = "fst"

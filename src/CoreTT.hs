@@ -119,6 +119,9 @@ typeEh ty | Just cts <- tagEh ty = case cts of
       checkEh (mk SList rowTy) rs
       checkEh (mk SList colTy) cs
   (SDest, [t]) -> typeEh t
+  (SQuantity, [g, v]) -> withScope $ do
+    typeEh g
+    checkEh (mk SAbel g) v
   (ty, _) -> fail $ "typeEh: unknown type " ++ ty
 typeEh ty | Just ty <- E $? ty = withScope $ do
   gotTy <- synthEh ty
@@ -431,6 +434,7 @@ typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
                  <*> checkEval (mk SList rowTy) rs
                  <*> checkEval (mk SList colTy) cs
   (SDest, [genTy]) -> mk SDest <$> typeEval genTy
+  (SQuantity, [genTy, t]) -> mk SQuantity <$> typeEval genTy <*> checkEval (mk SAbel genTy) t
   (ty, _) -> fail $ "typeEval: unknown type " ++ ty
 typeEval ty | Just ty <- E $? ty = fst <$> evalSynth ty
 typeEval ty = fail "typeEval: no"

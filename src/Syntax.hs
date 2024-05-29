@@ -34,6 +34,10 @@ data DirHeader
   | InputFormat String {- name of function -}
   | Typecheck ConcreteType Expr
   | SynthType Expr
+  | Dimensions
+      (WithSource String) -- name of the Abelian group
+      (WithSource String) -- name of the quantity semiring
+      [WithSource String] -- the set of generators (quoted)
 --  | EverythingOkay
   deriving Show
 

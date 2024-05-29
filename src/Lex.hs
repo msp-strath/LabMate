@@ -390,6 +390,7 @@ symbols = foldr insT empT $ binOps ++
   , ".?"
   , "(", ")", "[", "]", "{", "}", ",", ";"
   , "::"
+  , "`" -- LabMate symbol only
   ]
 
 opener :: Tok -> Maybe Bracket

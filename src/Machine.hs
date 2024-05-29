@@ -213,6 +213,10 @@ winning = Winning True mempty
 worried :: Monoid a => Mood' a
 worried = Winning False mempty
 
+
+data WhereAmI = MatLab | LabMate
+  deriving (Show, Eq, Ord)
+
 data DeclarationType a
   = UserDecl
   { varTy :: a             -- (eventual) type
@@ -221,20 +225,22 @@ data DeclarationType a
   -- requested name and how to reply (we hope of length at most 1)
   , newNames :: [(String, ResponseLocation)]
   , capturable :: Bool     -- is it capturable?
+  , whereAmI :: WhereAmI   -- LabMate variables are not in scope for MatLab
   }
   deriving (Functor, Show, Foldable, Traversable)
 
+
 data ElabTask where
   TensorTask :: TensorType' -> ElabTask
-  TypeExprTask :: TypeExpr' -> ElabTask
+  TypeExprTask :: WhereAmI -> TypeExpr' -> ElabTask
   LHSTask :: LHS' -> ElabTask
-  ExprTask :: Expr' -> ElabTask
+  ExprTask :: WhereAmI -> Expr' -> ElabTask
   Await :: NATTY n
     => BOOL          -- the closed Boolean value we hope will become true
     -> Term Chk ^ n  -- the scoped solution we will commit if the
                      -- Boolean becomes true
     -> ElabTask
-  ConstrainTask :: NATTY n => (String, Constraint) -> Term Chk ^ n -> ElabTask
+  ConstrainTask :: NATTY n => WhereAmI -> (String, Constraint) -> Term Chk ^ n -> ElabTask
   Abandon :: ElabTask -> ElabTask
 deriving instance Show ElabTask
 
@@ -688,7 +694,7 @@ constrainEqualType lhs rhs = constrain "Q" $ Constraint
   }
 
 findDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Maybe (Name, TYPE))
-findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} = excursion (go False)
+findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news, whereAmI = whereTo} = excursion (go False)
   where
   go :: Bool {- we think we are in a function -} -> Elab (Maybe (Name, TYPE))
   go b = pull >>= \case
@@ -697,7 +703,9 @@ findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news} =
       Locale ScriptLocale | b -> -- if we are in a function, script
         Nothing <$ push f        -- variables are out of scope
       Locale (FunctionLocale _) -> shup f >> go True -- we know we are in a function
-      Declaration n u'@UserDecl{varTy = ty', currentName = old', seen = seen', newNames = news'} | old == old' -> do
+      Declaration n u'@UserDecl{varTy = ty', currentName = old', seen = seen', newNames = news', whereAmI = whereFrom}
+        | old == old'
+        , whereFrom <= whereTo -> do
         case ty of
           Just ty -> () <$ constrainEqualType ty ty'
           Nothing -> pure ()
@@ -785,7 +793,7 @@ run = prob >>= \case
     newProb $ Done nil
     move winning
   LHS (LVar x) -> do
-    (x, _) <- ensureDeclaration (UserDecl Nothing x True [] True)
+    (x, _) <- ensureDeclaration (UserDecl Nothing x True [] True MatLab)
     newProb . Done $ FreeVar x
     move winning
   LHS (LMat []) -> do
@@ -794,13 +802,13 @@ run = prob >>= \case
   FormalParam x -> do
     ty <- invent (x ++ "Type") emptyContext (atom SType)
     val <- invent' Abstract (x ++ "Val") emptyContext ty
-    (x, _) <- makeDeclaration (UserDecl ty x True [] False)
+    (x, _) <- makeDeclaration (UserDecl ty x True [] False MatLab)
     -- TODO: should this be `postLeft`?
     excursion $ postRight [Currently ty (FreeVar x) val]
     newProb . Done $ FreeVar x
     move winning
   Expression (Var x) ->
-    findDeclaration (UserDecl Nothing x True [] False) >>= \case
+    findDeclaration (UserDecl Nothing x True [] False MatLab) >>= \case
     Nothing -> do
       newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
       move Whacked
@@ -851,7 +859,7 @@ run = prob >>= \case
     -- TODO: optimise for the case when we know the LHS type
     ty <- invent "assignTy" emptyContext (atom SType)
     (ltm, lhsProb) <- elab "AssignLHS" emptyContext (mk SDest ty) (LHSTask <$> lhs)
-    (rtm, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask <$> rhs)
+    (rtm, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask MatLab <$> rhs)
     excursion $ postRight [Currently ty ltm rtm]
     pushProblems [rhsProb]
     newProb lhsProb
@@ -860,7 +868,7 @@ run = prob >>= \case
     pushSource src
     runDirective rl dir
   Command (Function (lhs, fname :<=: _, args) cs) ->
-    findDeclaration (UserDecl Nothing fname True [] False)  >>= \case
+    findDeclaration (UserDecl Nothing fname True [] False MatLab)  >>= \case
       Nothing -> error "function should have been declared already"
       Just (fname, _) -> do
         traverse_ fundecl cs
@@ -901,11 +909,23 @@ run = prob >>= \case
     newProb $ Sourced (Expression <$> exp)
     run
   RenameAction old new rl -> do
-    ensureDeclaration (UserDecl Nothing old False [(new, rl)] True)
+    ensureDeclaration $
+      UserDecl{ varTy = Nothing
+              , currentName = old
+              , seen = False
+              , newNames = [(new, rl)]
+              , capturable = True
+              , whereAmI = MatLab }
     newProb $ Done nil
     move winning
   DeclareAction ty name -> do
-    (name, _) <- ensureDeclaration (UserDecl (Just ty) name False [] True)
+    (name, _) <- ensureDeclaration $
+      UserDecl{ varTy = Just ty
+              , currentName = name
+              , seen = False
+              , newNames = []
+              , capturable = True
+              , whereAmI = MatLab}
     newProb $ Done (FreeVar name)
     move winning
   InputFormatAction name body (n, c) -> do
@@ -956,16 +976,18 @@ runDirective rl (dir :<=: src, body) = do
       run
     Typecheck ty e -> do
       (tySol, tyProb) <- elab "typeToCheck" emptyContext (atom SType) (TensorTask <$> ty)
-      (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask <$> e)
+      (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask LabMate <$> e)
       --traverse push [Diagnostic _ rl, Problems [eProb]]
       newProb tyProb
       run
     SynthType e -> do
       ty <- invent "typeToSynth" emptyContext (atom SType)
-      (eSol, eProb) <- elab "exprToSynth" emptyContext ty (ExprTask <$> e)
+      (eSol, eProb) <- elab "exprToSynth" emptyContext ty (ExprTask LabMate <$> e)
       push $ Diagnostic rl (SynthD ty eSol e)
       newProb eProb
       run
+    Dimensions (g :<=: gsrc) (q :<=: qsrc) atoms -> do
+      debug (concat ["Dimensions ", g, " for ", q, " over ", show atoms]) $  move worried
     _ -> move worried
 
 elab'
@@ -1010,7 +1032,7 @@ ensureMatrixType ctxt ty
 
 runElabTask
   :: Name
-  -> Meta -- meta which carries the solution for T
+  -> Meta     -- meta which carries the solution for T
   -> ElabTask -- T
   -> Elab ()
 runElabTask _ meta task | debug (concat ["Elaborating ", show meta, " for task ", show task]) False  = undefined
@@ -1020,24 +1042,24 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
     TensorTask (Tensor ((x, xs :<=: xSrc), (y, ys :<=: ySrc)) (eTy :<=: eSrc)) -> do
       xTy <- invent (x ++ "Type") mctxt (atom SType)
       yTy <- invent (y ++ "Type") mctxt (atom SType)
-      (xsSol, xsProb) <- elab (x ++ "List") mctxt (mk SList xTy) (TypeExprTask xs :<=: xSrc)
-      (ysSol, ysProb) <- elab (y ++ "List") mctxt (mk SList yTy) (TypeExprTask ys :<=: ySrc)
+      (xsSol, xsProb) <- elab (x ++ "List") mctxt (mk SList xTy) (TypeExprTask LabMate xs :<=: xSrc)
+      (ysSol, ysProb) <- elab (y ++ "List") mctxt (mk SList yTy) (TypeExprTask LabMate ys :<=: ySrc)
       let ctx = mctxt \\\ (x, xTy) \\\ (y, wk yTy)
-      (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask eTy :<=: eSrc)
+      (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask LabMate eTy :<=: eSrc)
       pushProblems [xsProb, ysProb, eProb]
       metaDefn sol (mk SMatrix xTy yTy (lam x . lam y $ eSol) xsSol ysSol)
       newProb $ Done nil
       move winning
-    TypeExprTask (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
+    TypeExprTask LabMate (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
       metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
       newProb $ Done nil
       move winning
-    TypeExprTask (TyVar Lstring) | Just (SType, []) <- tagEh mtype -> do
+    TypeExprTask LabMate (TyVar Lstring) | Just (SType, []) <- tagEh mtype -> do
       metaDefn sol $ mk SList (atom SChar) -< no (vlen mctxt)
       newProb $ Done nil
       move winning
-    TypeExprTask (TyVar x) -> -- TODO: check whether `x` is already present in the mctxt, i.e. shadowing
-      findDeclaration (UserDecl Nothing x True [] False) >>= \case
+    TypeExprTask whereAmI (TyVar x) -> -- TODO: check whether `x` is already present in the mctxt, i.e. shadowing
+      findDeclaration (UserDecl Nothing x True [] False whereAmI) >>= \case
         Nothing -> do
           newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
           cry sol
@@ -1064,7 +1086,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
               pushProblems [Elab sol $ Await (conjunction [xstat, vstat]) (rhs -< no (vlen mctxt))]
           newProb . Done $ FreeVar x
           move winning
-    TypeExprTask (TyNum k) -> case tagEh mtype of
+    TypeExprTask LabMate (TyNum k) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         (_, cs) <- constrain "IsOne" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
@@ -1109,16 +1131,16 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           newProb . Elab sol $ Await (conjunction [rcs, ccs]) (mk Sone cellSol)
           run
       _ -> debug ("Unresolved overloading of numerical constant " ++ show k)$ move worried
-    TypeExprTask (TyBinaryOp Plus x y) -> do
+    TypeExprTask whereAmI (TyBinaryOp Plus x y) -> do
       -- TODO:
       -- 1. make sure `mtype` admits plus
       -- 2. find the correct way of doing plus in `mtype`
-      (xSol, xProb) <- elab "plusXTy" mctxt mtype (TypeExprTask <$> x)
-      (ySol, yProb) <- elab "plusYTy" mctxt mtype (TypeExprTask <$> y)
+      (xSol, xProb) <- elab "plusXTy" mctxt mtype (TypeExprTask whereAmI <$> x)
+      (ySol, yProb) <- elab "plusYTy" mctxt mtype (TypeExprTask whereAmI <$> y)
       pushProblems [xProb, yProb]
       newProb . Done $ nil -- FIXME: use the solutions
       move winning
-    TypeExprTask (TyBinaryOp (Mul False{- x*y -} div) x y) -> do
+    TypeExprTask whereAmI (TyBinaryOp (Mul False{- x*y -} div) x y) -> do
       -- Two main issues:
       -- redundancy in representation of matrices:
       -- (e.g., R C [a] [b] \r c. X vs
@@ -1156,13 +1178,13 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , mulIndexTypes = (rowTy, midTy, colTy)
             , mulDataTypes = (cellXTy, cellYTy, cellZTy)
             })
-      (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask <$> x)
-      (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask <$> y)
-      (zSol, zProb) <- elab' "mulZRet" mctxt zTy (ConstrainTask mulConstraint (E $^ MX $^ (R $^ xSol <&> xTy) <&> (R $^ ySol <&> yTy)))
+      (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask whereAmI <$> x)
+      (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask whereAmI <$> y)
+      (zSol, zProb) <- elab' "mulZRet" mctxt zTy (ConstrainTask whereAmI mulConstraint (E $^ MX $^ (R $^ xSol <&> xTy) <&> (R $^ ySol <&> yTy)))
       pushProblems [xProb, yProb, zProb]
       newProb . Elab sol $ Await zstat zSol
       run
-    TypeExprTask (TyStringLiteral s) -> case tagEh mtype of
+    TypeExprTask whereAmI (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         (_, cs) <- constrain "IsChar" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
@@ -1173,7 +1195,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb . Elab sol $ Await cs (ixKI mtype (lit s))
         run
       _ -> move worried
-    TypeExprTask (TyJux dir x y) -> do
+    TypeExprTask whereAmI (TyJux dir x y) -> do
       (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
       case dir of
         Vertical -> do
@@ -1185,8 +1207,8 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , lhs = mk Splus rs0 rs1
             , rhs = rs
             }
-          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask <$> x)
-          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask <$> y)
+          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask whereAmI <$> x)
+          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask whereAmI <$> y)
           pushProblems [xProb, yProb]
           let cstat' = conjunction [tystat, cstat]
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
@@ -1201,8 +1223,8 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , lhs = mk Splus cs0 cs1
             , rhs = cs
             }
-          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowTy colTy cellTy rs cs0) (TypeExprTask <$> x)
-          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowTy colTy cellTy rs cs1) (TypeExprTask <$> y)
+          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowTy colTy cellTy rs cs0) (TypeExprTask whereAmI <$> x)
+          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowTy colTy cellTy rs cs1) (TypeExprTask whereAmI <$> y)
           pushProblems [xProb, yProb]
           let cstat' = conjunction [tystat, cstat]
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
@@ -1210,7 +1232,13 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           run
     LHSTask lhs -> case lhs of
       LVar x -> do
-        (x, ty) <- debug ("LVar " ++ show meta) $ ensureDeclaration (UserDecl Nothing x True [] True)
+        (x, ty) <- debug ("LVar " ++ show meta) . ensureDeclaration $
+          UserDecl{ varTy = Nothing
+                  , currentName = x
+                  , seen = True
+                  , newNames = []
+                  , capturable = True
+                  , whereAmI = MatLab}
         (_, ccs) <- constrain "IsLHSTy" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
           , constraintType = Hom (atom SType)
@@ -1223,9 +1251,9 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       _ -> do  -- switch to being a scoping problem
         newProb $ LHS lhs
         run
-    ExprTask e -> case toTypeExpr' e of
+    ExprTask whereAmI e -> case toTypeExpr' e of
       Just e -> do
-        newProb . Elab sol $ TypeExprTask e
+        newProb . Elab sol $ TypeExprTask whereAmI e
         run
       _ -> do  -- switch to being a scoping problem
         newProb $ Expression e
@@ -1242,7 +1270,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       cstatus -> do
         newProb . Elab sol $ Await cstatus tm
         move winning
-    ConstrainTask (s, constraint) tm -> do
+    ConstrainTask whereAmI (s, constraint) tm -> do
       (_, cstatus) <- constrain s constraint
       newProb . Elab sol $ Await cstatus tm
       run
@@ -1420,5 +1448,8 @@ fundecl :: Command -> Elab ()
 fundecl (Function (_, fname :<=: _ , _) _ :<=: _) = do
   ty <- invent (fname ++ "Type") emptyContext (atom SType)
   fname' <- metaDecl Hoping fname emptyContext ty
-  push $ Declaration fname' (UserDecl ty fname False [] False)
+  push . Declaration fname' $
+    UserDecl{ varTy = ty,  currentName = fname
+            , seen = False, newNames = []
+            , capturable = False, whereAmI = MatLab}
 fundecl _ = pure ()

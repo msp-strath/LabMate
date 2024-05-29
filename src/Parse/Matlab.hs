@@ -113,12 +113,21 @@ pdir' = pvspcaround $
 pprejunk :: Parser ()
 pprejunk = () <$ pospc <* (psym "%" <|> pure ())  <* psym ">"  <* pospc
 
+patom :: Parser String
+patom = id <$ psym "`" <*> pnom
+
 pdirhead :: Parser DirHeader
 pdirhead = Declare <$> psep1 (pspc <|> punc ",") (pws pnom) <* pospc <* psym "::" <* pospc <*> ptensortype
     <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
     <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom
     <|> Typecheck <$ pkin Nom "typecheck" <* pospc <*> ptensortype <* pspc <*> pexpr topCI
     <|> SynthType <$ pkin Nom "typeof" <* pospc <*> pexpr topCI
+    <|> Dimensions <$ pkin Nom "dimensions" <* pspc
+                   <*> pws pnom <* pspc
+                   <* pkin Blk "for" <* pspc
+                   <*> pws pnom <* pspc
+                   <* pkin Nom "over" <* pspc
+                   <*> psep0 (pspc <|> punc ",") (pws patom)
 --    <|> EverythingOkay <$ pkin Nom ""
 
 ptensortype :: Parser TensorType
