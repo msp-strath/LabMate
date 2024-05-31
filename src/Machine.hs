@@ -152,6 +152,7 @@ data DiagnosticData
 data Frame where
   Source :: Source -> Frame
   Declaration :: Name -> DeclarationType TYPE -> Frame
+  Definition :: Name -> TERM -> Frame -- should have a corresponding declaration
   Locale :: LocaleType -> Frame
   ExcursionReturnMarker :: Frame
   RenameFrame :: String -> String -> Frame
@@ -724,6 +725,11 @@ makeDeclaration d@UserDecl{varTy, currentName} = excursion $ do
         Locale{} -> pure ()
         _ -> findLocale
 
+freshDeclaration :: DeclarationType TYPE -> Elab (Maybe (Name, TYPE))
+freshDeclaration d = findDeclaration (fmap Just d) >>= \case
+  Just _ -> pure Nothing
+  Nothing -> Just <$> makeDeclaration d
+
 ensureDeclaration :: DeclarationType (Maybe TYPE) -> Elab (Name, TYPE)
 ensureDeclaration s = findDeclaration s >>= \case
   Nothing -> ensureType s >>= makeDeclaration
@@ -987,6 +993,34 @@ runDirective rl (dir :<=: src, body) = do
       newProb eProb
       run
     Dimensions (g :<=: gsrc) (q :<=: qsrc) atoms -> do
+      let generators = mk SEnum $ foldr (mk Splus . (mk Sone :: TERM -> TERM) . atom . what) nil atoms :: TERM
+      let gdef = mk SAbel generators :: TERM
+      let gdecl = UserDecl
+            { varTy = mk SType
+            , currentName = g
+            , seen = False
+            , newNames = []
+            , capturable = False
+            , whereAmI = LabMate
+            }
+      freshDeclaration gdecl >>= \case
+        Nothing -> move worried
+        Just (g, gty) -> do
+          push $ Definition g gdef
+          let qdecl = UserDecl
+                { varTy = mk SPi gdef (lam "_" (mk SType))
+                , currentName = q
+                , seen = False
+                , newNames = []
+                , capturable = False
+                , whereAmI = LabMate
+                }
+          freshDeclaration qdecl >>= \case
+            Nothing -> move worried
+            Just (q, qty) -> do
+              push $ Definition q (lam "d" $ mk SQuantity (wk generators) (evar 0))
+              newProb $ Done nil
+              run
       debug (concat ["Dimensions ", g, " for ", q, " over ", show atoms]) $  move worried
     _ -> move worried
 
@@ -1073,6 +1107,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
                 }
           y <- excursion . pullUntil () $ \_ fr -> case fr of
                  Currently ty lhs rhs | lhs == FreeVar x -> Right (ty, rhs)
+                 Definition name rhs | name == x -> Right (xty, rhs)
                  _ -> Left ()
           case y of
             Nothing  -> cry sol

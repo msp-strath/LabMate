@@ -7,7 +7,7 @@
 % do we want a general notion of LabMate definition?
 
 
-%> dimensions V for Q over 'Length, 'Mass, 'Time
+%> dimensions V for Q over `Length, `Mass, `Time
 %{
 	Type \ni X   Abel(X) \ni d
 	--------------------------
@@ -16,7 +16,7 @@
 	V = Abel(Enum['Length, 'Mass, 'Time])
 	Q(v::V) = Quantity(Enum['Length, 'Mass, 'Time], v)  (<- to be implemented in CoreTT)
 %}
-%> unit meter :: Q({'Length})
+%TODO %> unit meter :: Q({'Length})
 meter = 1;
 % if we have the matrix A
 A = [1 2]
