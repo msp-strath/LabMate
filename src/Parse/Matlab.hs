@@ -117,17 +117,20 @@ patom :: Parser String
 patom = id <$ psym "`" <*> pnom
 
 pdirhead :: Parser DirHeader
-pdirhead = Declare <$> psep1 (pspc <|> punc ",") (pws pnom) <* pospc <* psym "::" <* pospc <*> ptensortype
-    <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
+pdirhead = Declare <$> psep1 (pspc <|> punc ",") (pws pnomNotLabMateKey) <* pospc <* psym "::" <* pospc <*> ptensortype
+    <|> Rename <$ pkin Nom "rename" <* pospc <*> pnomNotLabMateKey <* pspc <*> pnomNotLabMateKey
     <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom
     <|> Typecheck <$ pkin Nom "typecheck" <* pospc <*> ptensortype <* pspc <*> pexpr topCI
     <|> SynthType <$ pkin Nom "typeof" <* pospc <*> pexpr topCI
     <|> Dimensions <$ pkin Nom "dimensions" <* pspc
-                   <*> pws pnom <* pspc
+                   <*> pws pnomNotLabMateKey <* pspc
                    <* pkin Blk "for" <* pspc
-                   <*> pws pnom <* pspc
+                   <*> pws pnomNotLabMateKey <* pspc
                    <* pkin Nom "over" <* pspc
                    <*> psep0 (pspc <|> punc ",") (pws patom)
+    <|> Unit <$ pkin Nom "unit" <* pspc
+             <*> pws pnomNotLabMateKey <* pospc
+             <* psym "::" <* pospc <*> ptypeexpr topCI
 --    <|> EverythingOkay <$ pkin Nom ""
 
 ptensortype :: Parser TensorType
@@ -158,6 +161,8 @@ ptypeexpr ci = go >>= more ci where
                IntLiteral i -> pure $ TyNum i
                _ -> mempty)
    <|> pws (TyStringLiteral <$> pstringlit)
+   <|> pws (TyAtom <$> patom)
+   <|> pws (pgrp (== Bracket Curly) (TyBraces <$ pospc <*> optional (ptypeexpr topCI <* pospc)))
   lhsstuff ci = (pws (TyVar <$> pnom) >>= lmore)
             <|> pws (tyMat <$> pgrp (== Bracket Square) (many (prow ptypeexpr)))
   lmore l = pcond

@@ -38,6 +38,9 @@ data DirHeader
       (WithSource String) -- name of the Abelian group
       (WithSource String) -- name of the quantity semiring
       [WithSource String] -- the set of generators (quoted)
+  | Unit
+      (WithSource String)
+      TypeExpr
 --  | EverythingOkay
   deriving Show
 
@@ -59,6 +62,7 @@ data VOrH = Vertical | Horizontal
 data TypeExpr'
   = TyVar String -- might also be constants, e.g. Double
   | TyNum Int
+  | TyAtom String
   | TyApp TypeExpr [TypeExpr]
   -- | TyMat [[TypeExpr]]
   | TyJux VOrH TypeExpr TypeExpr
@@ -66,6 +70,7 @@ data TypeExpr'
   | TyBinaryOp BinOperator TypeExpr TypeExpr
   | TyUnaryOp UnOperator TypeExpr
   | TyStringLiteral String
+  | TyBraces (Maybe TypeExpr)
   deriving Show
 
 tyMat :: [[TypeExpr]] -> TypeExpr'

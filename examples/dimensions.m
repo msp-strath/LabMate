@@ -13,10 +13,11 @@
 	--------------------------
 	Type \ni Quantity(X, d)
 
-	V = Abel(Enum['Length, 'Mass, 'Time])
-	Q(v::V) = Quantity(Enum['Length, 'Mass, 'Time], v)  (<- to be implemented in CoreTT)
+	V = Abel(Enum[`Length, `Mass, `Time])
+	Q(v::V) = Quantity(Enum[`Length, `Mass, `Time], v)  (<- to be implemented in CoreTT)
 %}
-%TODO %> unit meter :: Q({'Length})
+%TODO %> unit meter :: Q({`Length})
+%TODO %> unit watt :: Q({`Mass * `Length^2 * `Time^(-3))
 meter = 1;
 % if we have the matrix A
 A = [1 2]

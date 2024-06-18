@@ -196,6 +196,11 @@ prawif k = ptok $ \ t -> raw t <$ guard (kin t == k)
 pnom :: Parser String
 pnom = ptok $ \ t -> if kin t == Nom then Just (raw t) else Nothing
 
+pnomNotLabMateKey :: Parser String
+pnomNotLabMateKey = pnom >>= \case
+  x | x `elem` ["unit"] -> empty
+  x -> pure x
+
 pcond :: Parser a -> (a -> Parser b) -> Parser b -> Parser b
 pcond pc ps pf = Parser $ \ n ts -> case parser pc n ts of
   (r,[]) -> first (max r) $ parser pf n ts

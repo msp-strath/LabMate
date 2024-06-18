@@ -31,7 +31,7 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Control.Monad.Reader
 
-debug = trace
+debug = const id --trace
 debugCatch = const id --trace
 debugMatrix = trace
 
