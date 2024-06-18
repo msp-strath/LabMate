@@ -162,7 +162,7 @@ ptypeexpr ci = go >>= more ci where
                _ -> mempty)
    <|> pws (TyStringLiteral <$> pstringlit)
    <|> pws (TyAtom <$> patom)
-   <|> pws (pgrp (== Bracket Curly) (TyBraces <$ pospc <*> optional (ptypeexpr topCI <* pospc)))
+   <|> pws (pgrp (== Bracket Curly) (plink (TyBraces <$ pospc <*> optional (ptypeexpr topCI <* pospc))))
   lhsstuff ci = (pws (TyVar <$> pnom) >>= lmore)
             <|> pws (tyMat <$> pgrp (== Bracket Square) (many (prow ptypeexpr)))
   lmore l = pcond

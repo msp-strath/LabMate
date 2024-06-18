@@ -31,7 +31,7 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Control.Monad.Reader
 
-debug = const id --trace
+debug = trace
 debugCatch = const id --trace
 debugMatrix = trace
 
@@ -1021,7 +1021,28 @@ runDirective rl (dir :<=: src, body) = do
               push $ Definition q (lam "d" $ mk SQuantity (wk generators) (evar 0))
               newProb $ Done nil
               run
-      debug (concat ["Dimensions ", g, " for ", q, " over ", show atoms]) $  move worried
+      move worried
+    Unit (u :<=: usrc) (ty :<=: tysrc) -> do
+      (tySol, tyProb) <- elab "unitType" emptyContext (atom SType) (TypeExprTask LabMate ty)
+      pushProblems [tyProb]
+      {- TODO: continue here
+      (x, ty) <- ensureDeclaration $
+          UserDecl{ varTy = Just tySol
+                  , currentName = u
+                  , seen = False
+                  , newNames = []
+                  , capturable = True
+                  , whereAmI = MatLab}
+        (_, ccs) <- constrain "IsLHSTy" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , lhs = mk SDest (ty -< no (vlen mctxt))
+          , rhs = mtype
+          }
+
+      newProb $ UnitDefinition u
+      -}
+      move worried
     _ -> move worried
 
 elab'
