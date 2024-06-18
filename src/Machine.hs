@@ -112,6 +112,9 @@ instance PrettyPrint DiagnosticData where
     ty <- pptm ty
     tm <- pptm tm
     pure [tm ++ " :: " ++ ty ++ " <- $" ++ show n]
+  pprint (UnitD un stat tn) = do
+    stat <- pptm stat
+    pure ["unit $" ++ show un ++ " " ++ stat ++ " $" ++ show tn]
 
 instance PrettyPrint Frame where
   pprint (Declaration n UserDecl{..}) = do
@@ -147,6 +150,7 @@ data DiagnosticData
       TYPE {- T -}
       TERM {- t :: T -}
       Expr {- e, t = elab e -}
+  | UnitD Nonce BOOL Nonce
   deriving Show
 
 data Frame where
@@ -257,6 +261,7 @@ data Problem where
   RenameAction :: String -> String -> ResponseLocation -> Problem
   DeclareAction :: TERM -> String -> Problem
   InputFormatAction :: String -> [String] -> ResponseLocation -> Problem
+  UnitDefinition :: BOOL -> Nonce -> ResponseLocation -> Problem
   FunCalled :: Expr' -> Problem
   Elab :: Name -> ElabTask -> Problem
   Prefer :: Problem -> Problem -> Problem
@@ -508,7 +513,7 @@ conjunction nfs = case partition isLit nfs of
 
 normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
 normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
-  Left err -> nattily (vlen ctx) $ error . concat $ ["normalise: TC error ", err, " for ", show tm, "::", show ty]
+  Left err -> nattily (vlen ctx) $ error . concat $ ["normalise: TC error [", err, "] for ", show tm, " :: ", show ty]
   Right tm -> pure tm
 
 constraintStatus :: Name -> Elab BOOL
@@ -983,7 +988,6 @@ runDirective rl (dir :<=: src, body) = do
     Typecheck ty e -> do
       (tySol, tyProb) <- elab "typeToCheck" emptyContext (atom SType) (TensorTask <$> ty)
       (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask LabMate <$> e)
-      --traverse push [Diagnostic _ rl, Problems [eProb]]
       newProb tyProb
       run
     SynthType e -> do
@@ -1022,27 +1026,26 @@ runDirective rl (dir :<=: src, body) = do
               newProb $ Done nil
               run
       move worried
-    Unit (u :<=: usrc) (ty :<=: tysrc) -> do
-      (tySol, tyProb) <- elab "unitType" emptyContext (atom SType) (TypeExprTask LabMate ty)
-      pushProblems [tyProb]
-      {- TODO: continue here
-      (x, ty) <- ensureDeclaration $
-          UserDecl{ varTy = Just tySol
-                  , currentName = u
-                  , seen = False
-                  , newNames = []
-                  , capturable = True
-                  , whereAmI = MatLab}
-        (_, ccs) <- constrain "IsLHSTy" $ Constraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , constraintType = Hom (atom SType)
-          , lhs = mk SDest (ty -< no (vlen mctxt))
-          , rhs = mtype
-          }
+    Unit u ty -> do
+      _ <- debug "Elaborating unit decl" $ pure True
 
-      newProb $ UnitDefinition u
-      -}
-      move worried
+      genTy <- invent "genTy" VN (atom SType)
+      dim <- invent "dimension" VN (mk SAbel genTy)
+      let qty = mk SQuantity genTy dim :: TYPE
+      _ <- debug "Constructing Unit type " $ pure True
+      (ltm, lhsProb) <- elab "unitFakeLHS" emptyContext (mk SDest qty) (LHSTask . LVar <$> u)
+      (tySol, tyProb) <- elab "unitType" emptyContext (atom SType) (TypeExprTask LabMate <$> ty)
+      excursion $ postRight [Currently qty ltm (lit (1::Double))]
+      (_, stat) <- constrain "unitType" $ Constraint
+              { constraintCtx = VN
+              , constraintType = Hom (atom SType)
+              , lhs = qty
+              , rhs = tySol
+              }
+      push $ Diagnostic rl (UnitD (nonce u) stat (nonce ty))
+      pushProblems [tyProb, lhsProb]
+      newProb $ Done nil
+      run
     _ -> move worried
 
 elab'
@@ -1409,9 +1412,12 @@ normaliseFrame = \case
   fr -> pure fr
   where
     normaliseDiagnostic (SynthD ty tm e) = do
-      ty <- normalise emptyContext (atom SType) ty
-      tm <- normalise emptyContext ty tm
+      ty <- normalise VN (atom SType) ty
+      tm <- normalise VN ty tm
       pure $ SynthD ty tm e
+    normaliseDiagnostic (UnitD un stat tn) = do
+      stat <- normalise VN (atom STwo) stat
+      pure $ UnitD un stat tn
 
 cleanup :: Mood -> Elab ()
 cleanup mood = do
@@ -1460,6 +1466,25 @@ diagnosticRun = llup >>= \case
           (_, _) ->
             resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is quite a puzzle"]
       -- _ -> pure [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Goodbye" Nom dump]
+      UnitD un stat tn -> case stat of
+        Intg 1 -> pure
+          [ Tok "\n" Ret dump
+          , spc dent, sym "%<{", Tok "\n" Ret dump
+          , spc dent, non un, spc 1, sym "=", spc 1, Tok "1" Dig dump, sym ";"
+                    , spc 1, sym "%", spc 1, sym "::" , spc 1, non tn
+                    , Tok "\n" Ret dump
+          , spc dent, sym "%<}"
+          ]
+        Intg 0 -> pure
+          [ Tok "\n" Ret dump
+          , spc dent, sym "%<", spc 1, sym "I cannot make", spc 1, non un, spc 1
+                    , sym "a unit because", spc 1, non tn, spc 1, sym "is not a quantity type."
+          ]
+        cstat  -> pure
+          [ Tok "\n" Ret dump
+          , spc dent, sym "%<", spc 1, sym "I cannot make", spc 1, non un, spc 1
+                    , sym "a unit yet, because I do not see why", spc 1, non tn, spc 1, sym "is a quantity type."
+          ]
 
 metaStatus :: Name -> Elab Status
 metaStatus x = do

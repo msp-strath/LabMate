@@ -404,6 +404,8 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
           False -> do
             (nf, _) <- checkEvalMatrixNF termToNFList (rowTy, colTy, cellTy) (rs, cs) tm
             pure $ nfMatrixToTerm nf
+  -- TODO: try harder to see whether there is any work to do
+  (SQuantity, [genTy, dim]) -> pure tm
   (t, _) -> fail $ "checkNormEval: unknown type " ++ t
 checkNormEval _ _ = fail "checkNormEval: no"
 

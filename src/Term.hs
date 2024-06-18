@@ -318,8 +318,10 @@ tmShow b (V :^ th) (_, ctx) = barIf b ++ vonly (th ?^ ctx)
 tmShow b Nil _
   | b = ""
   | otherwise = "[]"
-tmShow b (A s :$ U :^ _) _ = barIf b ++ "'" ++ s
+tmShow b (A s :$ U :^ _) _ = barIf b ++ "`" ++ s
 tmShow b (I i :$ U :^ _) _ = barIf b ++ show i
+tmShow b (SL s :$ U :^ _) _ = barIf b ++ show s
+tmShow b (DL d :$ U :^ _) _ = barIf b ++ show d
 tmShow b (U :^ _) _ = ""
 tmShow b (P tl u tr :^ th) _ = "tmShow: not in a great spot"
 tmShow b (K tm :^ th) ctx = barIf b ++ "(\\_. " ++ tmShow b (tm :^ th) ctx ++ ")"
@@ -347,6 +349,7 @@ tmShow b (D :$ tm :^ th) ctx = let (a, d) = split (tm :^ th)
 tmShow b (MX :$ tm :^ th) ctx = let (a, d) = split (tm :^ th)
   in concat [barIf b, "(", tmShow False a ctx, " * ", tmShow False d ctx, ")"]
 -- TODO : add the remaining cases
+tmShow b _ ctx = barIf b ++ "..."
 
 barIf :: Bool -> String
 barIf True = " | "
