@@ -1,5 +1,7 @@
 module Machine where
 
+import GHC.Stack
+
 import Control.Monad
 import Control.Newtype
 import Control.Monad.State
@@ -246,6 +248,7 @@ data ElabTask where
                      -- Boolean becomes true
     -> ElabTask
   ConstrainTask :: NATTY n => WhereAmI -> (String, Constraint) -> Term Chk ^ n -> ElabTask
+  ElimTask :: NATTY n => Natty n -> (Term Chk ^ n, Type ^ n) -> [TypeExpr] -> ElabTask
   Abandon :: ElabTask -> ElabTask
 deriving instance Show ElabTask
 
@@ -422,9 +425,9 @@ getMeta x = do
     collectStores (LocalStore st) = [st]
     collectStores _ = []
 
-cry :: Name -> Elab ()
+cry :: HasCallStack => Name -> Elab ()
 cry x = do
-  meta <- getMeta x
+  meta <- debug (prettyCallStack callStack) $ getMeta x
   modify $ \st@MS{..} -> st { metaStore = Map.insert x (meta{ mstat = Crying }) metaStore }
 
 yikes :: TERM -> TERM
@@ -593,6 +596,24 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
               , rhs = rty
               }
             metaDefn name stat
+          (SQuantity, [lgenTy, ldim], [rgenTy, rdim]) -> do
+             (_, gstat) <- constrain "genTy" $ Constraint
+                  { constraintCtx = constraintCtx
+                  , constraintType = Hom (atom SType)
+                  , lhs = lgenTy
+                  , rhs = rgenTy
+                  }
+             if alive gstat
+               then do
+                 (_, dstat) <- constrain "dim" $ Constraint
+                   { constraintCtx = constraintCtx
+                   , constraintType = mkConstraintType (mk SAbel lgenTy) gstat (mk SAbel rgenTy)
+                   , lhs = ldim
+                   , rhs = rdim
+                   }
+                 metaDefn name $ conjunction [gstat, dstat]
+               else do
+                 metaDefn name (I 0 :$ U :^ no Zy)
           (SMatrix, [rowTy, colTy, cellTy, rs, cs], [rowTy', colTy', cellTy', rs', cs'])
             | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
             , Just (r', cellTy') <- lamNameEh cellTy', Just (c', cellTy') <- lamNameEh cellTy' -> do
@@ -745,6 +766,13 @@ onNearestSource f = excursion go where
     Nothing -> error "Impossible: no enclosing Source frame"
     Just (Source (n, Hide ts)) -> pushSource (n, Hide $ f ts)
     Just f -> shup f >> go
+
+pushDefinition :: Name -> TERM -> Elab ()
+pushDefinition name def = excursion go where
+  go = pull >>= \case
+    Nothing -> error "LabMate: Do not make definitions for undeclared variables"
+    Just fr@(Declaration n _) | n == name -> traverse_ push [fr, Definition name def]
+    Just fr -> shup fr >> go
 
 metaDecl :: Status -> String -> Context n -> Type ^ n -> Elab Name
 metaDecl s x ctx ty = do
@@ -1009,7 +1037,7 @@ runDirective rl (dir :<=: src, body) = do
       freshDeclaration gdecl >>= \case
         Nothing -> move worried
         Just (g, gty) -> do
-          push $ Definition g gdef
+          pushDefinition g gdef
           let qdecl = UserDecl
                 { varTy = mk SPi gdef (lam "_" (mk SType))
                 , currentName = q
@@ -1021,7 +1049,7 @@ runDirective rl (dir :<=: src, body) = do
           freshDeclaration qdecl >>= \case
             Nothing -> move worried
             Just (q, qty) -> do
-              push $ Definition q (lam "d" $ mk SQuantity (wk generators) (evar 0))
+              pushDefinition q (lam "d" $ mk SQuantity (wk generators) (evar 0))
               newProb $ Done nil
               run
     Unit u ty -> do
@@ -1287,6 +1315,39 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
             debugMatrix "Making hjux..." (mk Shjux xSol ySol)
           run
+    TypeExprTask LabMate (TyApp f args) -> do
+      fTy <- invent "fTy" mctxt (atom SType)
+      (fSol, fProb) <- elab "func" mctxt fTy (TypeExprTask LabMate <$> f)
+      pushProblems [fProb]
+      newProb . Elab sol $ ElimTask (vlen mctxt) (fSol, fTy) args
+      run
+    ElimTask n (tgt, tty) [] -> nattyEqOi n (vlen mctxt) $ do
+      (_, cstat) <- debug ("!!!ElimTask[] " ++ show tty) $ constrain "elimFits" $ Constraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , constraintType = Hom (atom SType)
+        , lhs = tty
+        , rhs = mtype
+        }
+      newProb . Elab sol $ Await cstat tgt
+      run
+    ElimTask n (tgt, tty) (x : xs) -> nattyEqOi n (vlen mctxt) $ do
+      tty <- normalise mctxt (atom SType) tty
+      case debug ("!!!ElimTask x" ++ show tty ++ " for " ++ show x) $ tagEh tty of
+        Just (SPi, [s, t]) | Just t <- lamEh t -> do
+          (xSol, xProb) <- elab "arg" mctxt s (TypeExprTask LabMate <$> x)
+          let tty' = t //^ sub0 (R $^ xSol <&> s)
+          let tgt' = E $^ (D $^ (R $^ tgt <&> tty) <&> xSol)
+          tty' <- normalise mctxt (atom SType) tty'
+          tgt' <- normalise mctxt tty' tgt'
+          pushProblems [xProb]
+          newProb . Elab sol $ ElimTask n (tgt', tty') xs
+          run
+        Just _ -> do
+          cry sol
+          move Whacked
+        Nothing -> do
+          newProb . Elab sol $ ElimTask n (tgt, tty) (x : xs)
+          move worried
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("LVar " ++ show meta) . ensureDeclaration $
@@ -1433,6 +1494,9 @@ cleanup mood = do
   pure ()
   --modify $ \st@MS{..} -> st{ metaStore = Map.filter (\Meta{..} -> mstat /= Hoping || isNothing mdefn) metaStore }
 
+-- `diagnosticRun` *never* encounters a right fork, because of the way
+-- `move` leaves the tree (by the time `move` reaches the root of the
+-- tree, all the forks are left forks)
 diagnosticRun :: Elab ()
 diagnosticRun = llup >>= \case
   Just fr -> case fr of

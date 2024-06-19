@@ -29,6 +29,11 @@ nattyEqEh n m = case trichotomy n m of
    Equal -> pure Refl
    _ -> Nothing
 
+nattyEqOi :: Natty n -> Natty m -> ((n ~ m) => t) -> t
+nattyEqOi n m k = case nattyEqEh n m of
+  Just Refl -> k
+  Nothing -> error ("nattyEqOi: " ++ show n ++ " /= " ++ show m)
+
 cmpNatty :: Natty n -> Natty m -> Ordering' (n == m)
 cmpNatty n m = case trichotomy n m of
   LessThan _ _ -> LT'
