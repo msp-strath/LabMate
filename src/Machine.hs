@@ -261,7 +261,6 @@ data Problem where
   RenameAction :: String -> String -> ResponseLocation -> Problem
   DeclareAction :: TERM -> String -> Problem
   InputFormatAction :: String -> [String] -> ResponseLocation -> Problem
-  UnitDefinition :: BOOL -> Nonce -> ResponseLocation -> Problem
   FunCalled :: Expr' -> Problem
   Elab :: Name -> ElabTask -> Problem
   Prefer :: Problem -> Problem -> Problem
@@ -1025,7 +1024,6 @@ runDirective rl (dir :<=: src, body) = do
               push $ Definition q (lam "d" $ mk SQuantity (wk generators) (evar 0))
               newProb $ Done nil
               run
-      move worried
     Unit u ty -> do
       _ <- debug "Elaborating unit decl" $ pure True
 
