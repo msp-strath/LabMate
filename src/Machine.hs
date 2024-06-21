@@ -729,6 +729,33 @@ solveConstraint name c@Multiplicable{mulDataTypes = (x, y, z), mulIndexTypes = (
            , rhs = x
            }
          metaDefn name (conjunction [xystat, zstat])
+       (Just (SQuantity, [genTy1 :^ (No (No th)), dim1]), Just (SQuantity, [genTy2 :^ (No (No ph)), dim2]), _) -> do
+         (_, cstat) <- constrain "gentySame" $ Constraint
+           { constraintCtx = constraintCtx
+           , constraintType = Hom (atom SType)
+           , lhs = genTy1 :^ th
+           , rhs = genTy2 :^ ph
+           }
+         case cstat of
+           Intg 0 -> metaDefn name (I 0 :$ U :^ no Zy)
+           Intg 1 -> do -- here genTy1 is the same type as genTy2
+             let genTy1' = genTy1 :^ (No (No (No th)))
+             let dim1' = wk dim1
+             let dim2' = dim2 -< Su (Su (No (io (vlen ctx))))
+             normalise (ctx \\\ ("i", i) \\\ ("j", wk j) \\\ ("k", wk (wk k))) (mk SAbel genTy1') (mk Splus dim1' dim2') >>= \case
+               (dim3' :^ ps) -> case thicken ps (Su (No (Su (io (vlen ctx))))) of
+                 Just ps -> do
+                   (_, ostat) <- constrain "quantityOutTy" $ Constraint
+                     { constraintCtx = constraintCtx \\\\ ("i", Hom i) \\\\ ("k", Hom $ wk k)
+                     , constraintType = Hom (atom SType)
+                     , lhs = mk SQuantity (genTy1 :^ No (No th)) (dim3' :^ ps)
+                     , rhs = z
+                     }
+                   metaDefn name ostat
+                 Nothing -> if Set.null (dependencies (dim3' :^ ps))
+                   then metaDefn name (I 0 :$ U :^ no Zy)
+                   else push $ ConstraintFrame name c
+           _ -> push $ ConstraintFrame name c
        _ -> debug ("Push Constraint n-1" ++ show c) $ push $ ConstraintFrame name c
 solveConstraint name c@ElemConstraint{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
@@ -1093,10 +1120,11 @@ runDirective rl (dir :<=: src, body) = do
       genTy <- invent "genTy" VN (atom SType)
       dim <- invent "dimension" VN (mk SAbel genTy)
       let qty = mk SQuantity genTy dim :: TYPE
+      let mty = singMatTy qty
       _ <- debug "Constructing Unit type " $ pure True
-      (ltm, lhsProb) <- elab "unitFakeLHS" emptyContext (mk SDest qty) (LHSTask . LVar <$> u)
+      (ltm, lhsProb) <- elab "unitFakeLHS" emptyContext (mk SDest mty) (LHSTask . LVar <$> u)
       (tySol, tyProb) <- elab "unitType" emptyContext (atom SType) (TypeExprTask LabMate <$> ty)
-      excursion $ postRight [Currently qty ltm (lit (1::Double))]
+      excursion $ postRight [Currently mty ltm (mk Sone (lit (1::Double)))]
       (_, stat) <- constrain "unitType" $ Constraint
               { constraintCtx = VN
               , constraintType = Hom (atom SType)
@@ -1661,8 +1689,9 @@ diagnosticRun = llup >>= \case
             ++ sty ++ [sym ",", spc 1, sym "and it might." {- , spc 1, sym (show (dependencies tm)), spc 1, sym (show statTm)-}]
           (_, _) | Crying `elem` statTy ->
             resp ++ [sym "There is no sensible type for", spc 1, non en]
-          (_, _) ->
-            resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is quite a puzzle"]
+          (hopingTy, hopingTm) ->
+            debug ("%%%% Puzzle" ++ show (dependencies ty) ++ " and terms " ++ show (dependencies tm)) $
+              resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is quite a puzzle"]
       -- _ -> pure [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Goodbye" Nom dump]
       UnitD un stat tn -> case stat of
         Intg 1 -> pure

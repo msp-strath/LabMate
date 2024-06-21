@@ -10,3 +10,5 @@
 %> unit baz :: Q( {`Length / `Time^2})
 
 %> unit sq :: Q( { { `Length } })
+
+%> typeof unitless2

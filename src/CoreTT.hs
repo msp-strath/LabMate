@@ -276,6 +276,9 @@ unnil elty xs = withScope $ propEh elty >>= \case
     [] -> pure ()
     _ -> fail "unnil: non-empty list"
 
+singMatTy :: Type ^ n -> Type ^ n
+singMatTy c = nattily (scopeOf c) $ mk SMatrix SOne SOne (lam "i" $ lam "j" $ wk (wk c)) (tag Sone [nil]) (tag Sone [nil])
+
 prefixEh
   :: Type ^ n
   -> Term Chk ^ n -- prefix
@@ -558,7 +561,7 @@ termToNFAbel ty tm
   | Nil <- tm  = pure mempty
   | Just (Sone, [t]) <- tagEh tm = checkEval ty t >>= \case
      Nil -> pure $ NFAbel 1 []
-     _   -> withScope $ pure $ NFAbel 0 [(mk Sone t, 1)]
+     t   -> withScope $ pure $ NFAbel 0 [(mk Sone t, 1)]
   | Just (Splus, [s, t]) <- tagEh tm = (<>) <$> termToNFAbel ty s <*> termToNFAbel ty t
   | Just [Intg i, t] <- tupEh tm =
       if i == 0 then pure mempty else fmap (i *) <$> termToNFAbel ty t

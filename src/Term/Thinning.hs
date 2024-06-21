@@ -255,6 +255,8 @@ pub  Ze      Ze     =    Span  Ze       Ze      :^ Ze
 
 -- testing if one subset is included in another by checking
 -- if the pullback is degenerate
+-- first argument: what we are checking
+-- second argument: what is allowed
 thicken :: l <= m -> n <= m -> Maybe (l <= n)
 thicken th ph = case pub th ph of
   Span th' ph' :^ ps' -> do
