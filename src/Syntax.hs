@@ -84,6 +84,11 @@ tyMat exps = what $ go Vertical (go Horizontal id) exps
     go :: VOrH -> (a -> TypeExpr) -> [a] -> TypeExpr
     go dir pre = foldr (jux dir . pre) (nil dir)
 
+tyUnaryOp :: UnOperator -> TypeExpr -> TypeExpr'
+tyUnaryOp UMinus (TyNum i :<=: src) = TyNum (negate i)
+tyUnaryOp UPlus  (TyNum i :<=: src) = TyNum i
+tyUnaryOp op e = TyUnaryOp op e
+
 type Res = [Tok]
 
 type ConcreteType = TensorType

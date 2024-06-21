@@ -1350,6 +1350,21 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
             debugMatrix "Making hjux..." (mk Shjux xSol ySol)
           run
+    TypeExprTask LabMate (TyAtom a) -> do
+      atoms <- invent "atoms" mctxt (mk SList SAtom)
+      (_ , cstat) <- constrain "listAtoms" $ Constraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , constraintType = Hom (atom SType)
+        , lhs = mk SEnum atoms
+        , rhs = mtype
+        }
+      (_ , estat) <- constrain "elem" $ ElemConstraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , needle = a
+        , hayStack = atoms
+        }
+      newProb . Elab sol $ Await (conjunction [cstat, estat]) (inContext mctxt $ atom a)
+      run
     TypeExprTask LabMate (TyBraces ma) -> do
       genTy <- invent "genTy" mctxt (atom SType)
       (_ , cstat) <- constrain "abelType" $ Constraint
@@ -1396,22 +1411,40 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           newProb . Elab sol $ ElimTask n (tgt, tty) (x : xs)
           move worried
     AbelTask t -> case t of
-      TyAtom a -> do
-        atoms <- invent "atoms" mctxt (mk SList SAtom)
-        (_ , cstat) <- constrain "listAtoms" $ Constraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , constraintType = Hom (atom SType)
-          , lhs = tag SAbel [mk SEnum atoms]
-          , rhs = mtype
-          }
-        (_ , estat) <- constrain "elem" $ ElemConstraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , needle = a
-          , hayStack = atoms
-          }
-        newProb . Elab sol $ Await (conjunction [cstat, estat]) (inContext mctxt $ mk Sone (atom a))
+      TyNum 1 -> do
+        metaDefn sol (inContext mctxt nil)
+        newProb $ Done nil
         run
-      _ -> move worried
+      TyBinaryOp (Mul False Times) x y -> do
+        (xSol, xProb) <- elab "abelLeft" mctxt mtype (AbelTask <$> x)
+        (ySol, yProb) <- elab "abelRight" mctxt mtype (AbelTask <$> y)
+        pushProblems [xProb, yProb]
+        metaDefn sol (mk Splus xSol ySol)
+        newProb $ Done nil
+        run
+      TyBinaryOp (Mul False RDiv) x y -> do
+        (xSol, xProb) <- elab "abelLeft" mctxt mtype (AbelTask <$> x)
+        (ySol, yProb) <- elab "abelRight" mctxt mtype (AbelTask <$> y)
+        pushProblems [xProb, yProb]
+        metaDefn sol (mk Splus xSol (tup [lit (-1 :: Int), ySol]))
+        newProb $ Done nil
+        run
+      TyBinaryOp (Pow False) x (TyNum n :<=: nsrc) -> do
+        (xSol, xProb) <- elab "abelLeft" mctxt mtype (AbelTask <$> x)
+        pushProblems [xProb]
+        metaDefn sol (tup [lit n, xSol])
+        newProb $ Done nil
+        run
+      TyBraces (Just g) | Just (SAbel, [genTy]) <- tagEh mtype -> do
+        (gSol, gProb) <- elab "abelGen" mctxt genTy (TypeExprTask LabMate <$> g)
+        pushProblems [gProb]
+        metaDefn sol (mk Sone gSol)
+        newProb $ Done nil
+        run
+      TyAtom a -> do
+        newProb . Elab sol $ AbelTask (TyBraces (Just (noSource t)))
+        run
+      t -> newProb . Elab sol $ (TypeExprTask LabMate t)
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("LVar " ++ show meta) . ensureDeclaration $

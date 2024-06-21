@@ -155,14 +155,14 @@ ptypeexpr :: ContextInfo -> Parser TypeExpr
 ptypeexpr ci = go >>= more ci where
   go :: Parser TypeExpr
   go = pgrp (== Bracket Round) (id <$ pospc <*> ptypeexpr topCI <* pospc)
-   <|> pws (TyUnaryOp <$> punaryop <* pospc <*> ptypeexpr (ci {precedence = unaryLevel}))
+   <|> pws (tyUnaryOp <$> punaryop <* pospc <*> ptypeexpr (ci {precedence = unaryLevel}))
    <|> lhsstuff ci
    <|> pws (prawif Dig >>= pnumber >>= \case
                IntLiteral i -> pure $ TyNum i
                _ -> mempty)
    <|> pws (TyStringLiteral <$> pstringlit)
    <|> pws (TyAtom <$> patom)
-   <|> pws (pgrp (== Bracket Curly) (plink (TyBraces <$ pospc <*> optional (ptypeexpr topCI <* pospc))))
+   <|> pws (pgrp (== Bracket Curly) (TyBraces . join <$> optional (plink (id <$ pospc <*> optional (ptypeexpr topCI <* pospc)))))
   lhsstuff ci = (pws (TyVar <$> pnom) >>= lmore)
             <|> pws (tyMat <$> pgrp (== Bracket Square) (many (prow ptypeexpr)))
   lmore l = pcond
