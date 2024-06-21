@@ -62,6 +62,7 @@ data VOrH = Vertical | Horizontal
 data TypeExpr'
   = TyVar String -- might also be constants, e.g. Double
   | TyNum Int
+  | TyDouble Double
   | TyAtom String
   | TyApp TypeExpr [TypeExpr]
   -- | TyMat [[TypeExpr]]
@@ -87,6 +88,8 @@ tyMat exps = what $ go Vertical (go Horizontal id) exps
 tyUnaryOp :: UnOperator -> TypeExpr -> TypeExpr'
 tyUnaryOp UMinus (TyNum i :<=: src) = TyNum (negate i)
 tyUnaryOp UPlus  (TyNum i :<=: src) = TyNum i
+tyUnaryOp UMinus (TyDouble i :<=: src) = TyDouble (negate i)
+tyUnaryOp UPlus  (TyDouble i :<=: src) = TyDouble i
 tyUnaryOp op e = TyUnaryOp op e
 
 type Res = [Tok]
@@ -115,7 +118,9 @@ data Expr'
 toTypeExpr' :: Expr' -> Maybe TypeExpr'
 toTypeExpr' (Var x) = pure $ TyVar x
 toTypeExpr' (IntLiteral n) = pure $ TyNum n
+toTypeExpr' (DoubleLiteral d) = pure $ TyDouble d
 toTypeExpr' (StringLiteral s) = pure $ TyStringLiteral s
+toTypeExpr' (UnaryOp op x) = tyUnaryOp op <$> toTypeExpr x
 toTypeExpr' (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
 toTypeExpr' (Mat exps) = do
    exps <- traverse (traverse toTypeExpr) exps

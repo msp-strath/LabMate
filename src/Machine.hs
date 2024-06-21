@@ -1206,7 +1206,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
               pushProblems [Elab sol $ Await (conjunction [xstat, vstat]) (rhs -< no (vlen mctxt))]
           newProb . Done $ FreeVar x
           move winning
-    TypeExprTask LabMate (TyNum k) -> case tagEh mtype of
+    TypeExprTask whereAmI (TyNum k) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         (_, cs) <- constrain "IsOne" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
@@ -1250,7 +1250,46 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           pushProblems [cellProb]
           newProb . Elab sol $ Await (conjunction [rcs, ccs]) (mk Sone cellSol)
           run
+      Just (SQuantity, [genTy, dim]) -> do
+        newProb . Elab sol $ TypeExprTask whereAmI (TyDouble (fromIntegral k))
+        run
       _ -> debug ("Unresolved overloading of numerical constant " ++ show k)$ move worried
+    TypeExprTask whereAmI (TyDouble d) -> case tagEh mtype of
+      Just (SQuantity, [genTy, dim]) -> case d of
+        0 -> do
+          metaDefn sol (inContext mctxt $ lit (0::Double))
+          newProb $ Done nil
+          run
+        d -> do
+          (_ , cstat) <- constrain "dimensionless" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (mk SAbel genTy)
+            , lhs = dim
+            , rhs = nil
+            }
+          newProb . Elab sol $ Await cstat (inContext mctxt $ lit d)
+          run
+      Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+        | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
+          r <- invent r mctxt rowTy
+          c <- invent c mctxt colTy
+          (_, rcs) <- constrain "IsSingletonR" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (mk SList rowTy)
+            , lhs = mk Sone r
+            , rhs = rs
+            }
+          (_, ccs) <- constrain "IsSingletonC" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (mk SList colTy)
+            , lhs = mk Sone c
+            , rhs = cs
+            }
+          (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
+          pushProblems [cellProb]
+          newProb . Elab sol $ Await (conjunction [rcs, ccs]) (mk Sone cellSol)
+          run
+      _ -> debug ("Unresolved overloading of numerical constant " ++ show d ++ " at type " ++ show mtype) $ move worried
     TypeExprTask whereAmI (TyBinaryOp Plus x y) -> do
       -- TODO:
       -- 1. make sure `mtype` admits plus
