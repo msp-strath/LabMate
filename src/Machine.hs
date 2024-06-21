@@ -13,7 +13,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 
 -- mgen
-import TranslateContext
+import TranslateContext (TargetLang(..))
 import Translate
 
 import Bwd
@@ -249,6 +249,7 @@ data ElabTask where
     -> ElabTask
   ConstrainTask :: NATTY n => WhereAmI -> (String, Constraint) -> Term Chk ^ n -> ElabTask
   ElimTask :: NATTY n => Natty n -> (Term Chk ^ n, Type ^ n) -> [TypeExpr] -> ElabTask
+  AbelTask :: TypeExpr' -> ElabTask -- the problem type must be Abel genTy for some genTy
   Abandon :: ElabTask -> ElabTask
 deriving instance Show ElabTask
 
@@ -472,6 +473,11 @@ data Constraint = forall n . Constraint
   , mulIndexTypes :: (Type ^ n, Type ^ n, Type ^ n)
   , mulDataTypes :: (Type ^ S (S n), Type ^ S (S n), Type ^ S (S n))
   }
+  | forall n. ElemConstraint
+  { constraintCtx :: ConstraintContext n
+  , needle :: String
+  , hayStack :: Term Chk ^ n
+  }
 
 instance Show Constraint where
   show Constraint{..} = nattily (vlen constraintCtx) $ concat
@@ -487,6 +493,13 @@ instance Show Constraint where
     , ", mulDataTypes = ", show mulDataTypes
     , " }"
     ]
+  show ElemConstraint{..} = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", needle = ", needle
+    , ", hayStack = ", show hayStack
+    , " }"
+    ]
+
 
 mkConstraintType :: Type ^ n -> BOOL -> Type ^ n -> ConstraintType n
 mkConstraintType lty (Intg 1) rty = Hom lty
@@ -594,6 +607,14 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
               , constraintType = constraintType
               , lhs = lty
               , rhs = rty
+              }
+            metaDefn name stat
+          (SEnum, [ls], [rs]) -> do
+            (_, stat) <- constrain "dest" $ Constraint
+              { constraintCtx = constraintCtx
+              , constraintType = Hom (mk SList (atom SAtom))
+              , lhs = ls
+              , rhs = rs
               }
             metaDefn name stat
           (SQuantity, [lgenTy, ldim], [rgenTy, rdim]) -> do
@@ -709,6 +730,20 @@ solveConstraint name c@Multiplicable{mulDataTypes = (x, y, z), mulIndexTypes = (
            }
          metaDefn name (conjunction [xystat, zstat])
        _ -> debug ("Push Constraint n-1" ++ show c) $ push $ ConstraintFrame name c
+solveConstraint name c@ElemConstraint{..}
+  | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
+      (as, Any b) <- knownElems <$> normalise ctx (mk SList (atom SAtom)) hayStack
+      if needle `elem` as
+        then metaDefn name (I 1 :$ U :^ no Zy)
+        else if b then push $ ConstraintFrame name c else metaDefn name (I 0 :$ U :^ no Zy)
+  where
+    knownElems :: Term Chk ^ n -> ([String], Any)
+    knownElems t | Just ("", []) <- tagEh t = ([], Any False)
+    knownElems t | Just (Splus, [x, y]) <- tagEh t = knownElems x <> knownElems y
+                 | Just (Sone, [a]) <- tagEh t = case a of
+                     A s :$ _ :^ _ -> ([s], Any False)
+                     a -> ([], Any $ not (Set.null (dependencies a))) -- TODO: over approximation; will sometimes say maybe when it should say no
+    knownElems t = ([], Any $ not (Set.null (dependencies t))) -- TODO: over approximation; will sometimes say maybe when it should say no
 solveConstraint name c = debug ("Push Constraint n " ++ show c) $ push $ ConstraintFrame name c
 
 constrainEqualType :: TYPE -> TYPE -> Elab (Name, BOOL)
@@ -1315,6 +1350,18 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
             debugMatrix "Making hjux..." (mk Shjux xSol ySol)
           run
+    TypeExprTask LabMate (TyBraces ma) -> do
+      genTy <- invent "genTy" mctxt (atom SType)
+      (_ , cstat) <- constrain "abelType" $ Constraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , constraintType = Hom (atom SType)
+        , lhs = mk SAbel genTy
+        , rhs = mtype
+        }
+      (aSol, aProb) <- elab "abel" mctxt (mk SAbel genTy) (AbelTask <$> (fromMaybe (noSource $ TyNum 1) ma))
+      pushProblems [aProb]
+      newProb . Elab sol $ Await cstat aSol
+      run
     TypeExprTask LabMate (TyApp f args) -> do
       fTy <- invent "fTy" mctxt (atom SType)
       (fSol, fProb) <- elab "func" mctxt fTy (TypeExprTask LabMate <$> f)
@@ -1348,6 +1395,23 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         Nothing -> do
           newProb . Elab sol $ ElimTask n (tgt, tty) (x : xs)
           move worried
+    AbelTask t -> case t of
+      TyAtom a -> do
+        atoms <- invent "atoms" mctxt (mk SList SAtom)
+        (_ , cstat) <- constrain "listAtoms" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , lhs = tag SAbel [mk SEnum atoms]
+          , rhs = mtype
+          }
+        (_ , estat) <- constrain "elem" $ ElemConstraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , needle = a
+          , hayStack = atoms
+          }
+        newProb . Elab sol $ Await (conjunction [cstat, estat]) (inContext mctxt $ mk Sone (atom a))
+        run
+      _ -> move worried
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("LVar " ++ show meta) . ensureDeclaration $

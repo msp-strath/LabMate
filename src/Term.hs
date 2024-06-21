@@ -106,6 +106,9 @@ infixl 5 \\\
 (\\\) :: Context n -> (String, Type ^ n) -> Context (S n)
 ctx \\\ x = fmap wk <$> (ctx :# x)
 
+inContext :: Context n -> t ^ n -> t ^ n
+inContext _ x = x
+
 ---------------------------------------------
 cmpCtor :: Ctor s t -> Ctor s' t -> Ordering' (s == s')
 cmpCtor (A s) (A s') = fromOrd Refl $ compare s s'
