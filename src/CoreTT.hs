@@ -506,7 +506,10 @@ evalSubst (ctx :# (_, ty)) sig | Just sig <- ST $? sig = case split sig of
     sig <- evalSubst ctx sig
     ty  <- typeEval ty
     tm  <- checkNormEval ty (E $^ tm)
-    pure (ST $^ sig <&> (R $^ tm <&> ty))
+    let tm' = case E $? tm of
+                Just tm -> tm
+                Nothing -> R $^ tm <&> ty
+    pure (ST $^ sig <&> tm')
 
 evalSynthNmTy :: Term Syn ^ n -> TC n (Term Chk ^ n, NmTy ^ n)
 evalSynthNmTy tm = do

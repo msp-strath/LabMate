@@ -551,47 +551,25 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
     ty  <- normalise ctx (atom SType) ty
     lhs <- normalise ctx ty lhs
     rhs <- normalise ctx ty rhs
-    lhsFlexEh <- case lhs of
-       E :$ (M (x, n) :$ sig) :^ th
-         | Just meta@Meta{..} <- x `Map.lookup` ms
-         , Just Refl <- nattyEqEh n (vlen mctxt)
-         , Just Refl <- nattyEqEh n (vlen ctx) -> do
-           lhs' <- normalise mctxt mtype (nattily n (wrapMeta x))
-           pure (lhs == lhs')
-       _ -> pure False
-    rhsFlexEh <- case rhs of
-       E :$ (M (x, n) :$ sig) :^ th
-         | Just meta@Meta{..} <- x `Map.lookup` ms
-         , Just Refl <- nattyEqEh n (vlen mctxt)
-         , Just Refl <- nattyEqEh n (vlen ctx) -> do
-           rhs' <- normalise mctxt mtype (nattily n (wrapMeta x))
-           pure (rhs == rhs')
-       _ -> pure False
     case debug ("CONSTRAIN " ++ show lhs ++ " = " ++ show rhs) (lhs, rhs) of
       _ | debug "Checking syntactic equality?" (lhs == rhs) -> do
             debug ("Passed syn eq for " ++ show lhs ++ " =?= " ++ show rhs) $ metaDefn name (I 1 :$ U :^ no Zy)
       (E :$ (M (x, n) :$ sig) :^ th, t :^ ph)
         | Just meta@Meta{..} <- x `Map.lookup` ms
         , Hoping <- mstat
-        , lhsFlexEh
-        , Just Refl <- vlen mctxt `nattyEqEh` vlen ctx
-        , x `Set.notMember` dependencies t ->
-          case nattyEqEh n (vlen mctxt) of
-            Just Refl -> do
-              metaDefn x (t :^ ph)
+        , Right Refl <- idSubstEh sig
+        , Just ps <- thicken ph th
+        , x `Set.notMember` dependencies t -> do
+              metaDefn x (t :^ ps)
               metaDefn name (I 1 :$ U :^ no Zy)
-            _ -> error "constrain: different context lengths"
       (t :^ ph, E :$ (M (x, n) :$ sig) :^ th)
         | Just meta@Meta{..} <- x `Map.lookup` ms
         , Hoping <- mstat
-        , rhsFlexEh
-        , Just Refl <- vlen mctxt `nattyEqEh` vlen ctx
-        , x `Set.notMember` dependencies t ->
-          case nattyEqEh n (vlen mctxt) of
-            Just Refl -> do
-              metaDefn x (t :^ ph)
+        , Right Refl <- idSubstEh sig
+        , Just ps <- thicken ph th
+        , x `Set.notMember` dependencies t -> do
+              metaDefn x (t :^ ps)
               metaDefn name (I 1 :$ U :^ no Zy)
-            _ -> error "constrain: different context lengths"
       -- different atoms are never unifiable, raise the constraint as impossible
       _ | Just (s1, []) <- tagEh lhs
         , Just (s2, []) <- tagEh rhs
@@ -1208,7 +1186,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       move winning
     TypeExprTask whereAmI (TyVar x)
       | Just (xtm, xty) <- lookupInContext x mctxt -> do
-        (_, xstat) <- constrain "VarExpr" $ Constraint
+        (_, xstat) <- constrain "VarExprCtxt" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
           , constraintType = Hom (atom SType)
           , lhs = xty
@@ -1393,7 +1371,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb . Elab sol $ Await cs (ixKI mtype (lit s))
         run
       _ -> move worried
-    TypeExprTask whereAmI (TyJux dir x y) -> do
+    TypeExprTask whereAmI (TyJux dir x y) | whereAmI == MatLab -> do
       (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
       case dir of
         Vertical -> do
@@ -1471,7 +1449,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       newProb . Elab sol $ Await cstat tgt
       run
     ElimTask n (tgt, tty) (x : xs) -> nattyEqOi n (vlen mctxt) $ do
-      tty <- normalise mctxt (atom SType) tty
+      tty <- debug ("!!!ElimTask before x" ++ show tty ++ " for " ++ show x) $ normalise mctxt (atom SType) tty
       case debug ("!!!ElimTask x" ++ show tty ++ " for " ++ show x) $ tagEh tty of
         Just (SPi, [s, t]) | Just t <- lamEh t -> do
           (xSol, xProb) <- elab "arg" mctxt s (TypeExprTask LabMate <$> x)
@@ -1522,7 +1500,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       TyAtom a -> do
         newProb . Elab sol $ AbelTask (TyBraces (Just (noSource t)))
         run
-      t -> do
+      t -> debug ("Abeltask falling through: " ++ show t ++ " at type " ++ show mtype ++ " context " ++ show mctxt) $ do
         newProb . Elab sol $ (TypeExprTask LabMate t)
         run
     LHSTask lhs -> case lhs of
