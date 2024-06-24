@@ -1206,8 +1206,18 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       metaDefn sol $ mk SList (atom SChar) -< no (vlen mctxt)
       newProb $ Done nil
       move winning
-    TypeExprTask whereAmI (TyVar x) -> -- TODO: check whether `x` is already present in the mctxt, i.e. shadowing
-      findDeclaration (UserDecl Nothing x True [] False whereAmI) >>= \case
+    TypeExprTask whereAmI (TyVar x)
+      | Just (xtm, xty) <- lookupInContext x mctxt -> do
+        (_, xstat) <- constrain "VarExpr" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , lhs = xty
+          , rhs = mtype
+          }
+        pushProblems [Elab sol $ Await xstat xtm]
+        newProb $ Done nil
+        run
+      | otherwise -> findDeclaration (UserDecl Nothing x True [] False whereAmI) >>= \case
         Nothing -> do
           newProb . Done $ yikes (T $^ atom "OutOfScope" <&> atom x)
           cry sol
@@ -1234,7 +1244,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
                 }
               pushProblems [Elab sol $ Await (conjunction [xstat, vstat]) (rhs -< no (vlen mctxt))]
           newProb . Done $ FreeVar x
-          move winning
+          run
     TypeExprTask whereAmI (TyNum k) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         (_, cs) <- constrain "IsOne" $ Constraint

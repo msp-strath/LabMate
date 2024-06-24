@@ -12,6 +12,7 @@ import Hide
 import Bwd
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Control.Arrow (first)
 
 import Debug.Trace
 import Data.List (intercalate)
@@ -96,6 +97,8 @@ type NmTy = Type
 type Norm = Term
 
 ---------------------------------------------
+-- TODO: refine the type to distinguish strings chosen by the user
+-- from strings chosen by the elaborator
 type Context n = Vec n (String, Type ^ n)
 
 emptyContext :: Context Z
@@ -108,6 +111,15 @@ ctx \\\ x = fmap wk <$> (ctx :# x)
 
 inContext :: Context n -> t ^ n -> t ^ n
 inContext _ x = x
+
+lookupInContext :: String -> Context n -> Maybe (Term Chk ^ n, Type ^ n)
+lookupInContext x = go
+  where
+    go :: Vec i (String, Type ^ n) -> Maybe (Term Chk ^ i, Type ^ n)
+    go VN = Nothing
+    go (cs :# (s, t))
+      | s == x = Just (evar (Su (no (vlen cs))), t)
+      | otherwise = first wk <$> go cs
 
 ---------------------------------------------
 cmpCtor :: Ctor s t -> Ctor s' t -> Ordering' (s == s')
