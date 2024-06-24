@@ -1056,8 +1056,9 @@ run = prob >>= \case
     pushProblems ps
     newProb p
     run
-  -- _ -> trace ("Falling through. Problem = " ++ show (problem ms)) $ move
-  _ -> move worried
+  Done _ -> move winning
+  p -> trace ("Falling through. Problem = " ++ show p) $ move worried
+ -- _ -> move worried
 
 runDirective :: ResponseLocation -> Dir' -> Elab ()
 runDirective rl (dir :<=: src, body) = do
@@ -1281,7 +1282,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       Just (SQuantity, [genTy, dim]) -> do
         newProb . Elab sol $ TypeExprTask whereAmI (TyDouble (fromIntegral k))
         run
-      _ -> debug ("Unresolved overloading of numerical constant " ++ show k)$ move worried
+      _ -> debug ("Unresolved overloading of numerical constant " ++ show k) $ move worried
     TypeExprTask whereAmI (TyDouble d) -> case tagEh mtype of
       Just (SQuantity, [genTy, dim]) -> case d of
         0 -> do
@@ -1511,7 +1512,9 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       TyAtom a -> do
         newProb . Elab sol $ AbelTask (TyBraces (Just (noSource t)))
         run
-      t -> newProb . Elab sol $ (TypeExprTask LabMate t)
+      t -> do
+        newProb . Elab sol $ (TypeExprTask LabMate t)
+        run
     LHSTask lhs -> case lhs of
       LVar x -> do
         (x, ty) <- debug ("LVar " ++ show meta) . ensureDeclaration $
@@ -1664,7 +1667,7 @@ cleanup mood = do
 diagnosticRun :: Elab ()
 diagnosticRun = llup >>= \case
   Just fr -> case fr of
-    Diagnostic (n, dent) dd-> do
+    Diagnostic (n, dent) dd -> do
       nt <- gets nonceTable
       msg <- msg dent dd
       traverse_ push [Source (n, Hide msg), fr]
