@@ -531,6 +531,29 @@ normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
   Left err -> nattily (vlen ctx) $ error . concat $ ["normalise: TC error [", err, "] for ", show tm, " :: ", show ty]
   Right tm -> pure tm
 
+normalIdSubst :: Context n -> Elab (Subst n ^ n)
+normalIdSubst ctx = elabTC ctx (evalSubst (fmap (//^ (sig :^ th)) <$> ctx) (sig :^ th)) >>= \case
+    Left err -> error $ "normalIdSubst: " ++ err
+    Right sig -> pure sig
+  where
+    n = vlen ctx
+    sig = idSubst n
+    th = io n
+
+flexEh :: Norm Chk ^ m -> Elab (Maybe (Name, Natty ^ m))
+flexEh (E :$ (M (x, k) :$ sig) :^ th) = do
+   ms <- gets metaStore
+   case  x `Map.lookup` ms of
+     Just meta@Meta{..} | Hoping <- mstat -> do
+       idSub :^ ph <- normalIdSubst mctxt
+       case (nattyEqEh k (bigEnd ph), nattyEqEh (weeEnd th) (weeEnd ph)) of
+         (Just Refl, Just Refl)
+           | sig == idSub
+           , Just ps <- thicken _ _ -> pure (Just (x, k :^ ps))
+         _ -> pure Nothing
+     _ -> pure Nothing
+flexEh _ = pure Nothing
+
 constraintStatus :: Name -> Elab BOOL
 constraintStatus name = normalise VN (atom STwo) (wrapMeta name)
 
