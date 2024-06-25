@@ -1121,9 +1121,12 @@ runDirective rl (dir :<=: src, body) = do
       _ <- debug "Elaborating unit decl" $ pure True
 
       genTy <- invent "genTy" VN (atom SType)
-      dim <- invent "dimension" VN (mk SAbel genTy)
+      let abelTy = mk SAbel genTy :: TYPE
+      dim <- invent "dimension" VN abelTy
       let qty = mk SQuantity genTy dim :: TYPE
       let mty = singMatTy qty
+      -- let cellTy = mk SQuantity (wk (wk genTy)) (tag Splus [wk (wk dim), tag Splus [evar 0, tup [lit (-1 :: Int), evar 1]]]) :: Term Chk ^ S (S Z)
+      -- let mty = mk SMatrix abelTy abelTy (lam "i" $ lam "j" $ cellTy) (tag Sone [nil]) (tag Sone [nil])
       _ <- debug "Constructing Unit type " $ pure True
       (ltm, lhsProb) <- elab "unitFakeLHS" emptyContext (mk SDest mty) (LHSTask . LVar <$> u)
       (tySol, tyProb) <- elab "unitType" emptyContext (atom SType) (TypeExprTask LabMate <$> ty)
