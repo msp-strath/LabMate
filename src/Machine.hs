@@ -540,7 +540,10 @@ normalIdSubst ctx = elabTC ctx (evalSubst (fmap (//^ (sig :^ th)) <$> ctx) (sig 
     sig = idSubst n
     th = io n
 
-flexEh :: Norm Chk ^ m -> Elab (Maybe (Name, Natty ^ m))
+data FlexEh (m :: Nat) where
+  FlexEh :: Name -> Natty k -> n <= k -> n <= m -> FlexEh m
+
+flexEh :: Norm Chk ^ m -> Elab (Maybe (FlexEh m))
 flexEh (E :$ (M (x, k) :$ sig) :^ th) = do
    ms <- gets metaStore
    case  x `Map.lookup` ms of
@@ -549,7 +552,7 @@ flexEh (E :$ (M (x, k) :$ sig) :^ th) = do
        case (nattyEqEh k (bigEnd ph), nattyEqEh (weeEnd th) (weeEnd ph)) of
          (Just Refl, Just Refl)
            | sig == idSub
-           , Just ps <- thicken _ _ -> pure (Just (x, k :^ ps))
+               -> pure (Just (FlexEh x k ph th))
          _ -> pure Nothing
      _ -> pure Nothing
 flexEh _ = pure Nothing
@@ -573,25 +576,23 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
     ms  <- gets metaStore
     ty  <- normalise ctx (atom SType) ty
     lhs <- normalise ctx ty lhs
+    lhsFlexEh <- flexEh lhs
     rhs <- normalise ctx ty rhs
+    rhsFlexEh <- flexEh rhs
     case debug ("CONSTRAIN " ++ show lhs ++ " = " ++ show rhs) (lhs, rhs) of
       _ | debug "Checking syntactic equality?" (lhs == rhs) -> do
             debug ("Passed syn eq for " ++ show lhs ++ " =?= " ++ show rhs) $ metaDefn name (I 1 :$ U :^ no Zy)
-      (E :$ (M (x, n) :$ sig) :^ th, t :^ ph)
-        | Just meta@Meta{..} <- x `Map.lookup` ms
-        , Hoping <- mstat
-        , Right Refl <- idSubstEh sig
+      (_, t :^ ph)
+        | Just (FlexEh x k ph' th) <- lhsFlexEh
         , Just ps <- thicken ph th
         , x `Set.notMember` dependencies t -> do
-              metaDefn x (t :^ ps)
+              metaDefn x (t :^ (ps -< ph'))
               metaDefn name (I 1 :$ U :^ no Zy)
-      (t :^ ph, E :$ (M (x, n) :$ sig) :^ th)
-        | Just meta@Meta{..} <- x `Map.lookup` ms
-        , Hoping <- mstat
-        , Right Refl <- idSubstEh sig
+      (t :^ ph, _)
+        | Just (FlexEh x k ph' th) <- rhsFlexEh
         , Just ps <- thicken ph th
         , x `Set.notMember` dependencies t -> do
-              metaDefn x (t :^ ps)
+              metaDefn x (t :^ (ps -< ph'))
               metaDefn name (I 1 :$ U :^ no Zy)
       -- different atoms are never unifiable, raise the constraint as impossible
       _ | Just (s1, []) <- tagEh lhs
