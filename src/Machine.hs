@@ -540,8 +540,21 @@ normalIdSubst ctx = elabTC ctx (evalSubst (fmap (//^ (sig :^ th)) <$> ctx) (sig 
     sig = idSubst n
     th = io n
 
+-- we have successfully detected that one side of the equation is
+-- using a flex variable, pack the data to show that; `m` is the scope
+-- of the constraint
 data FlexEh (m :: Nat) where
-  FlexEh :: Name -> Natty k -> n <= k -> n <= m -> FlexEh m
+  FlexEh
+    :: Name     -- the name of the flex variable
+    -> Natty k  -- the scope of the flex variable
+    -> n <= k   -- `n` is the support of the id subst at which the
+                -- flex variable is used; eta expansion at type `One`
+                -- can make `n` less than `k`
+    -> n <= m   -- the thinning for the flex variable's permitted
+                -- dependencies; the same eta expansion on the other
+                -- side of the equation will eliminate occurences of
+                -- variables in `k`, but not `n`
+    -> FlexEh m
 
 flexEh :: Norm Chk ^ m -> Elab (Maybe (FlexEh m))
 flexEh (E :$ (M (x, k) :$ sig) :^ th) = do
