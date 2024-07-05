@@ -24,6 +24,7 @@ import Parse.Matlab
 import Syntax
 import Hide
 import CoreTT
+import NormalForm
 import Term
 import MagicStrings
 import Data.Foldable (traverse_)
@@ -33,9 +34,9 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Control.Monad.Reader
 
-debug = trace
+debug = const id --trace
 debugCatch = const id --trace
-debugMatrix = trace
+debugMatrix = const id --trace
 
 type Elab = State MachineState
 
@@ -1729,7 +1730,7 @@ diagnosticRun = llup >>= \case
           [ Tok "\n" Ret dump
           , spc dent, sym "%<{", Tok "\n" Ret dump
           , spc dent, non un, spc 1, sym "=", spc 1, Tok "1" Dig dump, sym ";"
-                    , spc 1, sym "%", spc 1, sym "::" , spc 1, non tn
+                    --, spc 1, sym "%", spc 1, sym "::" , spc 1, non tn
                     , Tok "\n" Ret dump
           , spc dent, sym "%<}"
           ]
@@ -1759,8 +1760,64 @@ unelabType ty | Just ct <- tagEh ty = case ct of
         let sig = subSnoc (sub0 (R $^ nil <&> rowTy)) (R $^ nil <&> colTy)
         unelabType =<< normalise emptyContext (atom SType) (cellTy //^ sig)
   (SAbel, [ty]) | Just (SOne, []) <- tagEh ty -> pure [nom "int"]
+  (SEnum, [as]) -> do
+    tas <- unelabTerm (mk SList $ atom SAtom) as
+    pure $ [sym "Enum", spc 1] ++ tas
+  (SQuantity, [enumTy, exp]) -> do
+        tenum <- unelabType enumTy
+        texp <- unelabTerm (mk SAbel enumTy) exp
+        pure $ [sym "Quantity", spc 1, sym "("] ++ tenum ++ [sym ")" , spc 1] ++ texp
   _ -> pure [sym $ show ty]
 unelabType ty = pure [sym $ show ty]
+
+unelabTerm :: TYPE -> TERM -> Elab [Tok]
+unelabTerm ty tm | Just ty <- tagEh ty = case ty of
+  (SList, [genTy]) -> do
+    elabTC VN (termToNFList genTy tm) >>= \case
+      Left err -> error err
+      Right xs -> go genTy xs False
+    where
+      go :: TYPE -> NFList Z
+         -> Bool -- are we in the middle of printing rights
+         -> Elab [Tok]
+      go ty [] True = pure [sym "]"]
+      go ty [] False = pure []
+      go ty [Left x] rightEh = do
+        ttm <- unelabTerm ty (E $^ x)
+        pure $ (if rightEh then [sym "]"] else []) ++ ttm
+      go ty (Left x : xs) rightEh = do
+        ttm <- unelabTerm ty (E $^ x)
+        xs <- go ty xs False
+        pure $ (if rightEh then [sym "]"] else []) ++ ttm ++ [ sym "++"] ++ xs
+      go ty (Right x : xs) rightEh = do
+        ttm <- unelabTerm ty x
+        xs <- go ty xs True
+        pure $ (if rightEh then [sym "," , spc 1] else [sym "["]) ++ ttm ++ xs
+  (SAbel, [genTy]) -> case tupEh tm of
+    (Just [Intg 1, t]) -> unelabTerm (mk SAbel genTy) t
+    (Just [Intg n, t]) -> (++ [sym "^", Tok (show n) Dig dump]) <$> unelabTerm (mk SAbel genTy) t
+    _ | Just (Sone, [g]) <- tagEh tm -> do
+          g <- unelabTerm genTy g
+          pure $ [sym "{"] ++ g ++ [sym "}"]
+    _ | Just (Splus, [x, y]) <- tagEh tm -> do
+          x <- unelabTerm (mk SAbel genTy) x
+          case tupEh y of
+            Just [Intg n, y] | n < 0 -> do
+               y <- unelabTerm (mk SAbel genTy) (tup [lit (-n), y])
+               pure $ x ++ [sym "/"] ++ y
+            _ -> do
+               y <- unelabTerm (mk SAbel genTy) y
+               pure $ x ++ [sym "*"] ++ y
+    _ | Intg 0 <- tm -> pure [sym "{}"]
+    _ -> pure [sym $ show tm]
+  (SEnum, [as]) | Intg i <- tm -> do
+      as <- elabTC VN (termToNFList (atom SAtom) as)
+      case as of
+        Left err -> error err
+        Right as -> case indexInEnum i as of
+          Just x -> unelabTerm (atom SAtom) x
+          Nothing -> pure [sym $ show tm]
+  _ -> pure [sym $ show tm]
 
 diagnosticMove :: ForkCompleteStatus -> Elab ()
 diagnosticMove stat = pull >>= \case

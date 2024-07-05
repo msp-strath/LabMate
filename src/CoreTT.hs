@@ -12,7 +12,7 @@ import Term
 
 import Debug.Trace
 
-track = trace
+track = const id --trace
 
 data Status = Crying | Waiting | Hoping | Abstract | ProgramVar
   deriving (Ord, Eq, Show)
@@ -537,6 +537,11 @@ findInEnum x ts = case (tagEh x, ts) of
     (m, ts) <- findInEnum y ts
     pure (n + m, ts)
   _ -> Nothing
+
+indexInEnum :: Integer -> NFList n -> Maybe (Term Chk ^ n)
+indexInEnum 0 (Right x: _) = Just x
+indexInEnum n (_ : xs) = indexInEnum (n - 1) xs
+indexInEnum _ _ = Nothing
 
 termToNFList
   :: Type ^ n     -- type of generators
