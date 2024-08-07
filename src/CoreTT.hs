@@ -10,6 +10,8 @@ import NormalForm
 import MagicStrings
 import Term
 
+import MissingLibrary
+
 import Debug.Trace
 
 track = const id --trace
@@ -422,7 +424,7 @@ checkEval ty tm = do
   checkNormEval ty tm
 
 typeEval :: Type ^ n -> TC n (NmTy ^ n)
-typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
+typeEval ty | Just ty <- tagEh ty = withScope $ let n = natty in case ty of
   (x, []) | x `elem` [SAtom, SOne, STwo, SType, SChar] -> pure $ atom x
   (SAbel, [genTy]) -> mk SAbel <$> typeEval genTy
   (SList, [genTy]) -> mk SList <$> typeEval genTy
@@ -433,11 +435,16 @@ typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
       mk SSig <$> typeEval s <*> (lam x <$> under (x, s) (typeEval t'))
   (SMatrix, [rowTy, colTy, cellTy, rs, cs])
     | Just (r, cellTy) <- lamNameEh cellTy, Just (c,cellTy) <- lamNameEh cellTy -> do
-      mk SMatrix <$> typeEval rowTy
-                 <*> typeEval colTy
-                 <*> (lam r <$> under (r, rowTy) (lam c <$> under (c, wk colTy) (typeEval cellTy)))
-                 <*> checkEval (mk SList rowTy) rs
-                 <*> checkEval (mk SList colTy) cs
+      rowTy <- typeEval rowTy
+      colTy <- typeEval colTy
+      rs <- checkEval (mk SList rowTy) rs
+      cs <- checkEval (mk SList colTy) cs
+      cellTy <- under (r, rowTy) (under (c, wk colTy) (typeEval cellTy))
+      case (listAllEqual rs, listAllEqual cs) of
+        (VaryOne r rn, VaryOne c cn) -> pure $ mk SMatrix SOne SOne (konst $ konst $ cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) (intToTerm rn) (intToTerm cn)
+        (VaryOne r rn, _) -> pure $ mk SMatrix SOne colTy (konst $ lam c $ cellTy //^ subSnoc (subSnoc (wk (idSubst n :^ io n)) (wk $ R $^ r <&> rowTy)) (var 0)) (intToTerm rn) cs
+        (_, VaryOne c cn) -> pure $ mk SMatrix SOne colTy (lam r $ konst $ cellTy //^ sub0 (wk $ R $^ c <&> colTy)) rs (intToTerm cn)
+        _ -> pure $ mk SMatrix rowTy colTy (lam r $ lam c $ cellTy) rs cs
   (SDest, [genTy]) -> mk SDest <$> typeEval genTy
   (SQuantity, [genTy, t]) -> mk SQuantity <$> typeEval genTy <*> checkEval (mk SAbel genTy) t
   (ty, _) -> fail $ "typeEval: unknown type " ++ ty
@@ -556,6 +563,17 @@ termToNFList ty tm
   | Just (Sone, [t]) <- tagEh tm = checkEval ty t >>= \r -> pure [Right r]
   | Just (Splus, [s, t]) <- tagEh tm = (++) <$> termToNFList ty s <*> termToNFList ty t
   | otherwise = error "termToNFList: no"
+
+-- Precondition: t has been fully normalised at list type
+listAllEqual :: Norm Chk ^ n -> Varying (Term Chk ^ n)
+listAllEqual t = case tagEh t of
+  Just (Sone, [t]) -> VaryOne t 1
+  Just (Splus, [s, t]) -> listAllEqual s <> listAllEqual t
+  Just ("", []) -> VaryNone
+  _ -> VaryTons
+
+intToTerm :: NATTY n => Integer -> Norm Chk ^ n
+intToTerm i = nfListToTerm (replicate (fromInteger i) (Right nil))
 
 termToNFAbel
   :: Type ^ n     -- type of generators

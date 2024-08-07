@@ -234,6 +234,9 @@ lam :: String -> Term Chk ^ S n -> Term Chk ^ n
 lam _ (t :^ No th) = K t :^ th
 lam x (t :^ Su th) = L (Hide x) t :^ th
 
+konst :: Term Chk ^ n -> Term Chk ^ n
+konst = ixmap K
+
 lamEh :: Term s ^ n -> Maybe (Term Chk ^ S n)
 lamEh = (snd <$>) . lamNameEh
 

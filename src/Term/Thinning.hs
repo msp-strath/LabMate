@@ -4,6 +4,8 @@ module Term.Thinning where
 import Term.Indexed
 import Term.Natty
 
+import MissingLibrary
+
 -- thinnings
 data (<=) :: Nat -> Nat -> * where
   No :: n <= m ->   n <= S m
@@ -110,6 +112,8 @@ cmpCov u u' = case cmpThin (covl u) (covl u') of
 data (^) :: (Nat -> *) -> Nat -> * where
   (:^) :: p n -> n <= m -> p ^ m
 
+instance IxFunctor (^) where
+  ixmap f (t :^ th) = f t :^ th
 
 scopeOf :: p ^ n -> Natty n
 scopeOf (_ :^ th) = bigEnd th
