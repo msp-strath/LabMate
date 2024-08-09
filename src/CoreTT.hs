@@ -659,7 +659,10 @@ subtypeEh got want = withScope $
       | Just (x, gt') <- lamNameEh gt, Just wt' <- lamEh wt -> do
         subtypeEh gs ws
         under (x, gs) $ subtypeEh gt' wt'
-    (_, Just (SOne, [])) -> pure ()
+    (Just (SAbel, [g]), Just (SAbel, [g'])) ->
+      subtypeEh g g'
+    (Just (SOne, []), Just (SAbel, [g])) -> pure () -- morally the unit type is Abel (Enum [])
+    -- (_, Just (SOne, [])) -> pure () -- might be dangerous
     _ -> guard $ got == want
 
 etaExpand

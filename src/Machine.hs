@@ -225,6 +225,8 @@ worried = Winning False mempty
 data WhereAmI = MatLab | LabMate
   deriving (Show, Eq, Ord)
 
+data SynthesisMode = FindSimplest | EnsureCompatability
+
 data DeclarationType a
   = UserDecl
   { varTy :: a             -- (eventual) type
@@ -240,7 +242,7 @@ data DeclarationType a
 
 data ElabTask where
   TensorTask :: TensorType' -> ElabTask
-  TypeExprTask :: WhereAmI -> TypeExpr' -> ElabTask
+  TypeExprTask :: WhereAmI -> SynthesisMode -> TypeExpr' -> ElabTask
   LHSTask :: LHS' -> ElabTask
   ExprTask :: WhereAmI -> Expr' -> ElabTask
   Await :: NATTY n
@@ -479,6 +481,13 @@ data Constraint = forall n . Constraint
   , needle :: String
   , hayStack :: Term Chk ^ n
   }
+  | forall n . JoinConstraint
+  { constraintCtx :: ConstraintContext n
+  , leftType :: Term Chk ^ n
+  , rightType :: Term Chk ^ n
+  , joinType :: Term Chk ^ n
+  }
+  | DummyConstraint
 
 instance Show Constraint where
   show Constraint{..} = nattily (vlen constraintCtx) $ concat
@@ -500,6 +509,14 @@ instance Show Constraint where
     , ", hayStack = ", show hayStack
     , " }"
     ]
+  show JoinConstraint{..} = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", leftType = ", show leftType
+    , ", rightType = ", show rightType
+    , ", joinType = ", show joinType
+    , " }"
+    ]
+  show DummyConstraint = "DummyConstraint"
 
 
 mkConstraintType :: Type ^ n -> BOOL -> Type ^ n -> ConstraintType n
@@ -773,6 +790,45 @@ solveConstraint name c@Multiplicable{mulDataTypes = (x, y, z), mulIndexTypes = (
                    else push $ ConstraintFrame name c
            _ -> push $ ConstraintFrame name c
        _ -> debug ("Push Constraint n-1" ++ show c) $ push $ ConstraintFrame name c
+solveConstraint name c@JoinConstraint{..}
+  | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
+      leftType <- normalise ctx (atom SType) leftType
+      rightType <- normalise ctx (atom SType) rightType
+      joinType <- normalise ctx (atom SType) joinType
+      case (tagEh leftType, tagEh rightType, tagEh joinType) of
+        (Just (SOne, []), _ , _) -> do
+          (_, rjstat) <- constrain "leftOne" $ Constraint
+            { constraintCtx = constraintCtx
+            , constraintType = Hom (atom SType)
+            , lhs = rightType
+            , rhs = joinType
+            }
+          metaDefn name rjstat
+        (_, Just (SOne, []), _) -> do
+          (_, ljstat) <- constrain "rightOne" $ Constraint
+            { constraintCtx = constraintCtx
+            , constraintType = Hom (atom SType)
+            , lhs = leftType
+            , rhs = joinType
+            }
+          metaDefn name ljstat
+        (_, _, Just (SOne, [])) -> do -- if join is least, both left and right must be least
+          (_, lstat) <- constrain "joinOne" $ Constraint
+            { constraintCtx = constraintCtx
+            , constraintType = Hom (atom SType)
+            , lhs = leftType
+            , rhs = joinType
+            }
+          (_, rstat) <- constrain "joinOne" $ Constraint
+            { constraintCtx = constraintCtx
+            , constraintType = Hom (atom SType)
+            , lhs = rightType
+            , rhs = joinType
+            }
+          metaDefn name (conjunction [lstat, rstat])
+        
+        _ -> push $ ConstraintFrame name JoinConstraint{..}
+
 solveConstraint name c@ElemConstraint{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
       (as, Any b) <- knownElems <$> normalise ctx (mk SList (atom SAtom)) hayStack
@@ -1366,18 +1422,23 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       -- scalar * mx, mx * scalar, mx * mx
       -- (do we need two phase commit to metastore, local metastores?)
       rowTy <- invent "rowType" mctxt (atom SType)
-      midTy <- invent "middleType" mctxt (atom SType)
+      leftMidTy <- invent "middleTypeL" mctxt (atom SType)
+      rightMidTy <- invent "middleTypeR" mctxt (atom SType)
+      joinMidTy <- invent "middleTypeJ" mctxt (atom SType)
       colTy <- invent "colType" mctxt (atom SType)
 
       rx <- invent "rowX" mctxt (mk SList rowTy)
-      cxry <- invent "colXrowY" mctxt (mk SList midTy)
+      leftcxry <- invent "colXrowY" mctxt (mk SList leftMidTy)
+      rightcxry <- invent "colXrowY" mctxt (mk SList rightMidTy)
       cy <- invent "colY" mctxt (mk SList colTy)
 
-      cellXTy <- invent "cellX" (mctxt \\\ ("i", rowTy) \\\ ("j", wk midTy)) (atom SType)
-      cellYTy <- invent "cellY" (mctxt \\\ ("j'", midTy) \\\ ("k", wk colTy)) (atom SType)
+      cellXTy <- invent "cellX" (mctxt \\\ ("i", rowTy) \\\ ("j", wk leftMidTy)) (atom SType)
+      cellYTy <- invent "cellY" (mctxt \\\ ("j'", rightMidTy) \\\ ("k", wk colTy)) (atom SType)
 
-      let xTy = mk SMatrix rowTy midTy (lam "i" . lam "j" $ cellXTy) rx cxry
-      let yTy = mk SMatrix midTy colTy (lam "j'" . lam "k" $ cellYTy) cxry cy
+
+      let xTy = mk SMatrix rowTy leftMidTy (lam "i" . lam "j" $ cellXTy) rx leftcxry
+      let yTy = mk SMatrix rightMidTy colTy (lam "j'" . lam "k" $ cellYTy) rightcxry cy
+
       -- 1. Invent the cell type for the result
       cellZTy <- invent "cellZ" (mctxt \\\ ("i", rowTy) \\\ ("k", wk colTy)) (atom SType)
       -- 2. Construct the matrix type for the result
@@ -1389,17 +1450,26 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         , lhs = zTy
         , rhs = mtype
         }
+
+      (_ , jc) <- constrain "middleJoins" $ JoinConstraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , leftType = leftMidTy
+        , rightType = rightMidTy
+        , joinType = joinMidTy
+        }
+      middle <- invent "middle" mctxt joinMidTy
       -- 4. Switch to the problem of ensuring the cell types are compatible
-      let mulConstraint = ("ZMultiplicable", Multiplicable
+      let mulConstraint = ("ZMultiplicable", DummyConstraint)
+      {-let mulConstraint = ("ZMultiplicable", Multiplicable
             { constraintCtx = fmap Hom <$> mctxt
             , mulIndexTypes = (rowTy, midTy, colTy)
             , mulDataTypes = (cellXTy, cellYTy, cellZTy)
-            })
+            })-}
       (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask whereAmI <$> x)
       (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask whereAmI <$> y)
       (zSol, zProb) <- elab' "mulZRet" mctxt zTy (ConstrainTask whereAmI mulConstraint (E $^ MX $^ (R $^ xSol <&> xTy) <&> (R $^ ySol <&> yTy)))
       pushProblems [xProb, yProb, zProb]
-      newProb . Elab sol $ Await zstat zSol
+      newProb . Elab sol $ Await (conjunction [jc, zstat]) zSol
       run
     TypeExprTask whereAmI (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
