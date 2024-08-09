@@ -279,7 +279,7 @@ unnil elty xs = withScope $ propEh elty >>= \case
     _ -> fail "unnil: non-empty list"
 
 singMatTy :: Type ^ n -> Type ^ n
-singMatTy c = nattily (scopeOf c) $ mk SMatrix SOne SOne (konst $ konst $ c) (tag Sone [nil]) (tag Sone [nil])
+singMatTy c = nattily (scopeOf c) $ mk SMatrix SOne SOne (lam "i" $ lam "j" $ wk (wk c)) (tag Sone [nil]) (tag Sone [nil])
 
 prefixEh
   :: Type ^ n
@@ -412,7 +412,7 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
   -- TODO: try harder to see whether there is any work to do
   (SQuantity, [genTy, dim]) -> pure tm
   (t, _) -> fail $ "checkNormEval: unknown type " ++ t
-checkNormEval wantTy tm = withScope $ fail $ "checkNormEval: no" ++ show wantTy ++ " " ++ show tm
+checkNormEval _ _ = fail "checkNormEval: no"
 
 checkEval
   :: Type ^ n {- Ty -}
@@ -443,7 +443,7 @@ typeEval ty | Just ty <- tagEh ty = withScope $ let n = natty in case ty of
       case (listAllEqual rs, listAllEqual cs) of
         (VaryOne r rn, VaryOne c cn) -> pure $ mk SMatrix SOne SOne (konst $ konst $ cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) (intToTerm rn) (intToTerm cn)
         (VaryOne r rn, _) -> pure $ mk SMatrix SOne colTy (konst $ lam c $ cellTy //^ subSnoc (subSnoc (wk (idSubst n :^ io n)) (wk $ R $^ r <&> rowTy)) (var 0)) (intToTerm rn) cs
-        (_, VaryOne c cn) -> pure $ mk SMatrix rowTy SOne (lam r $ konst $ cellTy //^ sub0 (wk $ R $^ c <&> colTy)) rs (intToTerm cn)
+        (_, VaryOne c cn) -> pure $ mk SMatrix SOne colTy (lam r $ konst $ cellTy //^ sub0 (wk $ R $^ c <&> colTy)) rs (intToTerm cn)
         _ -> pure $ mk SMatrix rowTy colTy (lam r $ lam c $ cellTy) rs cs
   (SDest, [genTy]) -> mk SDest <$> typeEval genTy
   (SQuantity, [genTy, t]) -> mk SQuantity <$> typeEval genTy <*> checkEval (mk SAbel genTy) t
