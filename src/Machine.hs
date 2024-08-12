@@ -225,7 +225,8 @@ worried = Winning False mempty
 data WhereAmI = MatLab | LabMate
   deriving (Show, Eq, Ord)
 
-data SynthesisMode = FindSimplest | EnsureCompatability
+data SynthesisMode = FindSimplest | EnsureCompatibility
+  deriving (Eq, Show)
 
 data DeclarationType a
   = UserDecl
@@ -487,6 +488,22 @@ data Constraint = forall n . Constraint
   , rightType :: Term Chk ^ n
   , joinType :: Term Chk ^ n
   }
+  | forall n . SubtypingConstraint
+  { constraintCtx   :: ConstraintContext n
+  , gotType :: Term Chk ^ n
+  , wantType :: Term Chk ^ n
+  }
+  | forall n . HeaderCompatibility
+  { constraintCtx :: ConstraintContext n
+  , leftType :: Term Chk ^ n
+  , rightType :: Term Chk ^ n
+  , joinType :: Term Chk ^ n
+  , joinStatus :: BOOL
+  , leftList :: Term Chk ^ n
+  , rightList :: Term Chk ^ n
+  , joinElement :: Term Chk ^ n
+  }
+
   | DummyConstraint
 
 instance Show Constraint where
@@ -514,6 +531,23 @@ instance Show Constraint where
     , ", leftType = ", show leftType
     , ", rightType = ", show rightType
     , ", joinType = ", show joinType
+    , " }"
+    ]
+  show SubtypingConstraint{..} = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", gotType = ", show gotType
+    , ", wantType = ", show wantType
+    , " }"
+    ]
+  show HeaderCompatibility{..} = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", leftType = ", show leftType
+    , ", rightType = ", show rightType
+    , ", joinType = ", show joinType
+    , ", joinStatus = ", show joinStatus
+    , ", leftList = ", show leftList
+    , ", rightList = ", show rightList
+    , ", joinElement = ", show joinElement
     , " }"
     ]
   show DummyConstraint = "DummyConstraint"
@@ -738,6 +772,120 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
        debug ("Push Constraint n-3 " ++ show c) $ push $ ConstraintFrame name c
   _ -> do
     debug ("Push Constraint n-2 " ++ show c) $ push $ ConstraintFrame name c
+solveConstraint name c@SubtypingConstraint{..} = case (traverse (traverse isHom) constraintCtx) of
+  Just ctx -> let n = vlen constraintCtx in nattily n $ do
+    ms  <- gets metaStore
+    gotType <- normalise ctx (atom SType) gotType
+    gotTypeFlexEh <- flexEh gotType
+    wantType <- normalise ctx (atom SType) wantType
+    wantTypeFlexEh <- flexEh wantType
+    case debug ("CONSTRAIN subtype " ++ show gotType ++ " = " ++ show wantType) (gotType, wantType) of
+      _ | debug "Checking syntactic equality?" (gotType == wantType) -> do
+            debug ("Passed syn eq for " ++ show gotType ++ " =?= " ++ show wantType) $ metaDefn name (I 1 :$ U :^ no Zy)
+      (_, t :^ ph) -- FIXME: this is NOT CORRECT
+        | Just (FlexEh x k ph' th) <- gotTypeFlexEh
+        , Just ps <- thicken ph th
+        , x `Set.notMember` dependencies t -> do
+              metaDefn x (t :^ (ps -< ph'))
+              metaDefn name (I 1 :$ U :^ no Zy)
+      (t :^ ph, _) -- FIXME: this is NOT CORRECT
+        | Just (FlexEh x k ph' th) <- wantTypeFlexEh
+        , Just ps <- thicken ph th
+        , x `Set.notMember` dependencies t -> do
+              metaDefn x (t :^ (ps -< ph'))
+              metaDefn name (I 1 :$ U :^ no Zy)
+      _ | Just (lt, ls) <- tagEh gotType
+        , Just (rt, rs) <- tagEh wantType
+        , lt == rt -> case (lt, ls, rs) of
+          (tag, [lty], [rty]) | tag `elem` [SAbel, SList] -> do
+            (_, stat) <- constrain "subTypeAbelList" $ SubtypingConstraint
+              { constraintCtx = constraintCtx
+              , gotType = lty
+              , wantType = rty
+              }
+            metaDefn name stat
+          (SDest, [lty], [rty]) -> do
+            (_, stat) <- constrain "subtypeDest" $ Constraint
+              { constraintCtx = constraintCtx
+              , constraintType = Hom (atom SType)
+              , lhs = lty
+              , rhs = rty
+              }
+            metaDefn name stat
+          (SEnum, [ls], [rs]) -> do
+            rest <- invent "suffix" ctx (mk SList (atom SAtom))
+            (_, stat) <- constrain "subtypeEnum" $ Constraint
+              { constraintCtx = constraintCtx
+              , constraintType = Hom (mk SList (atom SAtom))
+              , lhs = mk Splus ls rest
+              , rhs = rs
+              }
+            metaDefn name stat
+          (SQuantity, [lgenTy, ldim], [rgenTy, rdim]) -> do
+             (_, gstat) <- constrain "genTy" $ SubtypingConstraint
+                  { constraintCtx = constraintCtx
+                  , gotType = lgenTy
+                  , wantType = rgenTy
+                  }
+             if alive gstat
+               then do
+                 (_, dstat) <- constrain "dim" $ Constraint
+                   { constraintCtx = constraintCtx
+                   , constraintType = Hom (mk SAbel rgenTy)
+                   , lhs = ldim
+                   , rhs = rdim
+                   }
+                 metaDefn name $ conjunction [gstat, dstat]
+               else do
+                 metaDefn name (I 0 :$ U :^ no Zy)
+          (SMatrix, [rowTy, colTy, cellTy, rs, cs], [rowTy', colTy', cellTy', rs', cs'])
+            | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
+            , Just (r', cellTy') <- lamNameEh cellTy', Just (c', cellTy') <- lamNameEh cellTy' -> do
+                (_, rstat) <- constrain "rowTy" $ SubtypingConstraint
+                  { constraintCtx = constraintCtx
+                  , gotType = rowTy
+                  , wantType = rowTy'
+                  }
+                (_, cstat) <- constrain "colTy" $ SubtypingConstraint
+                  { constraintCtx = constraintCtx
+                  , gotType = colTy
+                  , wantType = colTy'
+                  }
+                if alive rstat && alive cstat
+                  then do
+                    rowJoinElt <- invent "joinElement" ctx rowTy'
+                    (_, headerRowStat) <- constrain "headerCompatRow" $ HeaderCompatibility
+                      { constraintCtx = constraintCtx
+                      , leftType = rowTy
+                      , rightType = rowTy'
+                      , joinType = rowTy'
+                      , joinStatus = rstat
+                      , leftList = rs
+                      , rightList = rs'
+                      , joinElement = rowJoinElt
+                      }
+                    colJoinElt <- invent "joinElement" ctx colTy'
+                    (_, headerColStat) <- constrain "headerCompatCol" $ HeaderCompatibility
+                      { constraintCtx = constraintCtx
+                      , leftType = colTy
+                      , rightType = colTy'
+                      , joinType = colTy'
+                      , joinStatus = cstat
+                      , leftList = cs
+                      , rightList = cs'
+                      , joinElement = colJoinElt
+                      }
+                    (_, cellStat) <- constrain "cell" $ SubtypingConstraint
+                      { constraintCtx = constraintCtx
+                                        \\\\ (r, Hom rowTy)
+                                        \\\\ (c, Hom (wk colTy))
+                      , gotType = cellTy
+                      , wantType = cellTy' //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (R $^ (mk Splus (var 1) (wk (wk rowJoinElt)))  <&> wk (wk rowTy'))) (R $^ (mk Splus (var 0) (wk (wk colJoinElt))) <&> wk (wk colTy')) -- subSnoc (sub0 (R $^ (mk Splus (var 1) (wk (wk rowJoinElt)))  <&> rowTy')) (R $^ (mk Splus (var 0) (wk (wk colJoinElt))) <&> colTy')
+                      }
+                    metaDefn name $ conjunction [rstat, cstat, cellStat, headerRowStat, headerColStat]
+                  else
+                    debug "RowTy/ColTy constraints - bad solution" $ metaDefn name (I 0 :$ U :^ no Zy)
+      _ -> push $ ConstraintFrame name c
 solveConstraint name c@Multiplicable{mulDataTypes = (x, y, z), mulIndexTypes = (i, j, k), ..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
      i <- normalise ctx (atom SType) i
@@ -813,20 +961,19 @@ solveConstraint name c@JoinConstraint{..}
             }
           metaDefn name ljstat
         (_, _, Just (SOne, [])) -> do -- if join is least, both left and right must be least
-          (_, lstat) <- constrain "joinOne" $ Constraint
+          (_, lstat) <- constrain "joinLeftOne" $ Constraint
             { constraintCtx = constraintCtx
             , constraintType = Hom (atom SType)
             , lhs = leftType
             , rhs = joinType
             }
-          (_, rstat) <- constrain "joinOne" $ Constraint
+          (_, rstat) <- constrain "joinRightOne" $ Constraint
             { constraintCtx = constraintCtx
             , constraintType = Hom (atom SType)
             , lhs = rightType
             , rhs = joinType
             }
           metaDefn name (conjunction [lstat, rstat])
-        
         _ -> push $ ConstraintFrame name JoinConstraint{..}
 
 solveConstraint name c@ElemConstraint{..}
@@ -1199,7 +1346,7 @@ runDirective rl (dir :<=: src, body) = do
       -- let mty = mk SMatrix abelTy abelTy (lam "i" $ lam "j" $ cellTy) (tag Sone [nil]) (tag Sone [nil])
       _ <- debug "Constructing Unit type " $ pure True
       (ltm, lhsProb) <- elab "unitFakeLHS" emptyContext (mk SDest mty) (LHSTask . LVar <$> u)
-      (tySol, tyProb) <- elab "unitType" emptyContext (atom SType) (TypeExprTask LabMate <$> ty)
+      (tySol, tyProb) <- elab "unitType" emptyContext (atom SType) (TypeExprTask LabMate EnsureCompatibility <$> ty)
       excursion $ postRight [Currently mty ltm (mk Sone (lit (1::Double)))]
       (_, stat) <- constrain "unitType" $ Constraint
               { constraintCtx = VN
@@ -1265,30 +1412,38 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
     TensorTask (Tensor ((x, xs :<=: xSrc), (y, ys :<=: ySrc)) (eTy :<=: eSrc)) -> do
       xTy <- invent (x ++ "Type") mctxt (atom SType)
       yTy <- invent (y ++ "Type") mctxt (atom SType)
-      (xsSol, xsProb) <- elab (x ++ "List") mctxt (mk SList xTy) (TypeExprTask LabMate xs :<=: xSrc)
-      (ysSol, ysProb) <- elab (y ++ "List") mctxt (mk SList yTy) (TypeExprTask LabMate ys :<=: ySrc)
+      (xsSol, xsProb) <- elab (x ++ "List") mctxt (mk SList xTy) (TypeExprTask LabMate EnsureCompatibility xs :<=: xSrc)
+      (ysSol, ysProb) <- elab (y ++ "List") mctxt (mk SList yTy) (TypeExprTask LabMate EnsureCompatibility ys :<=: ySrc)
       let ctx = mctxt \\\ (x, xTy) \\\ (y, wk yTy)
-      (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask LabMate eTy :<=: eSrc)
+      (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask LabMate EnsureCompatibility eTy :<=: eSrc)
       pushProblems [xsProb, ysProb, eProb]
       metaDefn sol (mk SMatrix xTy yTy (lam x . lam y $ eSol) xsSol ysSol)
       newProb $ Done nil
       move winning
-    TypeExprTask LabMate (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
+    TypeExprTask LabMate _ (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
       metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
       newProb $ Done nil
       move winning
-    TypeExprTask LabMate (TyVar Lstring) | Just (SType, []) <- tagEh mtype -> do
+    TypeExprTask LabMate _ (TyVar Lstring) | Just (SType, []) <- tagEh mtype -> do
       metaDefn sol $ mk SList (atom SChar) -< no (vlen mctxt)
       newProb $ Done nil
       move winning
-    TypeExprTask whereAmI (TyVar x)
+    TypeExprTask whereAmI synthMode (TyVar x)
       | Just (xtm, xty) <- lookupInContext x mctxt -> do
-        (_, xstat) <- constrain "VarExprCtxt" $ Constraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , constraintType = Hom (atom SType)
-          , lhs = xty
-          , rhs = mtype
-          }
+        (_, xstat) <- constrain "VarExprCtxt" $ case synthMode of
+            FindSimplest ->
+              Constraint
+              { constraintCtx = fmap Hom <$> mctxt
+              , constraintType = Hom (atom SType)
+              , lhs = xty
+              , rhs = mtype
+              }
+            EnsureCompatibility ->
+              SubtypingConstraint
+              { constraintCtx = fmap Hom <$> mctxt
+              , gotType = xty
+              , wantType = mtype
+              }
         pushProblems [Elab sol $ Await xstat xtm]
         newProb $ Done nil
         run
@@ -1298,12 +1453,21 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           cry sol
           move Whacked
         Just (x, xty) -> do
-          (_, xstat) <- constrain "VarExpr" $ Constraint
+          (_, xstat) <- constrain "VarExpr" $ case synthMode of
+              FindSimplest ->
+                Constraint
                 { constraintCtx = fmap Hom <$> mctxt
                 , constraintType = Hom (atom SType)
                 , lhs = xty -< no natty
                 , rhs = mtype
                 }
+              EnsureCompatibility ->
+                SubtypingConstraint
+                { constraintCtx = fmap Hom <$> mctxt
+                , gotType = xty -< no natty
+                , wantType = mtype
+                }
+
           y <- excursion . pullUntil () $ \_ fr -> case fr of
                  Currently ty lhs rhs | lhs == FreeVar x -> Right (ty, rhs)
                  Definition name rhs | name == x -> Right (xty, rhs)
@@ -1311,16 +1475,24 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           case y of
             Nothing  -> cry sol
             Just (ty, rhs) -> do
-              (_, vstat) <- constrain "VarExpr" $ Constraint
-                { constraintCtx = fmap Hom <$> mctxt
-                , constraintType = Hom (atom SType)
-                , lhs = ty -< no natty
-                , rhs = mtype
-                }
+              (_, vstat) <- constrain "VarExpr" $ case synthMode of
+                FindSimplest ->
+                  Constraint
+                  { constraintCtx = fmap Hom <$> mctxt
+                  , constraintType = Hom (atom SType)
+                  , lhs = ty -< no natty
+                  , rhs = mtype
+                  }
+                EnsureCompatibility ->
+                  SubtypingConstraint
+                  { constraintCtx = fmap Hom <$> mctxt
+                  , gotType = xty -< no natty
+                  , wantType = mtype
+                  }
               pushProblems [Elab sol $ Await (conjunction [xstat, vstat]) (rhs -< no (vlen mctxt))]
           newProb . Done $ FreeVar x
           run
-    TypeExprTask whereAmI (TyNum k) -> case tagEh mtype of
+    TypeExprTask whereAmI synthMode (TyNum k) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         (_, cs) <- constrain "IsOne" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
@@ -1346,29 +1518,57 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         run
       Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
         | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
-          r <- invent r mctxt rowTy
-          c <- invent c mctxt colTy
-          (_, rcs) <- constrain "IsSingletonR" $ Constraint
-            { constraintCtx = fmap Hom <$> mctxt
-            , constraintType = Hom (mk SList rowTy)
-            , lhs = mk Sone r
-            , rhs = rs
-            }
-          (_, ccs) <- constrain "IsSingletonC" $ Constraint
-            { constraintCtx = fmap Hom <$> mctxt
-            , constraintType = Hom (mk SList colTy)
-            , lhs = mk Sone c
-            , rhs = cs
-            }
-          (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
-          pushProblems [cellProb]
-          newProb . Elab sol $ Await (conjunction [rcs, ccs]) (mk Sone cellSol)
-          run
+            r <- invent r mctxt rowTy
+            c <- invent c mctxt colTy
+            (_, rcs) <- constrain "IsSingletonR" $ Constraint
+              { constraintCtx = fmap Hom <$> mctxt
+              , constraintType = Hom (mk SList rowTy)
+              , lhs = mk Sone r
+              , rhs = rs
+              }
+            (_, ccs) <- constrain "IsSingletonC" $ Constraint
+              { constraintCtx = fmap Hom <$> mctxt
+              , constraintType = Hom (mk SList colTy)
+              , lhs = mk Sone c
+              , rhs = cs
+              }
+            (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
+            extraStats <- case synthMode of
+              EnsureCompatibility -> pure []
+              FindSimplest -> do
+                (_, rstat) <- constrain "rowtyIsOne" $ Constraint
+                  { constraintCtx = fmap Hom <$> mctxt
+                  , constraintType = Hom (atom SType)
+                  , lhs = rowTy
+                  , rhs = atom SOne
+                  }
+                (_, cstat) <- constrain "coltyIsOne" $ Constraint
+                  { constraintCtx = fmap Hom <$> mctxt
+                  , constraintType = Hom (atom SType)
+                  , lhs = colTy
+                  , rhs = atom SOne
+                  }
+                (_, runitstat) <- constrain "rIsUnit" $ Constraint
+                  { constraintCtx = fmap Hom <$> mctxt
+                  , constraintType = Het (mk SOne) rstat rowTy
+                  , lhs = nil
+                  , rhs = r
+                  }
+                (_, cunitstat) <- constrain "cisUnit" $ Constraint
+                  { constraintCtx = fmap Hom <$> mctxt
+                  , constraintType = Het (mk SOne) cstat colTy
+                  , lhs = nil
+                  , rhs = c
+                  }
+                pure [rstat, cstat, runitstat, cunitstat]
+            pushProblems [cellProb]
+            newProb . Elab sol $ Await (conjunction ([rcs, ccs] ++ extraStats)) (mk Sone cellSol)
+            run
       Just (SQuantity, [genTy, dim]) -> do
-        newProb . Elab sol $ TypeExprTask whereAmI (TyDouble (fromIntegral k))
+        newProb . Elab sol $ TypeExprTask whereAmI synthMode (TyDouble (fromIntegral k))
         run
       _ -> debug ("Unresolved overloading of numerical constant " ++ show k) $ move worried
-    TypeExprTask whereAmI (TyDouble d) -> case tagEh mtype of
+    TypeExprTask whereAmI synthMode (TyDouble d) -> case tagEh mtype of
       Just (SQuantity, [genTy, dim]) -> case d of
         0 -> do
           metaDefn sol (inContext mctxt $ lit (0::Double))
@@ -1400,20 +1600,60 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , rhs = cs
             }
           (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
+          extraStats <- case synthMode of
+            EnsureCompatibility -> pure []
+            FindSimplest -> do
+              (_, rstat) <- constrain "rowtyIsOne" $ Constraint
+                { constraintCtx = fmap Hom <$> mctxt
+                , constraintType = Hom (atom SType)
+                , lhs = rowTy
+                , rhs = atom SOne
+                }
+              (_, cstat) <- constrain "coltyIsOne" $ Constraint
+                { constraintCtx = fmap Hom <$> mctxt
+                , constraintType = Hom (atom SType)
+                , lhs = colTy
+                , rhs = atom SOne
+                }
+              (_, runitstat) <- constrain "rIsUnit" $ Constraint
+                { constraintCtx = fmap Hom <$> mctxt
+                , constraintType = Het (mk SOne) rstat rowTy
+                , lhs = nil
+                , rhs = r
+                }
+              (_, cunitstat) <- constrain "cisUnit" $ Constraint
+                { constraintCtx = fmap Hom <$> mctxt
+                , constraintType = Het (mk SOne) cstat colTy
+                , lhs = nil
+                , rhs = c
+                }
+              pure [rstat, cstat, runitstat, cunitstat]
           pushProblems [cellProb]
-          newProb . Elab sol $ Await (conjunction [rcs, ccs]) (mk Sone cellSol)
+          newProb . Elab sol $ Await (conjunction ([rcs, ccs] ++ extraStats)) (mk Sone cellSol)
           run
       _ -> debug ("Unresolved overloading of numerical constant " ++ show d ++ " at type " ++ show mtype) $ move worried
-    TypeExprTask whereAmI (TyBinaryOp Plus x y) -> do
+    TypeExprTask whereAmI synthMode (TyBinaryOp Plus x y) -> do
       -- TODO:
       -- 1. make sure `mtype` admits plus
       -- 2. find the correct way of doing plus in `mtype`
-      (xSol, xProb) <- elab "plusXTy" mctxt mtype (TypeExprTask whereAmI <$> x)
-      (ySol, yProb) <- elab "plusYTy" mctxt mtype (TypeExprTask whereAmI <$> y)
+      (xTy, yTy, stats) <- case synthMode of
+        EnsureCompatibility -> pure (mtype, mtype, [])
+        FindSimplest -> do
+          xTy <- invent "xType" mctxt (atom SType)
+          yTy <- invent "yType" mctxt (atom SType)
+          (_ , jc) <- constrain "xyJoin" $ JoinConstraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , leftType = xTy
+            , rightType = yTy
+            , joinType = mtype
+            }
+          pure (xTy, yTy, [jc])
+      (xSol, xProb) <- elab "plusXTy" mctxt xTy (TypeExprTask whereAmI synthMode <$> x)
+      (ySol, yProb) <- elab "plusYTy" mctxt yTy (TypeExprTask whereAmI synthMode <$> y)
       pushProblems [xProb, yProb]
-      newProb . Done $ nil -- FIXME: use the solutions
+      newProb . Elab sol $ Await (conjunction stats) (mk Splus xSol ySol) -- FIXME: do proper addition, eg if mtype is a matrix type
       move winning
-    TypeExprTask whereAmI (TyBinaryOp (Mul False{- x*y -} div) x y) -> do
+    TypeExprTask whereAmI synthMode (TyBinaryOp (Mul False{- x*y -} div) x y) -> do
       -- Two main issues:
       -- redundancy in representation of matrices:
       -- (e.g., R C [a] [b] \r c. X vs
@@ -1435,7 +1675,6 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       cellXTy <- invent "cellX" (mctxt \\\ ("i", rowTy) \\\ ("j", wk leftMidTy)) (atom SType)
       cellYTy <- invent "cellY" (mctxt \\\ ("j'", rightMidTy) \\\ ("k", wk colTy)) (atom SType)
 
-
       let xTy = mk SMatrix rowTy leftMidTy (lam "i" . lam "j" $ cellXTy) rx leftcxry
       let yTy = mk SMatrix rightMidTy colTy (lam "j'" . lam "k" $ cellYTy) rightcxry cy
 
@@ -1444,13 +1683,20 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       -- 2. Construct the matrix type for the result
       let zTy = mk SMatrix rowTy colTy (lam "i" . lam "k" $ cellZTy) rx cy
       -- 3. Constrain it to the type we are checking against
-      (_, zstat) <- constrain "Zmatrix" $ Constraint
-        { constraintCtx = fmap Hom <$> mctxt
-        , constraintType = Hom (atom SType)
-        , lhs = zTy
-        , rhs = mtype
-        }
-
+      (_, zstat) <- constrain "Zmatrix" $ case synthMode of
+        FindSimplest ->
+          Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , lhs = zTy
+          , rhs = mtype
+          }
+        EnsureCompatibility ->
+          SubtypingConstraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , gotType = zTy
+          , wantType = mtype
+          }
       (_ , jc) <- constrain "middleJoins" $ JoinConstraint
         { constraintCtx = fmap Hom <$> mctxt
         , leftType = leftMidTy
@@ -1465,13 +1711,13 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , mulIndexTypes = (rowTy, midTy, colTy)
             , mulDataTypes = (cellXTy, cellYTy, cellZTy)
             })-}
-      (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask whereAmI <$> x)
-      (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask whereAmI <$> y)
+      (xSol, xProb) <- elab "mulXTy" mctxt xTy (TypeExprTask whereAmI FindSimplest <$> x)
+      (ySol, yProb) <- elab "mulYTy" mctxt yTy (TypeExprTask whereAmI FindSimplest <$> y)
       (zSol, zProb) <- elab' "mulZRet" mctxt zTy (ConstrainTask whereAmI mulConstraint (E $^ MX $^ (R $^ xSol <&> xTy) <&> (R $^ ySol <&> yTy)))
       pushProblems [xProb, yProb, zProb]
       newProb . Elab sol $ Await (conjunction [jc, zstat]) zSol
       run
-    TypeExprTask whereAmI (TyStringLiteral s) -> case tagEh mtype of
+    TypeExprTask whereAmI _ (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         (_, cs) <- constrain "IsChar" $ Constraint
           { constraintCtx = fmap Hom <$> mctxt
@@ -1482,7 +1728,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb . Elab sol $ Await cs (ixKI mtype (lit s))
         run
       _ -> move worried
-    TypeExprTask whereAmI (TyJux dir x y) | whereAmI == MatLab -> do
+    TypeExprTask whereAmI EnsureCompatibility (TyJux dir x y) | whereAmI == MatLab -> do
       (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
       case dir of
         Vertical -> do
@@ -1494,8 +1740,8 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , lhs = mk Splus rs0 rs1
             , rhs = rs
             }
-          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask whereAmI <$> x)
-          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask whereAmI <$> y)
+          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask whereAmI EnsureCompatibility <$> x)
+          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask whereAmI EnsureCompatibility <$> y)
           pushProblems [xProb, yProb]
           let cstat' = conjunction [tystat, cstat]
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
@@ -1510,14 +1756,14 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , lhs = mk Splus cs0 cs1
             , rhs = cs
             }
-          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowTy colTy cellTy rs cs0) (TypeExprTask whereAmI <$> x)
-          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowTy colTy cellTy rs cs1) (TypeExprTask whereAmI <$> y)
+          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowTy colTy cellTy rs cs0) (TypeExprTask whereAmI EnsureCompatibility <$> x)
+          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowTy colTy cellTy rs cs1) (TypeExprTask whereAmI EnsureCompatibility <$> y)
           pushProblems [xProb, yProb]
           let cstat' = conjunction [tystat, cstat]
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
             debugMatrix "Making hjux..." (mk Shjux xSol ySol)
           run
-    TypeExprTask LabMate (TyAtom a) -> do
+    TypeExprTask LabMate _ (TyAtom a) -> do
       atoms <- invent "atoms" mctxt (mk SList SAtom)
       (_ , cstat) <- constrain "listAtoms" $ Constraint
         { constraintCtx = fmap Hom <$> mctxt
@@ -1532,7 +1778,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         }
       newProb . Elab sol $ Await (conjunction [cstat, estat]) (inContext mctxt $ atom a)
       run
-    TypeExprTask LabMate (TyBraces ma) -> do
+    TypeExprTask LabMate _ (TyBraces ma) -> do
       genTy <- invent "genTy" mctxt (atom SType)
       (_ , cstat) <- constrain "abelType" $ Constraint
         { constraintCtx = fmap Hom <$> mctxt
@@ -1544,9 +1790,9 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       pushProblems [aProb]
       newProb . Elab sol $ Await cstat aSol
       run
-    TypeExprTask LabMate (TyApp f args) -> do
+    TypeExprTask LabMate synthMode (TyApp f args) -> do
       fTy <- invent "fTy" mctxt (atom SType)
-      (fSol, fProb) <- elab "func" mctxt fTy (TypeExprTask LabMate <$> f)
+      (fSol, fProb) <- elab "func" mctxt fTy (TypeExprTask LabMate synthMode <$> f)
       pushProblems [fProb]
       newProb . Elab sol $ ElimTask (vlen mctxt) (fSol, fTy) args
       run
@@ -1563,7 +1809,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       tty <- debug ("!!!ElimTask before x" ++ show tty ++ " for " ++ show x) $ normalise mctxt (atom SType) tty
       case debug ("!!!ElimTask x" ++ show tty ++ " for " ++ show x) $ tagEh tty of
         Just (SPi, [s, t]) | Just t <- lamEh t -> do
-          (xSol, xProb) <- elab "arg" mctxt s (TypeExprTask LabMate <$> x)
+          (xSol, xProb) <- elab "arg" mctxt s (TypeExprTask LabMate EnsureCompatibility <$> x)
           let tty' = t //^ sub0 (R $^ xSol <&> s)
           let tgt' = E $^ (D $^ (R $^ tgt <&> tty) <&> xSol)
           tty' <- normalise mctxt (atom SType) tty'
@@ -1603,7 +1849,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb $ Done nil
         run
       TyBraces (Just g) | Just (SAbel, [genTy]) <- tagEh mtype -> do
-        (gSol, gProb) <- elab "abelGen" mctxt genTy (TypeExprTask LabMate <$> g)
+        (gSol, gProb) <- elab "abelGen" mctxt genTy (TypeExprTask LabMate EnsureCompatibility <$> g)
         pushProblems [gProb]
         metaDefn sol (mk Sone gSol)
         newProb $ Done nil
@@ -1612,7 +1858,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb . Elab sol $ AbelTask (TyBraces (Just (noSource t)))
         run
       t -> debug ("Abeltask falling through: " ++ show t ++ " at type " ++ show mtype ++ " context " ++ show mctxt) $ do
-        newProb . Elab sol $ (TypeExprTask LabMate t)
+        newProb . Elab sol $ (TypeExprTask LabMate EnsureCompatibility t)
         run
     LHSTask lhs -> case lhs of
       LVar x -> do
@@ -1637,7 +1883,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         run
     ExprTask whereAmI e -> case toTypeExpr' e of
       Just e -> do
-        newProb . Elab sol $ TypeExprTask whereAmI e
+        newProb . Elab sol $ TypeExprTask whereAmI EnsureCompatibility e
         run
       _ -> do  -- switch to being a scoping problem
         newProb $ Expression e
