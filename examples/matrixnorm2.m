@@ -2,7 +2,7 @@
 
 %> unit kg :: Q({ `Mass })
 
-%> x :: int
+%> x :: double
 x = 2
 
 %> y :: Q({ `Mass})

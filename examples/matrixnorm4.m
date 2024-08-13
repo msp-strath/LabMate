@@ -6,3 +6,8 @@
 y = 2*kg
 
 %> typeof y
+
+%> z :: double
+z = 4
+
+%> typeof z
