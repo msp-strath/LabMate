@@ -276,6 +276,23 @@ unnil elty xs = withScope $ propEh elty >>= \case
     [] -> pure ()
     _ -> fail "unnil: non-empty list"
 
+data ListView n
+  = LIsNull
+  | LIsCons (Norm Chk ^ n, Norm Chk ^ n)
+  | LIsNeut (Norm Syn ^ n)
+
+listView :: Norm Chk ^ n -> ListView n
+listView t = nattily (scopeOf t) $ case tagEh t of
+  Just ("", []) -> LIsNull
+  Just (Sone, [x]) -> LIsCons (x, nil)
+  Just (Splus, [ox, xs]) | Just (Sone, [x]) <- tagEh ox -> LIsCons (x, xs)
+  _ -> case E $? t of
+    Just e -> LIsNeut e
+    _ -> case t of
+      Intg 0 -> LIsNull
+      Intg i -> LIsCons (nil, lit (i - 1))
+      _ -> error $ "bad normal list " ++ show t
+
 singMatTy :: Typ ^ n -> Typ ^ n
 singMatTy c = nattily (scopeOf c) $ mk SMatrix SOne SOne (lam "i" $ lam "j" $ wk (wk c)) (tag Sone [nil]) (tag Sone [nil])
 

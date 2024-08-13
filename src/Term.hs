@@ -418,6 +418,9 @@ instance Substable (Term s) where
 (t :^ th) //^ (sig :^ ph) | Roof sigl u sigr <- roofLemma (rightAll th) sig =
   t // sigl :^ covl u -< ph
 
+negTm :: NATTY n => Term Chk ^ n -> Term Chk ^ n
+negTm = mk (lit (-1 :: Integer))
+
 class Mk t where
   type Scope t :: Nat
   type Uncurry t :: Type

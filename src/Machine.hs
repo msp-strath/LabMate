@@ -976,6 +976,43 @@ solveConstraint name c@JoinConstraint{..}
           metaDefn name (conjunction [lstat, rstat])
         _ -> push $ ConstraintFrame name JoinConstraint{..}
 
+solveConstraint name c@HeaderCompatibility{..} 
+  | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
+      leftType <- normalise ctx (atom SType) leftType
+      rightType <- normalise ctx (atom SType) rightType
+      joinType <- normalise ctx (atom SType) joinType
+      leftList <- normalise ctx (mk SList leftType) leftList
+      rightList <- normalise ctx (mk SList rightType) rightList
+      joinElement <- normalise ctx joinType joinElement
+      case (listView leftList, listView rightList) of
+        (LIsNull, LIsNull) -> metaDefn name (I 1 :$ U :^ no Zy)
+        (LIsCons (x, xs), LIsCons (y, ys)) -> do
+          hstats <- case tagEh joinType of
+            Just (SAbel, [_]) -> do
+              (_, hstat) <- constrain "headCompat" $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType = Het joinType joinStatus joinType
+                , lhs = joinElement
+                , rhs = mk Splus (negTm x) y
+                }
+              pure [hstat]
+            Just (SOne, []) -> pure []
+            _ -> do  -- TODO: check if this really makes sense, sometime
+              (_, hstat) <- constrain "headEqual" $ Constraint
+                { constraintCtx = constraintCtx
+                , constraintType = Het leftType joinStatus rightType
+                , lhs = x
+                , rhs = y
+                }
+              pure [hstat]
+          (_, tstat) <- constrain "tailCompat" $ HeaderCompatibility
+            { leftList = xs
+            , rightList = ys
+            , ..
+            }
+          metaDefn name (conjunction (tstat : hstats))
+        _ -> push $ ConstraintFrame name HeaderCompatibility{..}
+
 solveConstraint name c@ElemConstraint{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
       (as, Any b) <- knownElems <$> normalise ctx (mk SList (atom SAtom)) hayStack
@@ -1548,19 +1585,21 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
                   , lhs = colTy
                   , rhs = atom SOne
                   }
+                {-
                 (_, runitstat) <- constrain "rIsUnit" $ Constraint
                   { constraintCtx = fmap Hom <$> mctxt
-                  , constraintType = Het (mk SOne) rstat rowTy
+                  , constraintType = Het (atom SOne) rstat rowTy
                   , lhs = nil
                   , rhs = r
                   }
-                (_, cunitstat) <- constrain "cisUnit" $ Constraint
+                (_, cunitstat) <- constrain "cIsUnit" $ Constraint
                   { constraintCtx = fmap Hom <$> mctxt
-                  , constraintType = Het (mk SOne) cstat colTy
+                  , constraintType = Het (atom SOne) cstat colTy
                   , lhs = nil
                   , rhs = c
                   }
-                pure [rstat, cstat, runitstat, cunitstat]
+                -}
+                pure [rstat, cstat] -- , runitstat, cunitstat]
             pushProblems [cellProb]
             newProb . Elab sol $ Await (conjunction ([rcs, ccs] ++ extraStats)) (mk Sone cellSol)
             run
