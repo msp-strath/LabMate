@@ -1437,6 +1437,9 @@ ensureMatrixType ctxt ty
         }
       pure (rowTy, colTy, cellTy, rs, cs, cstat)
 
+doubleType :: Term Chk ^ Z
+doubleType =  mk SQuantity (tag SEnum [nil]) nil
+
 runElabTask
   :: Name
   -> Meta     -- meta which carries the solution for T
@@ -1455,6 +1458,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask LabMate EnsureCompatibility eTy :<=: eSrc)
       pushProblems [xsProb, ysProb, eProb]
       metaDefn sol (mk SMatrix xTy yTy (lam x . lam y $ eSol) xsSol ysSol)
+      newProb $ Done nil
+      move winning
+    TypeExprTask LabMate _ (TyVar Ldouble) | Just (SType, []) <- tagEh mtype -> do
+      metaDefn sol $ doubleType -< no (vlen mctxt)
       newProb $ Done nil
       move winning
     TypeExprTask LabMate _ (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
@@ -1603,10 +1610,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             pushProblems [cellProb]
             newProb . Elab sol $ Await (conjunction ([rcs, ccs] ++ extraStats)) (mk Sone cellSol)
             run
-      Just (SQuantity, [genTy, dim]) -> do
+      _ -> do
         newProb . Elab sol $ TypeExprTask whereAmI synthMode (TyDouble (fromIntegral k))
         run
-      _ -> debug ("Unresolved overloading of numerical constant " ++ show k) $ move worried
+             
     TypeExprTask whereAmI synthMode (TyDouble d) -> case tagEh mtype of
       Just (SQuantity, [genTy, dim]) -> case d of
         0 -> do
@@ -1654,6 +1661,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
                 , lhs = colTy
                 , rhs = atom SOne
                 }
+              {-
               (_, runitstat) <- constrain "rIsUnit" $ Constraint
                 { constraintCtx = fmap Hom <$> mctxt
                 , constraintType = Het (mk SOne) rstat rowTy
@@ -1666,11 +1674,23 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
                 , lhs = nil
                 , rhs = c
                 }
-              pure [rstat, cstat, runitstat, cunitstat]
+              -}
+              pure [rstat, cstat] -- , runitstat, cunitstat]
           pushProblems [cellProb]
           newProb . Elab sol $ Await (conjunction ([rcs, ccs] ++ extraStats)) (mk Sone cellSol)
           run
-      _ -> debug ("Unresolved overloading of numerical constant " ++ show d ++ " at type " ++ show mtype) $ move worried
+      _ -> case synthMode of
+        EnsureCompatibility -> debug ("Unresolved overloading of numerical constant " ++ show d ++ " at type " ++ show mtype) $ move worried
+        FindSimplest -> do
+          (_, stat) <- constrain "toilTrouble" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (atom SType)
+            , lhs = mtype
+            , rhs = doubleType -< no (vlen mctxt)
+            }
+          newProb . Elab sol $ Await stat (inContext mctxt $ lit d)
+          run
+
     TypeExprTask whereAmI synthMode (TyBinaryOp Plus x y) -> do
       -- TODO:
       -- 1. make sure `mtype` admits plus
@@ -1736,6 +1756,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           , gotType = zTy
           , wantType = mtype
           }
+      -- 3.5 Find the shared type for the middle and check header compatibility.
       (_ , jc) <- constrain "middleJoins" $ JoinConstraint
         { constraintCtx = fmap Hom <$> mctxt
         , leftType = leftMidTy
@@ -1743,6 +1764,16 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         , joinType = joinMidTy
         }
       middle <- invent "middle" mctxt joinMidTy
+      (_, hc) <- constrain "headerCompat" $ HeaderCompatibility
+        { constraintCtx = fmap Hom <$> mctxt
+        , leftType = leftMidTy
+        , rightType = rightMidTy
+        , joinType = joinMidTy
+        , joinStatus = jc
+        , leftList = leftcxry
+        , rightList = rightcxry
+        , joinElement = middle
+        }
       -- 4. Switch to the problem of ensuring the cell types are compatible
       let mulConstraint = ("ZMultiplicable", DummyConstraint)
       {-let mulConstraint = ("ZMultiplicable", Multiplicable

@@ -27,5 +27,6 @@ pattern Svjux = "vjux"
 pattern Sand = "and"
 
 -- Labmate user types
+pattern Ldouble = "double"
 pattern Lint = "int"
 pattern Lstring = "string"
