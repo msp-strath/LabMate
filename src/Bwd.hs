@@ -7,6 +7,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Control.Monad.State
+import Control.Monad
 
 data Bwd x = B0 | Bwd x :< x
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable)

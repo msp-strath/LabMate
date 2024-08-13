@@ -1,6 +1,8 @@
 module Term.Indexed where
 
-data (==) :: a -> a -> * where
+import Data.Kind
+
+data (==) :: a -> a -> Type where
   Refl :: x == x
 
 -- `qs` is usually a tuple of equations
@@ -14,31 +16,31 @@ fromOrd a = \case
   EQ -> EQ' a
 
 -- existential quantification
-data Ex :: (a -> *) -> * where
+data Ex :: (a -> Type) -> Type where
   Ex :: p x -> Ex p
 
 -- .. and universal
-data Al :: (a -> *) -> * where
+data Al :: (a -> Type) -> Type where
   Al :: (forall x. p x) -> Al p
 
 -- pointwise conjunction
-data (:*) :: (a -> *) -> (a -> *) -> (a -> *) where
+data (:*) :: (a -> Type) -> (a -> Type) -> (a -> Type) where
   (:*) :: p n -> q n -> (p :* q) n
 
 infixr 5 :*
 
 -- .. and implication
-data (:->) :: (a -> *) -> (a -> *) -> (a -> *) where
+data (:->) :: (a -> Type) -> (a -> Type) -> (a -> Type) where
   FunI :: (p n -> q n) -> (p :-> q) n
 
-newtype Flip :: (b -> a -> *) -> a -> b -> * where
+newtype Flip :: (b -> a -> Type) -> a -> b -> Type where
   Flip :: { getFlip :: f y x } -> Flip f x y
 
-newtype Konst :: * -> b -> * where
+newtype Konst :: Type -> b -> Type where
   Konst :: { getKonst :: x } -> Konst x y
 
 instance Show x => Show (Konst x y) where
   show = show . getKonst
 
-ixKI :: {- forall (f :: s -> *)(g :: s -> *)(a :: s) . -} f a -> g a -> g a
+ixKI :: {- forall (f :: s -> Type)(g :: s -> Type)(a :: s) . -} f a -> g a -> g a
 ixKI = const id

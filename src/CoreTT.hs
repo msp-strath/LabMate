@@ -19,7 +19,7 @@ data Status = Crying | Waiting | Hoping | Abstract | ProgramVar
 
 data Meta = forall n. Meta
   { mctxt :: Context n
-  , mtype :: Type ^ n
+  , mtype :: Typ ^ n
   , mdefn :: Maybe (Term Chk ^ n)
   , mstat :: Status   -- if mdefn is `Just _` mstat should be only
                       -- `Waiting` or `Hoping`
@@ -71,7 +71,7 @@ must :: MonadFail m => String -> Maybe a -> m a
 must _ (Just a) = pure a
 must s Nothing = fail $ s ++ " must fail"
 
-typeOf :: (S Z <= n) -> TC n (Type ^ n)
+typeOf :: (S Z <= n) -> TC n (Typ ^ n)
 typeOf i = TC $ \_ -> Right . snd . vonly . (i ?^)
 
 scope :: TC n (Natty n)
@@ -83,7 +83,7 @@ withScope c = do
   nattily n c
 
 under
-  :: (String, Type ^ n)
+  :: (String, Typ ^ n)
   -> TC (S n) a
   -> TC n a -- discharging the bound variable is the caller's problem
 under ty (TC f) = TC $ \st ctx -> f st (fmap wk <$> (ctx :# ty))
@@ -129,7 +129,7 @@ typeEh ty | Just ty <- E $? ty = withScope $ do
 typeEh _ = fail "typeEh: not a type"
 
 checkEh
-  :: Type ^ n {- Ty -}
+  :: Typ ^ n {- Ty -}
   -> Term Chk ^ n {- tm -}
   -> TC n ()  {- Ty \ni tm -}
 checkEh ty tm | Just tm <- E $? tm = do
@@ -250,13 +250,13 @@ checkCanMatrixEh ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
   | otherwise = fail "checkCanMatrixEh: not a valid matrix ctor"
 
 {-
-withListAs :: Type ^ n -> [Term Chk ^ n] -> TC n (Either [NFAbel n] [NFList n])
+withListAs :: Typ ^ n -> [Term Chk ^ n] -> TC n (Either [NFAbel n] [NFList n])
 withListAs ty tms = propEh ty >>= \case
   True  -> Left <$> traverse (termToNFAbel ty) tms
   False -> Right <$> traverse (termToNFList ty) tms
 -}
 
-uncons :: Type ^ n -> Term Chk ^ n -> TC n (Term Chk ^ n, Term Chk ^ n)
+uncons :: Typ ^ n -> Term Chk ^ n -> TC n (Term Chk ^ n, Term Chk ^ n)
 uncons elty xs = withScope $ propEh elty >>= \case
   True  -> termToNFAbel elty xs >>= \case
     t@NFAbel{..} -> do
@@ -267,7 +267,7 @@ uncons elty xs = withScope $ propEh elty >>= \case
     (Left _) : _ -> fail "uncons: stuck head"
     _ -> fail "uncons: empty list"
 
-unnil :: Type ^ n -> Term Chk ^ n -> TC n ()
+unnil :: Typ ^ n -> Term Chk ^ n -> TC n ()
 unnil elty xs = withScope $ propEh elty >>= \case
   True  -> termToNFAbel elty xs >>= \case
     NFAbel{nfConst = 0, nfStuck = []} -> pure  ()
@@ -276,11 +276,11 @@ unnil elty xs = withScope $ propEh elty >>= \case
     [] -> pure ()
     _ -> fail "unnil: non-empty list"
 
-singMatTy :: Type ^ n -> Type ^ n
+singMatTy :: Typ ^ n -> Typ ^ n
 singMatTy c = nattily (scopeOf c) $ mk SMatrix SOne SOne (lam "i" $ lam "j" $ wk (wk c)) (tag Sone [nil]) (tag Sone [nil])
 
 prefixEh
-  :: Type ^ n
+  :: Typ ^ n
   -> Term Chk ^ n -- prefix
   -> Term Chk ^ n -- whole list
   -> TC n (Term Chk ^ n)
@@ -343,7 +343,7 @@ checkEnumEh ts tm = withScope $ case tagEh tm of
 
 synthEh
   :: Term Syn ^ n    {- t -}
-  -> TC n (Type ^ n) {- t \in T, T need *not* be normal -}
+  -> TC n (Typ ^ n) {- t \in T, T need *not* be normal -}
 synthEh (V :^ i) = typeOf i
 synthEh tm | Just tm <- R $? tm, (tm, ty) <- split tm =
   ty <$ typeEh ty <* checkEh ty tm
@@ -413,7 +413,7 @@ checkNormEval ty tm | Just ty <- tagEh ty = withScope $ case ty of
 checkNormEval _ _ = fail "checkNormEval: no"
 
 checkEval
-  :: Type ^ n {- Ty -}
+  :: Typ ^ n {- Ty -}
   -> Term Chk ^ n {- tm -}
   -- must be Ty \ni tm, i.e. already checked
   -> TC n (Norm Chk ^ n)
@@ -421,7 +421,7 @@ checkEval ty tm = do
   ty <- typeEval ty
   checkNormEval ty tm
 
-typeEval :: Type ^ n -> TC n (NmTy ^ n)
+typeEval :: Typ ^ n -> TC n (NmTy ^ n)
 typeEval ty | Just ty <- tagEh ty = withScope $ case ty of
   (x, []) | x `elem` [SAtom, SOne, STwo, SType, SChar] -> pure $ atom x
   (SAbel, [genTy]) -> mk SAbel <$> typeEval genTy
@@ -446,7 +446,7 @@ typeEval ty = fail "typeEval: no"
 
 -- there is no guarantee that the returned term is the canonical
 -- representative of its eq. class because it is *not* eta-long.
-evalSynth :: Term Syn ^ n -> TC n (Term Chk ^ n, Type ^ n)
+evalSynth :: Term Syn ^ n -> TC n (Term Chk ^ n, Typ ^ n)
 evalSynth tm = withScope $ case tm of
   V :^ i -> (E $^ tm,) <$> typeOf i
   tm | Just tm <- R $? tm, (tm, ty) <- split tm -> do
@@ -499,7 +499,7 @@ evalSynth tm = withScope $ case tm of
       | otherwise -> fail "evalSynth: usage of a metavariable at wrong arity"
   _ -> fail "evalSynthEh: no"
 
-evalSubst :: Vec k (String, Type ^ n) -> Subst k ^ n -> TC n (Subst k ^ n)
+evalSubst :: Vec k (String, Typ ^ n) -> Subst k ^ n -> TC n (Subst k ^ n)
 evalSubst VN _ = (Sub0 :^) <$> (no <$> scope)
 evalSubst (ctx :# (_, ty)) sig | Just sig <- ST $? sig = case split sig of
   (sig, tm) -> do
@@ -544,7 +544,7 @@ indexInEnum n (_ : xs) = indexInEnum (n - 1) xs
 indexInEnum _ _ = Nothing
 
 termToNFList
-  :: Type ^ n     -- type of generators
+  :: Typ ^ n     -- type of generators
   -> Term Chk ^ n
   -> TC n (NFList n)
 termToNFList ty tm
@@ -558,7 +558,7 @@ termToNFList ty tm
   | otherwise = error "termToNFList: no"
 
 termToNFAbel
-  :: Type ^ n     -- type of generators
+  :: Typ ^ n     -- type of generators
   -> Term Chk ^ n
   -> TC n (NFAbel n)
 termToNFAbel ty tm
@@ -595,7 +595,7 @@ termToNFBool tm
 
 checkEvalMatrixNF
   :: (Eq h, Monoid h, Show h)
-  => (Type ^ n -> Term Chk ^ n -> TC n h)
+  => (Typ ^ n -> Term Chk ^ n -> TC n h)
   -> (NmTy ^ n, NmTy ^ n, NmTy ^ S (S n))  -- \row col. cellTy
   -> Corner n        -- (rs, cs)
   -> Term 'Chk ^ n
@@ -633,7 +633,7 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
   | otherwise = withScope $ fail $ "checkEvalMatrixAbel: not a valid matrix ctor " ++ show tm
 
 
-propEh :: Type ^ n -> TC n Bool
+propEh :: Typ ^ n -> TC n Bool
 propEh ty = typeEval ty >>= \case
   Atom SOne -> pure True
   _         -> pure False

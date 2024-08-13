@@ -16,7 +16,7 @@ import Data.List
 import Data.Map (Map)
 import qualified Data.Map as Map
 
-import Control.Monad (unless)
+import Control.Monad
 import Control.Monad.State
 
 import Options.Applicative hiding (ParseError)

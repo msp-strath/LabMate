@@ -13,6 +13,7 @@ import Bwd
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Control.Arrow (first)
+import Data.Kind
 
 import Debug.Trace
 import Data.List (intercalate)
@@ -92,30 +93,30 @@ data Term (s :: Sort)
 -- for documentary purposes; used only when we *know* (and not merely
 -- hope) a term is a type, a normalised type or a canonical form,
 -- respectively
-type Type = Term Chk
-type NmTy = Type
+type Typ = Term Chk
+type NmTy = Typ
 type Norm = Term
 
 ---------------------------------------------
 -- TODO: refine the type to distinguish strings chosen by the user
 -- from strings chosen by the elaborator
-type Context n = Vec n (String, Type ^ n)
+type Context n = Vec n (String, Typ ^ n)
 
 emptyContext :: Context Z
 emptyContext = VN
 
 infixl 5 \\\
 
-(\\\) :: Context n -> (String, Type ^ n) -> Context (S n)
+(\\\) :: Context n -> (String, Typ ^ n) -> Context (S n)
 ctx \\\ x = fmap wk <$> (ctx :# x)
 
 inContext :: Context n -> t ^ n -> t ^ n
 inContext _ x = x
 
-lookupInContext :: String -> Context n -> Maybe (Term Chk ^ n, Type ^ n)
+lookupInContext :: String -> Context n -> Maybe (Term Chk ^ n, Typ ^ n)
 lookupInContext x = go
   where
-    go :: Vec i (String, Type ^ n) -> Maybe (Term Chk ^ i, Type ^ n)
+    go :: Vec i (String, Typ ^ n) -> Maybe (Term Chk ^ i, Typ ^ n)
     go VN = Nothing
     go (cs :# (s, t))
       | s == x = Just (evar (Su (no (vlen cs))), t)
@@ -373,7 +374,7 @@ barIf False = ""
 instance NATTY n => Show (Term s ^ n) where
   show t = tmShow False t (rootNamespace, names natty)
 
-data Roof :: Nat -> Nat -> Nat -> * where
+data Roof :: Nat -> Nat -> Nat -> Type where
   Roof :: Subst l l' -> Cov l' r' n -> Subst r r' -> Roof l r n
 
 roofLemma :: Cov l r k -> Subst k n -> Roof l r n
@@ -391,7 +392,7 @@ roofLemma (SS u0) (SubT sig u1 t)
   , MiddleFour u3 u4 u5 <- middleFour u2 u1 (allCov (weeEnd (covr u1)))
   = Roof (SubT sigl u3 t) u4 (SubT sigr u5 t)
 
-class Substable (t :: Nat -> *) where
+class Substable (t :: Nat -> Type) where
 
   (//) :: t k -> Subst k n -> t n
   t // sig = case idSubstEh sig of
@@ -419,7 +420,7 @@ instance Substable (Term s) where
 
 class Mk t where
   type Scope t :: Nat
-  type Uncurry t :: *
+  type Uncurry t :: Type
 
   from :: (Uncurry t -> Term Chk ^ Scope t, (Uncurry t -> Term Chk ^ Scope t) -> t)
 

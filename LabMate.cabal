@@ -45,7 +45,7 @@ common haskell
                        directory,
                        filepath,
                        optparse-applicative,
-                       mgen
+                       mgen > 0.1.0.1
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances
 

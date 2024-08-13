@@ -145,7 +145,7 @@ instance PrettyPrint MachineState where
     pure (show (metaStore st) : show (constraintStore st) : lines)
 
 type TERM = Term Chk ^ Z
-type TYPE = Type ^ Z
+type TYPE = Typ ^ Z
 type BOOL = Norm Chk ^ Z
 
 data DiagnosticData
@@ -252,7 +252,7 @@ data ElabTask where
                      -- Boolean becomes true
     -> ElabTask
   ConstrainTask :: NATTY n => WhereAmI -> (String, Constraint) -> Term Chk ^ n -> ElabTask
-  ElimTask :: NATTY n => Natty n -> (Term Chk ^ n, Type ^ n) -> [TypeExpr] -> ElabTask
+  ElimTask :: NATTY n => Natty n -> (Term Chk ^ n, Typ ^ n) -> [TypeExpr] -> ElabTask
   AbelTask :: TypeExpr' -> ElabTask -- the problem type must be Abel genTy for some genTy
   Abandon :: ElabTask -> ElabTask
 deriving instance Show ElabTask
@@ -448,10 +448,10 @@ data ConstraintType' t
   | Het t BOOL t
   deriving (Show, Functor)
 
-type ConstraintType n = ConstraintType' (Type ^ n)
+type ConstraintType n = ConstraintType' (Typ ^ n)
 
-lhsType :: ConstraintType n -> Type ^ n
-rhsType :: ConstraintType n -> Type ^ n
+lhsType :: ConstraintType n -> Typ ^ n
+rhsType :: ConstraintType n -> Typ ^ n
 
 lhsType (Hom ty) = ty
 lhsType (Het lty _ _) = lty
@@ -459,7 +459,7 @@ lhsType (Het lty _ _) = lty
 rhsType (Hom ty) = ty
 rhsType (Het _ _ rty) = rty
 
-isHom :: ConstraintType n -> Maybe (Type ^ n)
+isHom :: ConstraintType n -> Maybe (Typ ^ n)
 isHom (Hom ty) = Just ty
 isHom _ = Nothing
 
@@ -474,8 +474,8 @@ data Constraint = forall n . Constraint
   -- TODO: actually use it
   | forall n. Multiplicable
   { constraintCtx :: ConstraintContext n
-  , mulIndexTypes :: (Type ^ n, Type ^ n, Type ^ n)
-  , mulDataTypes :: (Type ^ S (S n), Type ^ S (S n), Type ^ S (S n))
+  , mulIndexTypes :: (Typ ^ n, Typ ^ n, Typ ^ n)
+  , mulDataTypes :: (Typ ^ S (S n), Typ ^ S (S n), Typ ^ S (S n))
   }
   | forall n. ElemConstraint
   { constraintCtx :: ConstraintContext n
@@ -553,7 +553,7 @@ instance Show Constraint where
   show DummyConstraint = "DummyConstraint"
 
 
-mkConstraintType :: Type ^ n -> BOOL -> Type ^ n -> ConstraintType n
+mkConstraintType :: Typ ^ n -> BOOL -> Typ ^ n -> ConstraintType n
 mkConstraintType lty (Intg 1) rty = Hom lty
 mkConstraintType lty status rty = Het lty status rty
 
@@ -578,7 +578,7 @@ conjunction nfs = case partition isLit nfs of
     isLit (Intg _) = True
     isLit _ = False
 
-normalise :: Context n -> Type ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
+normalise :: Context n -> Typ ^ n -> Term Chk ^ n -> Elab (Norm Chk ^ n)
 normalise ctx ty tm  = elabTC ctx (checkEval ty tm) >>= \case
   Left err -> nattily (vlen ctx) $ error . concat $ ["normalise: TC error [", err, "] for ", show tm, " :: ", show ty]
   Right tm -> pure tm
@@ -1055,12 +1055,12 @@ pushDefinition name def = excursion go where
     Just fr@(Declaration n _) | n == name -> traverse_ push [fr, Definition name def]
     Just fr -> shup fr >> go
 
-metaDecl :: Status -> String -> Context n -> Type ^ n -> Elab Name
+metaDecl :: Status -> String -> Context n -> Typ ^ n -> Elab Name
 metaDecl s x ctx ty = do
    x <- fresh x
    x <$ modifyNearestStore (Map.insert x (Meta ctx ty Nothing s))
 
-metaDeclTerm :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
+metaDeclTerm :: Status -> String -> Context n -> Typ ^ n -> Elab (Term Chk ^ n)
 metaDeclTerm s x ctx ty = nattily (vlen ctx) (wrapMeta <$> metaDecl s x ctx ty)
 
 metaDefn :: Name -> Term Chk ^ n -> Elab ()
@@ -1077,7 +1077,7 @@ metaDefn x def = getMeta x >>= \case
     , " for " , show x
     , " in meta scope ", show (vlen mctxt)]
 
-invent' :: Status -> String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
+invent' :: Status -> String -> Context n -> Typ ^ n -> Elab (Term Chk ^ n)
 invent' stat x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
   ty
     | Just (SOne, []) <- tagEh ty ->
@@ -1090,7 +1090,7 @@ invent' stat x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \
         pure (T $^ a <&> d)
   ty -> wrapMeta <$> metaDecl stat x ctx ty
 
-invent :: String -> Context n -> Type ^ n -> Elab (Term Chk ^ n)
+invent :: String -> Context n -> Typ ^ n -> Elab (Term Chk ^ n)
 invent = invent' Hoping
 
 ensureType :: DeclarationType (Maybe TYPE) -> Elab (DeclarationType TYPE)
@@ -1363,7 +1363,7 @@ runDirective rl (dir :<=: src, body) = do
 elab'
   :: String -- name advice for new elaboration prob
   -> Context n
-  -> Type ^ n -- the type of the solution
+  -> Typ ^ n -- the type of the solution
   -> ElabTask
   -> Elab (Term Chk ^ n, Problem)
 elab' x ctx ty etask = nattily (vlen ctx) $ do
@@ -1373,7 +1373,7 @@ elab' x ctx ty etask = nattily (vlen ctx) $ do
 elab
   :: String -- name advice for new elaboration prob
   -> Context n
-  -> Type ^ n -- the type of the solution
+  -> Typ ^ n -- the type of the solution
   -> WithSource ElabTask
   -> Elab (Term Chk ^ n, Problem)
 elab x ctx ty (etask :<=: src) =
