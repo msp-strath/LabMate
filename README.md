@@ -80,5 +80,5 @@ to wherever you have stored `labmate.el`):
 After doing so, opening a file with extension `.m` should
 automatically start LabMate mode, which will give you syntax
 highlighting of directives and responses. More importantly, you can
-run LabMate on the current buffer by pressing `C-c C-l` (Control-C
-followed by Control-L).
+run LabMate on the current buffer by pressing `C-c C-l` (Control-c
+followed by Control-l).
