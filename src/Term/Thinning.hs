@@ -1,11 +1,13 @@
 {-# LANGUAGE QuantifiedConstraints #-}
 module Term.Thinning where
 
+import Data.Kind
+
 import Term.Indexed
 import Term.Natty
 
 -- thinnings
-data (<=) :: Nat -> Nat -> * where
+data (<=) :: Nat -> Nat -> Type where
   No :: n <= m ->   n <= S m
   Su :: n <= m -> S n <= S m
   Ze ::             Z <= Z
@@ -51,7 +53,7 @@ io (Sy n) = Su (io n)
 io  Zy    = Ze
 
 -- action of thinnings
-class Thinny (f :: Nat -> *) where
+class Thinny (f :: Nat -> Type) where
   (-<) :: forall n m. f n -> n <= m -> f m
 
 -- composition is the action of thinnings on thinnings
@@ -68,7 +70,7 @@ no  Zy    = Ze
 
 -- `Cov l r m` codes up `l <= m` and `r <= m`, such that
 -- `m` is covered
-data Cov :: Nat -> Nat -> Nat -> * where
+data Cov :: Nat -> Nat -> Nat -> Type where
   SN :: Cov l r m -> Cov (S l)    r  (S m)
   NS :: Cov l r m -> Cov    l  (S r) (S m)
   SS :: Cov l r m -> Cov (S l) (S r) (S m)
@@ -107,15 +109,15 @@ cmpCov u u' = case cmpThin (covl u) (covl u') of
 
 -- CoDeBruijn pairing of a thing with its thinning
 -- `n` is implicitly existential
-data (^) :: (Nat -> *) -> Nat -> * where
+data (^) :: (Nat -> Type) -> Nat -> Type where
   (:^) :: p n -> n <= m -> p ^ m
 
 
 scopeOf :: p ^ n -> Natty n
 scopeOf (_ :^ th) = bigEnd th
 
--- (^) is the free Thinny on (p :: Nat -> *)
-instance Thinny ((^) (p :: Nat -> *)) where
+-- (^) is the free Thinny on (p :: Nat -> Type)
+instance Thinny ((^) (p :: Nat -> Type)) where
   (p :^ th) -< ph = p :^ (th -< ph)
 
 instance (forall (n :: Nat). Eq (p n)) => Eq (p ^ m) where
@@ -167,13 +169,13 @@ swapCov (NS u) = SN (swapCov u)
 swapCov (SN u) = NS (swapCov u)
 swapCov (SS u) = SS (swapCov u)
 
-data IUJK :: Nat -> Nat -> Nat -> Nat -> * where
+data IUJK :: Nat -> Nat -> Nat -> Nat -> Type where
   (:^\^:) :: Cov i jk ijk -> Cov j k jk -> IUJK i j k ijk
 
-data IJUK :: Nat -> Nat -> Nat -> Nat -> * where
+data IJUK :: Nat -> Nat -> Nat -> Nat -> Type where
   (:^/^:) :: Cov i j ij -> Cov ij k ijk -> IJUK i j k ijk
 
-data MiddleFour :: Nat -> Nat -> Nat -> Nat -> Nat -> * where
+data MiddleFour :: Nat -> Nat -> Nat -> Nat -> Nat -> Type where
   MiddleFour :: Cov a c ac -> Cov ac bd abcd -> Cov b d bd
              -> MiddleFour a b c d abcd
 
@@ -212,7 +214,7 @@ middleFour aub abucd cud
   = MiddleFour auc acubd bud
 {-
 -- relevant pairing
-data (&) :: (Nat -> *) -> (Nat -> *) -> (Nat -> *) where
+data (&) :: (Nat -> Type) -> (Nat -> Type) -> (Nat -> Type) where
   P :: s l -> Cov l r m -> t r -> (s & t) m
 
 -- smart constructor (for CoDeBruijn RP)
@@ -222,7 +224,7 @@ data (&) :: (Nat -> *) -> (Nat -> *) -> (Nat -> *) where
 
 {-
 -- binding
-data B :: (Nat -> *) -> Nat -> * where
+data B :: (Nat -> Type) -> Nat -> Type where
   K :: p n     -> B p n  -- vacuous
   L :: p (S n) -> B p n  -- relevant
 
@@ -233,7 +235,7 @@ bi (p :^ Su th) = L p :^ th
 -}
 
 -- spans in (<=)
-data Span :: Nat -> Nat -> Nat -> * where
+data Span :: Nat -> Nat -> Nat -> Type where
   Span :: n <= l -> n <= r -> Span l r n
 
 -- products in (<=m), a.k.a pullbacks in (<=),

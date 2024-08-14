@@ -34,9 +34,9 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Control.Monad.Reader
 
-debug = const id --trace
-debugCatch = const id --trace
-debugMatrix = const id --trace
+debug = {-const id -- -} trace
+debugCatch = {- const id -- -} trace
+debugMatrix = {- const id -- -} trace
 
 type Elab = State MachineState
 

@@ -4,9 +4,10 @@ import Term.Natty
 import Term.Thinning
 import Data.Traversable
 import GHC.Exts
+import Data.Kind
 
 -- snoc vectors
-data Vec :: Nat -> * -> * where
+data Vec :: Nat -> Type -> Type where
   VN   :: Vec Z x
   (:#) :: Vec n x -> x -> Vec (S n) x
 
