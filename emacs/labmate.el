@@ -9,16 +9,22 @@
   '((t :foreground "black"
        :background "pale turquoise"
        :weight bold
-       :underline t
        ))
   "Face for directives."
   :group 'labmate )
+
+(defface labmate-response-delimiter
+  '((t :foreground "black"
+       :background "pale green"
+       ))
+  "Face for response delimiters."
+  :group 'labmate )
+
 
 (defface labmate-response-error
   '((t :foreground "black"
        :background "light salmon"
        :weight bold
-       :underline t
        ))
   "Face for errorneous directive responses."
   :group 'labmate )
@@ -27,7 +33,6 @@
   '((t :foreground "black"
        :background "pale green"
        :weight bold
-       :underline t
        ))
   "Face for successful directive responses."
   :group 'labmate )
@@ -38,10 +43,12 @@
   ;; handling comments
   :syntax-table (make-syntax-table)
   ;; code for syntax highlighting
-  (font-lock-add-keywords nil '(("^\s*%>[^%|^\n]+" . 'labmate-directive)))
+  (font-lock-add-keywords nil '(("^\s*%>[^%\n]+" . 'labmate-directive)))
   (font-lock-add-keywords nil '(("^\s*%<.+" . 'labmate-response-error)))
-  (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%|^\n]+" . 'labmate-response-success)))
-  (font-lock-add-keywords nil '(("^\s*%<\s*LabMate[^%|^\n]+" . 'labmate-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<[{}]$" . 'labmate-response-delimiter)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%\n]+" . 'labmate-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*.*::[^%\n]+" . 'labmate-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*LabMate[^%\n]+" . 'labmate-response-success)))
   (setq mode-name "labmate")
   ;; clear memory
   ;;(setq typos-keywords-regexp nil)
