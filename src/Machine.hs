@@ -34,9 +34,9 @@ import qualified Data.Set as Set
 import Debug.Trace
 import Control.Monad.Reader
 
-debug = {-const id -- -} trace
-debugCatch = {- const id -- -} trace
-debugMatrix = {- const id -- -} trace
+debug = const id -- trace
+debugCatch = const id -- trace
+debugMatrix = const id -- trace
 
 type Elab = State MachineState
 
@@ -1995,7 +1995,36 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb . Elab sol $ Await cs (ixKI mtype (lit s))
         run
       _ -> move worried
-    TypeExprTask whereAmI EnsureCompatibility (TyJux dir x y) | whereAmI == MatLab -> do
+    TypeExprTask MatLab EnsureCompatibility (TyJux dir x (TyNil _ :<=: _)) -> do
+      (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
+      (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs cs) (TypeExprTask MatLab EnsureCompatibility <$> x)
+      pushProblems [xProb]
+      newProb . Elab sol $ Await tystat $ xSol
+      run
+    {-
+      let nill = nil in do
+        (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
+        case dir of
+          Vertical -> do
+            (_, rstat) <- constrain "noRs" $ Constraint
+              { constraintCtx = fmap Hom <$> mctxt
+              , constraintType = Hom (mk SList rowTy)
+              , lhs = nill
+              , rhs = rs
+              }
+            newProb . Elab sol $ Await rstat $ nill
+            run
+          Horizontal -> do
+            (_, cstat) <- constrain "noCs" $ Constraint
+              { constraintCtx = fmap Hom <$> mctxt
+              , constraintType = Hom (mk SList colTy)
+              , lhs = nill
+              , rhs = cs
+              }
+            newProb . Elab sol $ Await cstat $ nill
+            run
+     -}
+    TypeExprTask MatLab EnsureCompatibility (TyJux dir x y) -> do
       (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
       case dir of
         Vertical -> do
@@ -2007,8 +2036,8 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , lhs = mk Splus rs0 rs1
             , rhs = rs
             }
-          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask whereAmI EnsureCompatibility <$> x)
-          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask whereAmI EnsureCompatibility <$> y)
+          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask MatLab EnsureCompatibility <$> x)
+          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask MatLab EnsureCompatibility <$> y)
           pushProblems [xProb, yProb]
           let cstat' = conjunction [tystat, cstat]
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
@@ -2017,19 +2046,31 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         Horizontal -> do
           cs0 <- debugMatrix ("HJUX matrix #### " ++ show mtype) $ invent "cs0" mctxt (mk SList colTy)
           cs1 <- invent "cs1" mctxt (mk SList colTy)
-          (_, cstat) <- constrain "SplitRs" $ Constraint
+          (_, cstat) <- constrain "SplitCs" $ Constraint
             { constraintCtx = fmap Hom <$> mctxt
             , constraintType = Hom (mk SList colTy)
             , lhs = mk Splus cs0 cs1
             , rhs = cs
             }
-          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowTy colTy cellTy rs cs0) (TypeExprTask whereAmI EnsureCompatibility <$> x)
-          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowTy colTy cellTy rs cs1) (TypeExprTask whereAmI EnsureCompatibility <$> y)
+          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowTy colTy cellTy rs cs0) (TypeExprTask MatLab EnsureCompatibility <$> x)
+          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowTy colTy cellTy rs cs1) (TypeExprTask MatLab EnsureCompatibility <$> y)
           pushProblems [xProb, yProb]
           let cstat' = conjunction [tystat, cstat]
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
             debugMatrix "Making hjux..." (mk Shjux xSol ySol)
           run
+    TypeExprTask LabMate synthMode (TyJux Vertical (x :<=: src) (TyNil _ :<=: _)) | Just (SList, [e]) <- tagEh mtype -> do
+      newProb $ Sourced (Elab sol (TypeExprTask LabMate synthMode x) :<=: src)
+      run
+    TypeExprTask LabMate synthMode (TyJux Horizontal x y) | Just (SList, [e]) <- tagEh mtype -> do
+      (hSol, hProb) <- elab "head" mctxt e (TypeExprTask LabMate synthMode <$> x)
+      (tSol, tProb) <- elab "tail" mctxt mtype (TypeExprTask LabMate synthMode <$> y)
+      pushProblems [hProb, tProb]
+      newProb . Elab sol . Await (conjunction []) $ tag Splus [mk Sone hSol, tSol]
+      run
+    TypeExprTask LabMate synthMode (TyNil Horizontal) | Just (SList, [e]) <- tagEh mtype -> do
+      newProb . Elab sol . Await (conjunction []) $ nil `inScopeOf` mtype
+      run
     TypeExprTask LabMate _ (TyAtom a) -> do
       atoms <- invent "atoms" mctxt (mk SList SAtom)
       (_ , cstat) <- constrain "listAtoms" $ Constraint
@@ -2125,7 +2166,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb . Elab sol $ AbelTask (TyBraces (Just (noSource t)))
         run
       t -> debug ("Abeltask falling through: " ++ show t ++ " at type " ++ show mtype ++ " context " ++ show mctxt) $ do
-        newProb . Elab sol $ (TypeExprTask LabMate EnsureCompatibility t)
+        newProb . Elab sol $ (TypeExprTask LabMate FindSimplest {-EnsureCompatibility-} t)
         run
     LHSTask lhs -> case lhs of
       LVar x -> do

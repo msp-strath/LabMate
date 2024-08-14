@@ -77,7 +77,7 @@ data TypeExpr'
 tyMat :: [[TypeExpr]] -> TypeExpr'
 tyMat exps = what $ go Vertical (go Horizontal id) exps
   where
-    jux _ e (TyNil _ :<=: _) = e
+    -- jux _ e (TyNil _ :<=: _) = e -- making more trouble than it's worth?
     jux dir e e' = noSource $ TyJux dir e e'
 
     nil dir = noSource $ TyNil dir

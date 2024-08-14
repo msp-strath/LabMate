@@ -279,6 +279,9 @@ tagEh t = case tupEh t of
   Just ((A s :$ U :^ _) : ts) -> Just (s, ts)
   _   -> Nothing
 
+inScopeOf :: Term d ^ n -> Term e ^ n -> Term d ^ n
+inScopeOf x y = x
+
 -------------------------------------------
 
 type Subst k = Term (Sub k)

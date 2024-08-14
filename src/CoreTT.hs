@@ -647,7 +647,7 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
            h   <- nf rowTy rs0
            pure ([(h, [NFNeutral tm])], ((rs1, cs0), (rs0, cs1)))
          _ -> fail "checkEvalMatrixAbel"
-  | otherwise = withScope $ fail $ "checkEvalMatrixAbel: not a valid matrix ctor " ++ show tm
+  | otherwise = withScope $ fail $ "checkEvalMatrixNF: not a valid matrix ctor " ++ show tm
 
 
 propEh :: Typ ^ n -> TC n Bool
