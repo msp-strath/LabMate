@@ -3,9 +3,6 @@
 LabMate is your friendly robotic assistant for writing meaningful
 Matlab code.
 
-At the moment, LabMate mostly parses Matlab code, but in the future, it
-will also check if the code makes sense, and offer to generate code.
-
 ## Installation
 
 You will need to have the `GHC` Haskell compiler and the `cabal` tool
@@ -79,3 +76,9 @@ to wherever you have stored `labmate.el`):
 (add-to-list 'auto-mode-alist '("\\.m\\'" . labmate-mode))
 
 ```
+
+After doing so, opening a file with extension `.m` should
+automatically start LabMate mode, which will give you syntax
+highlighting of directives and responses. More importantly, you can
+run LabMate on the current buffer by pressing `C-c C-l` (Control-C
+followed by Control-L).
