@@ -924,26 +924,41 @@ solveConstraint name c@SubtypingConstraint{..} = case (traverse (traverse isHom)
       _ -> push $ ConstraintFrame name c
 solveConstraint name c@Multiplicable{..}
  | Just ctx <- traverse (traverse isHom) constraintCtx = let n = vlen constraintCtx in nattily n $ do
-     
-     let (rowTy, leftMidTy, leftCellTy) = leftTypes
-     let (rightMidTy, colTy, rightCellTy) = rightTypes
+     let (rowTy, leftMidTy, leftCellType) = leftTypes
+     let (rightMidTy, colTy, rightCellType) = rightTypes
      rowTy <- normalise ctx (atom SType) rowTy
      leftMidTy <- normalise ctx (atom SType) leftMidTy
      rightMidTy <- normalise ctx (atom SType) rightMidTy
      colTy <- normalise ctx (atom SType) colTy
-     leftCellTy <- normalise (ctx \\\ ("i", rowTy) \\\ ("j", wk leftMidTy)) (atom SType) leftCellTy
-     rightCellTy <- normalise (ctx \\\ ("i", rightMidTy) \\\ ("j", wk colTy)) (atom SType) rightCellTy
+     leftCellType <- normalise (ctx \\\ ("i", rowTy) \\\ ("j", wk leftMidTy)) (atom SType) leftCellType
+     rightCellType <- normalise (ctx \\\ ("i", rightMidTy) \\\ ("j", wk colTy)) (atom SType) rightCellType
      let returnCtx = ctx \\\ ("i", rowTy) \\\ ("k", wk colTy)
      returnCellType <- normalise returnCtx (atom SType) returnCellType
      joinType <- normalise ctx (atom SType) joinType
      joinElement <- normalise ctx joinType joinElement
      awaitingStatus <- normalise emptyContext (atom STwo) awaitingStatus
-     let leftTypes = (rowTy, leftMidTy, leftCellTy)
-     let rightTypes = (rightMidTy, colTy, rightCellTy)
+     let leftTypes = (rowTy, leftMidTy, leftCellType)
+     let rightTypes = (rightMidTy, colTy, rightCellType)
      case awaitingStatus of
        Intg 0 -> metaDefn name (I 0 :$ U :^ no Zy)
        Intg 1 -> do
-         case (tagEh leftCellTy, tagEh rightCellTy) of
+         case (tagEh leftCellType, tagEh rightCellType) of
+           -- int * int case
+           -- TODO: matching for `No No` does not account for metavariables
+           (Just (SAbel, [x' :^ (No (No th))]), Just (SAbel, [y' :^ (No (No ph))])) -> do
+             (_, xystat) <- constrain "xy" $ Constraint
+               { constraintCtx = constraintCtx
+               , constraintType = Hom (atom SType)
+               , lhs = x' :^ th
+               , rhs = y' :^ ph
+               }
+             (_, zstat) <- constrain "zx" $ Constraint
+               { constraintCtx = fmap Hom <$> returnCtx
+               , constraintType = Hom (atom SType)
+               , lhs = returnCellType
+               , rhs = leftCellType
+               }
+             metaDefn name (conjunction [xystat, zstat])
            (Just (SQuantity, [g0' :^ (No (No th)), d0]), Just (SQuantity, [g1' :^ (No (No ph)), d1])) -> do
              let g0 = g0' :^ th
              let g1 = g1' :^ ph
@@ -978,53 +993,6 @@ solveConstraint name c@Multiplicable{..}
              metaDefn name (conjunction [retCellstat, noMidDepStat])
            _ -> push $ ConstraintFrame name Multiplicable{..}
        _ -> push $ ConstraintFrame name Multiplicable{..}
-
-{-
-     debug ("MULTIPLICABLE #####################" ++ show [x, y, z]) $ case (tagEh x, tagEh y, tagEh z) of
-       -- TODO: matching for `No No` does not account for metavariables
-       (Just (SAbel, [x' :^ (No (No th))]), Just (SAbel, [y' :^ (No (No ph))]), _) -> do
-         (_, xystat) <- constrain "xy" $ Constraint
-           { constraintCtx = constraintCtx
-           , constraintType = Hom (atom SType)
-           , lhs = x' :^ th
-           , rhs = y' :^ ph
-           }
-         (_, zstat) <- constrain "zx" $ Constraint
-           { constraintCtx = constraintCtx \\\\ ("i", Hom i) \\\\ ("k", Hom $ wk k)
-           , constraintType = Hom (atom SType)
-           , lhs = z
-           , rhs = x
-           }
-         metaDefn name (conjunction [xystat, zstat])
-       (Just (SQuantity, [genTy1 :^ (No (No th)), dim1]), Just (SQuantity, [genTy2 :^ (No (No ph)), dim2]), _) -> do
-         (_, cstat) <- constrain "gentySame" $ Constraint
-           { constraintCtx = constraintCtx
-           , constraintType = Hom (atom SType)
-           , lhs = genTy1 :^ th
-           , rhs = genTy2 :^ ph
-           }
-         case cstat of
-           Intg 0 -> metaDefn name (I 0 :$ U :^ no Zy)
-           Intg 1 -> do -- here genTy1 is the same type as genTy2
-             let genTy1' = genTy1 :^ (No (No (No th)))
-             let dim1' = wk dim1
-             let dim2' = dim2 -< Su (Su (No (io (vlen ctx))))
-             normalise (ctx \\\ ("i", i) \\\ ("j", wk j) \\\ ("k", wk (wk k))) (mk SAbel genTy1') (mk Splus dim1' dim2') >>= \case
-               (dim3' :^ ps) -> case thicken ps (Su (No (Su (io (vlen ctx))))) of
-                 Just ps -> do
-                   (_, ostat) <- constrain "quantityOutTy" $ Constraint
-                     { constraintCtx = constraintCtx \\\\ ("i", Hom i) \\\\ ("k", Hom $ wk k)
-                     , constraintType = Hom (atom SType)
-                     , lhs = mk SQuantity (genTy1 :^ No (No th)) (dim3' :^ ps)
-                     , rhs = z
-                     }
-                   metaDefn name ostat
-                 Nothing -> if Set.null (dependencies (dim3' :^ ps))
-                   then metaDefn name (I 0 :$ U :^ no Zy)
-                   else push $ ConstraintFrame name c
-           _ -> push $ ConstraintFrame name c
-       _ -> debug ("Push Constraint n-1" ++ show c) $ push $ ConstraintFrame name c
--}
 
 solveConstraint name c@JoinConstraint{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
