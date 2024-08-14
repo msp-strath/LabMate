@@ -19,27 +19,63 @@ This should give you a `labmate` executable to run.
 
 ## Usage
 
-LabMate can either be given a file or a directory as an argument.
+LabMate is meant to work as a *transducer*: it converts an input file
+into a possibly more informal output file. If the input file contains
+*directives* (encoded as formally marked Matlab comments), the output
+file will contain additional *responses*, either in the form of Matlab
+comments again, or in the form of generated Matlab code.
 
-**Parsing individual files:** The invocation
-
-```shell
-labmate file.m
-```
-
-will parse the Matlab file `file.m` and print out the internal LabMate
-parse tree for the file.
-
-**Parsing directories:** The invocation
+**LabMate as a filter**: If LabMate is given no argument, it reads
+from the standard input stream and writes to the standard output
+stream. Thus LabMate can be invoked as follows:
 
 ```shell
-labmate dir
+cat infile.m | labmate
 ```
 
-will parse all `.m` files in the directory `dir` and report how many
-files were successfully parsed. Any parse errors will also be
-reported.
+This functionality is useful for running LabMate as a "filter" in your
+favourite text editor; see instructions for setting up an Emacs mode
+that does this below.
 
-If no argument is given to LabMate, this currently means the same as
-`labmate .`, that is, LabMate will try to parse all Matlab files in the
-current directory.
+**LabMate acting on a given file:** If LabMate is given a filename as
+an argument, it will read from the given file, and output an updated
+version of the file to standard output. Thus LabMate can also be
+invoked as follows:
+
+```shell
+labmate infile.m > outfile.m
+```
+
+**LabMate acting on a given directory:** If LabMate is given a
+directory name as input, it will try to parse all the Matlab files in
+that directory, and report how well it succeeded. It will not actually
+transduce the contents of the files. This mode can be useful for
+verifying that LabMate at least understands the syntactic structure of
+an existing codebase.
+
+```shell
+labmate examples/
+```
+
+## Other command line options
+
+LabMate also understands the following command line options:
+
+| Option       | Action                                          |
+|--------------|-------------------------------------------------|
+| --help       | Print help text, then exit                      |
+| --verbose    | Print internal state of LabMate after execution |
+| --no-version | Do not insert LabMate version number in output  |
+
+## Emacs mode
+
+The file [labmate.el](emacs/labmate.el) can be used to add basic
+LabMate transducer functionality to the text editor Emacs. Add the
+following to your `.emacs` file to enable it (where `PATH` is the path
+to wherever you have stored `labmate.el`):
+
+```elisp
+(autoload 'labmate-mode "PATH/labmate.el" nil t)
+(add-to-list 'auto-mode-alist '("\\.m\\'" . labmate-mode))
+
+```
