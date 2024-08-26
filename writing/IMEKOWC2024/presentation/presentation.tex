@@ -148,60 +148,61 @@
 \setcounter{framenumber}{0}
 
 \begin{frame}{The Problem}
-  \begin{itemize}
-  \item Much software in science and engineering.
-    written in \ma
+  \begin{itemize}[<+->]
+  \item Much science and engineering software is written in \keyword{\ma}.
     \smallskip
-    \begin{itemize}
-    \item May contain errors and bugs, as with any software.
+    \begin{itemize}[<.->]
+    \item May contain \keyword{errors} and \keyword{bugs}, as with any software.
     \end{itemize}
     \bigskip
-  \item Developers often leave comments about how their data should be
-    interpreted, e.g., units of measure for quantities.
+  \item Developers often leave comments about how their
+    \keyword{data} should be \keyword{interpreted}, e.g., units of measure for
+    quantities.
 %  \item Developers often leave comments what are the corresponding
 %    physical systems of their data and how it should be interpreted,
 %    e.g., units of measure for quantities.
     \bigskip
-  \item However \ma is oblivious to these high-level comments, and
-    instead performs low-level %compatibility
-    checks during execution.
+  \item However \ma is \keyword{oblivious} to these high-level
+    comments, and instead performs \keyword{low-level checks} during
+    execution.
   \end{itemize}
 \end{frame}
 
 \begin{frame}{Our Plan}
   \textit{Can we do better?}
-  
-  \begin{itemize}
+
+  \begin{itemize}[<+->]
     \medskip
   \item Make these developer comments formal.
     \medskip
   \item \ldots and create a tool to make use of them --- \lm.
-    \begin{itemize}
+    \begin{itemize}[<.->]
       \smallskip
-    \item Keep existing \ma code and toolchains; no need to
+    \item \keyword{Keep existing} \ma \keyword{code} and toolchains; no need to
       switch to a new language.
     \end{itemize}
     \medskip
   \item Distill the essence of the developer comments in
-    \lm's expressive type system.
-    \begin{itemize}
+    \lm's \keyword{expressive type system}.
+    \begin{itemize}[<.->]
       \smallskip
     \item A set of logical rules that assign domains of admissible
       values to program expressions.
     \end{itemize}
     \medskip
-  \item \lm is meant to be used while writing the code to get instant
-    feedback and guidance --- do not delay until execution.
+  \item \lm is meant to be used while writing the code to get
+    \keyword{instant feedback} and guidance --- do not delay until
+    execution.
   \end{itemize}
 \end{frame}
 
 \definecolor{commentgreen}{RGB}{034,139,034}
 
 \begin{frame}[fragile]{How does \lm Work?}
-  \begin{itemize}
-  \item \lm is a program transducer: reads \ma code with formal comments, and outputs a modified version of the input.
+  \begin{itemize}[<+->]
+  \item \lm is a \keyword{program transducer}: reads \ma code with formal comments, and outputs a modified version of the input.
     \medskip
-  \item These formal comments are directives --- they start with \textcolor{commentgreen}{\texttt{\%<}}.
+  \item These formal comments are \keyword{directives} --- they start with \textcolor{commentgreen}{\texttt{\%<}}.
     \medskip
   \item Input the program:
    \begin{lstlisting}[xleftmargin=2em]
@@ -211,7 +212,6 @@
    \end{lstlisting}
   \pause
   \mycallout<+>{ren}{this is an input directive to rename a variable}
-  \pause
 \item Run \lm to get:
   \begin{lstlisting}[xleftmargin=2em]
 %< LabMate 0.2.0.1 !\tikzmark{ver}!
@@ -221,15 +221,15 @@ display(x);
    \end{lstlisting}
   \pause
   \mycallout<+>{renr}{LabMate response to the input directive}
-  \mycallout<+>{ver}{mark the file as processed by LabMate}
+  \mycallout<+>{ver}{Mark the file as processed by LabMate}
 \end{itemize}
 \end{frame}
 
 \begin{frame}[fragile]{Matrix Types}
   \begin{itemize}[<+->]
-  \item Matrices feature heavily in \ma code.
+  \item \keyword{Matrices} feature heavily in \ma code.
     \medskip
-  \item \lm supports type annotations for matrices:
+  \item \lm supports \keyword{type annotations} for matrices:
 \begin{lstlisting}[xleftmargin=0em, belowskip=-0.5em]
 %> A :: [ 1 x 2 ] int  !\tikzmark{ann1}!
 A = [ 3 4 ]
@@ -264,8 +264,8 @@ D = B * A
   \begin{itemize}[<+->]
   \item \lm processes arbitrary \ma code.
     \smallskip
-    \begin{itemize}
-    \item \lm does not rely on constants, variables work as well.
+    \begin{itemize}[<.->]
+    \item \lm does not rely on constants, \keyword{variables} work as well.
     \end{itemize}
   \item
 \begin{lstlisting}[xleftmargin=0em]
@@ -274,7 +274,7 @@ function B = f(A)
   B = [ 1 A ]
 
   %> typeof A
-  %< A :: [Matrix int 1 2]!\tikzmark{fromb}!
+  %< A :: [Matrix 1 2 int]!\tikzmark{fromb}!
 end
 
 A = 'hello'
@@ -289,7 +289,7 @@ A = 'hello'
 
 \begin{frame}[fragile]{Dimensions and Quantities}
   \begin{itemize}[<+->]
-  \item \lm has support for arbitrary quantities.
+  \item \lm has support for arbitrary \keyword{quantities}.
     \begin{lstlisting}[xleftmargin=0em,belowskip=-1em]
 %> dimensions V for Q over `Mass!\tikzmark{base}!, `Time
 %> unit kg :: Q({!\tikzmark{unit1}! `Mass })!\tikzmark{unit}!
@@ -307,7 +307,7 @@ kg = 1; !\tikzmark{kg}!
 \pause
    \mycallout<+>{kg}{this is a ``magic'' response that LabMate emits}
 \pause
-\item We can then use the unit of measure for quantities:
+\item We can then use the \keyword{unit of measure} for quantities:
 \begin{lstlisting}[xleftmargin=0em]
 y = 5*kg !\tikzmark{q}!
 %> typeof y
@@ -321,9 +321,9 @@ y = 5*kg !\tikzmark{q}!
 
 \begin{frame}[fragile]{Dimensional Consistency for Matrices}
   \begin{itemize}[<+->]
-  \item Most \ma programs do not work on uniform matrices: type of the entry $e_{i, j}$ might depend on the indices $i$ and $j$.
+  \item Most \ma programs \keyword{do not work on uniform matrices}: type of the entry $e_{i, j}$ might depend on the indices $i$ and $j$.
     \medskip
-  \item A common scenario when working with matrices of quantities
+  \item A common scenario when working with matrices of quantities:
 %    $\begin{array}{ccccc}
 % e_{1,1}  &        & e_{1,j} &        & e_{1,n} \\
 %         &        &         &        &         \\
@@ -352,7 +352,7 @@ A = [ 2*kg       5*kg*metre
 
 \begin{frame}{Implementation Details}
   \begin{itemize}[<+->]
-  \item \ma programs are modelled as trees of commands, rather than sequence of commands.
+  \item \ma programs are modelled as \keyword{trees of commands}, rather than sequence of commands.
     \medskip
     \begin{itemize}
     \item Type information is propagated (consistently) throughout the tree; can put type annotations after variable declarations.
@@ -360,14 +360,14 @@ A = [ 2*kg       5*kg*metre
     \item Not every annotation is needed; document the interesting ones.
     \end{itemize}
     \medskip
-  \item \ma expressions are translated to \lm internal core type theory.
+  \item \ma expressions are translated to \lm internal \keyword{core type theory}.
     \medskip
     \begin{itemize}
     \item Matrix types are parametrised over 5 parameters with dependencies between them.
       \medskip
     \item Quantities are modelled as the free Abelian group over a base set of dimensions.
       \medskip
-    \item The typechecker understands nontrivial algebraic properties.
+    \item The typechecker understands \keyword{nontrivial algebraic properties}.
     \end{itemize}
   \end{itemize}
 \end{frame}
@@ -376,14 +376,14 @@ A = [ 2*kg       5*kg*metre
   \begin{itemize}[<+->]
   \item \lm is under active development.
     \smallskip
-    \begin{itemize}
+    \begin{itemize}[<.->]
     \item Available on GitHub, please get it in touch if interested.
     \end{itemize}
     \bigskip
   \item Work in the pipeline:
     \smallskip
     \begin{itemize}
-    \item \keyword{Uniqueness of representation}: currently, a matrix with quantities can have more than one corresponding type; this might lead to odd behaviour during typechecking.
+    \item<.-> \keyword{Uniqueness of representation}: currently, a matrix with quantities can have more than one corresponding type; this might lead to odd behaviour during typechecking.
       \medskip
     \item \keyword{Quality of life improvements}: better messages and more readable responses from \lm.
       \medskip
