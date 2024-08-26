@@ -211,6 +211,9 @@ instance Literal String  where ctor = SL
 pattern Intg :: () => (s ~ Chk) => Integer -> Term s ^ n
 pattern Intg i <- I i :$ U :^ _
 
+pattern Strg :: () => (s ~ Chk) => String -> Term s ^ n
+pattern Strg s <- SL s :$ U :^ _
+
 infixr 5 <&>
 (<&>) :: Term s ^ n -> Term t ^ n -> Term (Prd s t) ^ n
 (tl :^ th) <&> (tr :^ ph) | u :^ ps <- cop th ph = P tl u tr :^ ps

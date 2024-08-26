@@ -569,10 +569,11 @@ termToNFList ty tm
       Just tm -> pure [Left tm]
       Nothing -> termToNFList ty tm
   | Intg i <- tm = withScope $ pure $ replicate (fromInteger i) (Right nil)
+  | Strg s <- tm = withScope $ pure $ [Right (SL s :$ U :^ no natty)]
   | Nil <- tm  = pure []
   | Just (Sone, [t]) <- tagEh tm = checkEval ty t >>= \r -> pure [Right r]
   | Just (Splus, [s, t]) <- tagEh tm = (++) <$> termToNFList ty s <*> termToNFList ty t
-  | otherwise = error "termToNFList: no"
+  | otherwise = withScope $ error $ "termToNFList: no\nty = " ++ show ty ++ "\n m = " ++ show tm
 
 termToNFAbel
   :: Typ ^ n     -- type of generators

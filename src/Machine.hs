@@ -1984,6 +1984,16 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       pushProblems [xProb, yProb, zProb]
       newProb . Elab sol $ Await (conjunction [jc, hc, zstat]) zSol
       run
+    TypeExprTask whereAmI _ (TyStringLiteral s) -> do
+      (_, cs) <- constrain "IsListChar" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , lhs = mtype
+          , rhs = mk SList (atom SChar)
+          }
+      newProb . Elab sol $ Await cs (ixKI mtype (lit s))
+      run
+{-
     TypeExprTask whereAmI _ (TyStringLiteral s) -> case tagEh mtype of
       Just (SList, [genTy]) -> do
         (_, cs) <- constrain "IsChar" $ Constraint
@@ -1995,6 +2005,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         newProb . Elab sol $ Await cs (ixKI mtype (lit s))
         run
       _ -> move worried
+-}
     TypeExprTask MatLab EnsureCompatibility (TyJux dir x (TyNil _ :<=: _)) -> do
       (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
       (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs cs) (TypeExprTask MatLab EnsureCompatibility <$> x)
@@ -2384,6 +2395,7 @@ unelabType ty | Just ct <- tagEh ty = case ct of
         let sig = subSnoc (sub0 (R $^ nil <&> rowTy)) (R $^ nil <&> colTy)
         unelabType =<< normalise emptyContext (atom SType) (cellTy //^ sig)
   (SAbel, [ty]) | Just (SOne, []) <- tagEh ty -> pure [nom "int"]
+  (SList, [ty]) | Just (SChar, []) <- tagEh ty -> pure [nom "string"]
   (SEnum, [as]) -> do
     tas <- unelabTerm (mk SList $ atom SAtom) as
     pure $ [sym "Enum", spc 1] ++ tas
