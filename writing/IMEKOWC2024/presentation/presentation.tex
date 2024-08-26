@@ -125,15 +125,27 @@
 \setbeamertemplate{frametitle}[default][center]
 \beamertemplatenavigationsymbolsempty
 
+\defbeamertemplate*{footline}{my theme}
+{
+  \leavevmode%
+  \hbox{%
+    \usebeamerfont{date in head/foot}
+    \hspace*{0.97\paperwidth}\raisebox{2pt}{\insertframenumber{}}}
+  \vskip0pt%
+}
+
+
 \title{\huge \lm: \\ \centerline{Supporting Types for \ma} }
 \author[McBride, Nakov, Nordvall Forsberg et al]{\small Conor McBride$^{1}$, \underline{Georgi Nakov}$^{1}$, Fredrik Nordvall Forsberg$^{1}$,\\ Andr\'e Videla$^{1}$, Alistair Forbes$^{2}$, Keith Lines$^{2}$}
 \institute[]{$^{1}$University of Strathclyde, UK\\$^{2}$National Physical Laboratory, UK}
 
 \begin{document}
 
-\begin{frame}
+\begin{frame}[plain]
   \titlepage
 \end{frame}
+
+\setcounter{framenumber}{0}
 
 \begin{frame}{The Problem}
   \begin{itemize}
