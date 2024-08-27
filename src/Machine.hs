@@ -980,6 +980,10 @@ solveConstraint name c@SubtypingConstraint{..} = let n = vlen constraintCtx in n
         (genTyWant, aStat) <- ensureAbel wantCtx wantType
         stat <- subtype "subTypeAbelGot" genTyGot genTyWant
         metaDefn name (conjunction [aStat, stat])
+      Just (tag, [elTyGot]) | tag `elem` [SList, SDest] -> do
+        (elTyWant, dStat) <- ensureUTag tag wantCtx wantType
+        stat <- subtype "subTypeUTagGot" elTyGot elTyWant
+        metaDefn name (conjunction [dStat, stat])
       Just (SEnum, [genTyGot]) -> do
         (genTyWant, eStat) <- ensureEnum wantCtx wantType
         stat <- prefixConstraint constraintCtx genTyGot genTyWant
@@ -1008,6 +1012,10 @@ solveConstraint name c@SubtypingConstraint{..} = let n = vlen constraintCtx in n
           (genTyGot, aStat) <- ensureAbel gotCtx gotType
           stat <- subtype "subTypeAbelWant" genTyGot genTyWant
           metaDefn name (conjunction [aStat, stat])
+        Just (tag, [elTyWant]) | tag `elem` [SList, SDest] -> do
+          (elTyGot, dStat) <- ensureUTag tag gotCtx gotType
+          stat <- subtype "subTypeUTagGot" elTyGot elTyWant
+          metaDefn name (conjunction [dStat, stat])
         Just (SEnum, [genTyWant]) -> do
           (genTyGot, eStat) <- ensureEnum gotCtx gotType
           stat <- prefixConstraint constraintCtx genTyGot genTyWant
@@ -1034,7 +1042,7 @@ solveConstraint name c@SubtypingConstraint{..} = let n = vlen constraintCtx in n
         _ -> push $ ConstraintFrame name SubtypingConstraint{..}
  where
   prefixConstraint :: NATTY n => ConstraintContext n -> Term Chk ^ n -> Term Chk ^ n -> Elab BOOL
-  prefixConstraint ctx Nil ws = pure $ conjunction []
+  prefixConstraint ctx Nil ws = pure $ tRUE
   prefixConstraint ctx gs Nil = do
     (_ , stat) <- constrain "enumPrefixNil" $ Constraint
       { constraintCtx = ctx
@@ -1909,7 +1917,7 @@ ensureMatrix :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, NmTy ^ n, Nor
 ensureMatrix ctxt ty
   | Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs]) <- tagEh ty
   {- , Just cellTy <- lamEh cellTy
-  , Just cellTy <- lamEh cellTy -} = pure (rowGenTy, colGenTy, cellTy, rs, cs, conjunction [])
+  , Just cellTy <- lamEh cellTy -} = pure (rowGenTy, colGenTy, cellTy, rs, cs, tRUE)
   | otherwise = nattily (vlen ctxt) $ do
       rowGenTy <- invent "rowType" ctxt (atom SType)
       colGenTy <- invent "colType" ctxt (atom SType)
@@ -1925,8 +1933,21 @@ ensureMatrix ctxt ty
         }
       pure (rowGenTy, colGenTy, cellTy, rs, cs, cstat)
 
+ensureUTag :: String -> Context n -> NmTy ^ n -> Elab (Norm Chk ^ n, BOOL)
+ensureUTag tag ctxt ty | Just (tag, [t]) <- tagEh ty = pure (t, tRUE)
+  | otherwise = nattily (vlen ctxt) $ do
+     t <- invent "tagElTy" ctxt (atom SType)
+     (_ , tStat) <- constrain "tagTy" $ Constraint
+       { constraintCtx = fmap Hom <$> ctxt
+       , constraintType = Hom (atom SType)
+       , lhs = ty
+       , rhs = mk tag t
+       }
+     pure (t, tStat)
+
+
 ensureEnum :: Context n -> NmTy ^ n -> Elab (Norm Chk ^ n, BOOL)
-ensureEnum ctxt ty | Just (SEnum, [xs]) <- tagEh ty = pure (xs, conjunction [])
+ensureEnum ctxt ty | Just (SEnum, [xs]) <- tagEh ty = pure (xs, tRUE)
   | otherwise = nattily (vlen ctxt) $ do
      as <- invent "atoms" ctxt (mk SList (atom SAtom))
      (_ , asStat) <- constrain "enumAtoms" $ Constraint
@@ -1938,7 +1959,7 @@ ensureEnum ctxt ty | Just (SEnum, [xs]) <- tagEh ty = pure (xs, conjunction [])
      pure (as, asStat)
 
 ensureAbel :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, BOOL)
-ensureAbel ctxt ty | Just (SAbel, [g]) <- tagEh ty = pure (g, conjunction [])
+ensureAbel ctxt ty | Just (SAbel, [g]) <- tagEh ty = pure (g, tRUE)
   | otherwise = nattily (vlen ctxt) $ do
      g <- invent "genTy" ctxt (atom SType)
      (_ , gStat) <- constrain "abelG" $ Constraint
@@ -1950,7 +1971,7 @@ ensureAbel ctxt ty | Just (SAbel, [g]) <- tagEh ty = pure (g, conjunction [])
      pure (g, gStat)
 
 ensurePi :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, BOOL)
-ensurePi ctxt ty | Just (SPi, [src, tgt]) <- tagEh ty = pure (src, tgt, conjunction [])
+ensurePi ctxt ty | Just (SPi, [src, tgt]) <- tagEh ty = pure (src, tgt, tRUE)
   | otherwise = nattily (vlen ctxt) $ do
      src <- invent "srcTy" ctxt (atom SType)
      tgt <- invent "tgtTy" (ctxt \\\ ("x", src)) (atom SType)
@@ -1964,7 +1985,7 @@ ensurePi ctxt ty | Just (SPi, [src, tgt]) <- tagEh ty = pure (src, tgt, conjunct
      pure (src, ltgt, pStat)
 
 ensureQuantity :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, Norm Chk ^ n, BOOL)
-ensureQuantity ctxt ty | Just (SQuantity, [genTy, dim]) <- tagEh ty = pure (genTy, dim, conjunction [])
+ensureQuantity ctxt ty | Just (SQuantity, [genTy, dim]) <- tagEh ty = pure (genTy, dim, tRUE)
   | otherwise = nattily (vlen ctxt) $ do
      genTy <- invent "genTy" ctxt (atom SType)
      dim <- invent "dim" ctxt (mk SAbel genTy)
