@@ -116,6 +116,9 @@ data (^) :: (Nat -> Type) -> Nat -> Type where
 scopeOf :: p ^ n -> Natty n
 scopeOf (_ :^ th) = bigEnd th
 
+withScopeOf :: p ^ n -> (NATTY n => b) -> b
+withScopeOf x k = nattily (scopeOf x) k
+
 -- (^) is the free Thinny on (p :: Nat -> Type)
 instance Thinny ((^) (p :: Nat -> Type)) where
   (p :^ th) -< ph = p :^ (th -< ph)

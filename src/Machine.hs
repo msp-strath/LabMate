@@ -6,17 +6,23 @@ import Control.Monad
 import Control.Newtype
 import Control.Monad.State
 import Data.Char
+import Data.Either
 import Data.List
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Monoid
 import Data.Map (Map)
 import qualified Data.Map as Map
 
+import Data.Traversable
+
 -- mgen
 import TranslateContext (TargetLang(..))
 import Translate
 
+import MissingLibrary
+
 import Bwd
+import Term.Indexed
 
 import Lex
 import Parse
@@ -37,6 +43,8 @@ import Control.Monad.Reader
 debug = const id -- trace
 debugCatch = const id -- trace
 debugMatrix = const id -- trace
+debug260824 = trace
+
 
 type Elab = State MachineState
 
@@ -385,6 +393,7 @@ prob = llup >>= \case
     push $ LocalNamespace oldNs
     prob
   Just (ConstraintFrame name c) -> do
+    c <- updateConstraint c
     debug ("`prob` attempting to solve constraint " ++ show c) $ solveConstraint name c
     prob
   Just f  -> do
@@ -459,6 +468,54 @@ lhsType (Het lty _ _) = lty
 rhsType (Hom ty) = ty
 rhsType (Het _ _ rty) = rty
 
+data SimplifiedContext m = forall n. SimplifiedContext
+  { simplifiedContext :: ConstraintContext n
+  , simplifySubst :: Subst m ^ n -- strengthening
+  }
+
+nonUnitTypes :: Vec j (String, ConstraintType m) -> Ex (Flip (<=) j)
+nonUnitTypes VN = Ex (Flip Ze)
+nonUnitTypes (ga :# (_, cty)) = case nonUnitTypes ga of
+  Ex (Flip th) -> case cty of
+    Hom t | isUnitType t -> Ex (Flip (No th))
+          | otherwise -> Ex (Flip (Su th))
+
+strengthenNil :: i <= j -> Subst j i
+strengthenNil Ze = Sub0
+strengthenNil (No th) = SubT (strengthenNil th) (leftAll (no (weeEnd th))) (R :$ P (A "" :$ U) ZZ oneTypeZ)
+strengthenNil (Su th) = wkSubst (strengthenNil th)
+
+simplifyContext :: ConstraintContext m -> SimplifiedContext m
+simplifyContext ga = case nonUnitTypes ga of
+  Ex (Flip th) -> let sg = strengthenNil th :^ io (weeEnd th) in
+                    SimplifiedContext (fmap (fmap (fmap (//^ sg))) (th ?^ ga)) sg
+
+
+
+updateConstraintType :: ConstraintContext n -> ConstraintType n -> Elab (ConstraintType n)
+updateConstraintType ctx (Hom t) = nattily (vlen ctx) $ Hom <$> normalise (fmap lhsType <$> ctx) (atom SType) t
+updateConstraintType ctx (Het s b t) = nattily (vlen ctx) $ normalise emptyContext (atom STwo) b >>= \case
+  Intg 1 -> Hom <$> normalise (fmap lhsType <$> ctx) (atom SType) s
+  b -> Het <$> normalise (fmap lhsType <$> ctx) (atom SType) s <*> pure b <*> normalise (fmap rhsType <$> ctx) (atom SType) t
+
+updateConstraint :: Constraint -> Elab Constraint
+updateConstraint Constraint{..} = do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  constraintType' <- updateConstraintType constraintCtx constraintType
+  case simplifyContext constraintCtx of
+    SimplifiedContext constraintCtx sg -> do
+      let constraintType = fmap (//^ sg) constraintType'
+      lhs <- normalise (fmap lhsType <$> constraintCtx) (lhsType constraintType) (lhs //^ sg)
+      rhs <- normalise (fmap rhsType <$> constraintCtx) (rhsType constraintType) (rhs //^ sg)
+      pure Constraint{..}
+updateConstraint SubtypingConstraint{..} = nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  gotType <- normalise (fmap lhsType <$> constraintCtx) (atom SType) gotType
+  wantType <- normalise (fmap rhsType <$> constraintCtx) (atom SType) wantType
+  pure SubtypingConstraint{..}
+updateConstraint c = pure c
+
+
 isHom :: ConstraintType n -> Maybe (Typ ^ n)
 isHom (Hom ty) = Just ty
 isHom _ = Nothing
@@ -476,7 +533,7 @@ data Constraint = forall n . Constraint
   , leftTypes :: (Typ ^ n, Typ ^ n, Typ ^ S (S n))
   , rightTypes :: (Typ ^ n, Typ ^ n, Typ ^ S (S n))
   , returnCellType :: Typ ^ S (S n)
-  , joinType :: Typ ^ n
+  , joinGenType :: Typ ^ n
   , joinElement :: Term Chk ^ n
   , awaitingStatus :: BOOL
   }
@@ -493,23 +550,33 @@ data Constraint = forall n . Constraint
   }
   | forall n . JoinConstraint
   { constraintCtx :: ConstraintContext n
-  , leftType :: Term Chk ^ n
-  , rightType :: Term Chk ^ n
-  , joinType :: Term Chk ^ n
+  , leftGenType :: Term Chk ^ n
+  , rightGenType :: Term Chk ^ n
+  , joinGenType :: Term Chk ^ n
   }
   | forall n . SubtypingConstraint
   { constraintCtx   :: ConstraintContext n
   , gotType :: Term Chk ^ n
   , wantType :: Term Chk ^ n
   }
-  | forall n . HeaderCompatibility
+  | forall n . HeadersCompatibility
   { constraintCtx :: ConstraintContext n
-  , leftType :: Term Chk ^ n
-  , rightType :: Term Chk ^ n
-  , joinType :: Term Chk ^ n
+  , leftGenType :: Term Chk ^ n
+  , rightGenType :: Term Chk ^ n
+  , joinGenType :: Term Chk ^ n
   , joinStatus :: BOOL
   , leftList :: Term Chk ^ n
   , rightList :: Term Chk ^ n
+  , joinElement :: Term Chk ^ n
+  }
+  | forall n . HeaderCompatibility
+  { constraintCtx :: ConstraintContext n
+  , leftGenType :: Term Chk ^ n
+  , rightGenType :: Term Chk ^ n
+  , joinGenType :: Term Chk ^ n
+  , joinStatus :: BOOL
+  , leftElement :: Term Chk ^ n
+  , rightElement :: Term Chk ^ n
   , joinElement :: Term Chk ^ n
   }
   | forall n . NoMiddleDependency
@@ -535,7 +602,7 @@ instance Show Constraint where
     , ", leftTypes = ", show leftTypes
     , ", rightTypes = ", show rightTypes
     , ", returnCellType = ", show returnCellType
-    , ", joinType = ", show joinType
+    , ", joinGenType = ", show joinGenType
     , ", joinElement = ", show joinElement
     , ", awaitingStatus = ", show awaitingStatus
     , " }"
@@ -555,9 +622,9 @@ instance Show Constraint where
     ]
   show JoinConstraint{..} = nattily (vlen constraintCtx) $ concat
     [ "{ constraintCtx = ", show constraintCtx
-    , ", leftType = ", show leftType
-    , ", rightType = ", show rightType
-    , ", joinType = ", show joinType
+    , ", leftGenType = ", show leftGenType
+    , ", rightGenType = ", show rightGenType
+    , ", joinGenType = ", show joinGenType
     , " }"
     ]
   show SubtypingConstraint{..} = nattily (vlen constraintCtx) $ concat
@@ -566,14 +633,25 @@ instance Show Constraint where
     , ", wantType = ", show wantType
     , " }"
     ]
-  show HeaderCompatibility{..} = nattily (vlen constraintCtx) $ concat
+  show HeadersCompatibility{..} = nattily (vlen constraintCtx) $ concat
     [ "{ constraintCtx = ", show constraintCtx
-    , ", leftType = ", show leftType
-    , ", rightType = ", show rightType
-    , ", joinType = ", show joinType
+    , ", leftGenType = ", show leftGenType
+    , ", rightGenType = ", show rightGenType
+    , ", joinGenType = ", show joinGenType
     , ", joinStatus = ", show joinStatus
     , ", leftList = ", show leftList
     , ", rightList = ", show rightList
+    , ", joinElement = ", show joinElement
+    , " }"
+    ]
+  show HeaderCompatibility{..} = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", leftGenType = ", show leftGenType
+    , ", rightGenType = ", show rightGenType
+    , ", joinGenType = ", show joinGenType
+    , ", joinStatus = ", show joinStatus
+    , ", leftElement = ", show leftElement
+    , ", rightElement = ", show rightElement
     , ", joinElement = ", show joinElement
     , " }"
     ]
@@ -600,6 +678,12 @@ ctx \\\\ x = fmap (fmap wk) <$> ctx :# x
 alive :: BOOL -> Bool
 alive (Intg 0) = False
 alive _ = True
+
+fALSE :: BOOL
+fALSE = I 0 :$ U :^ Ze
+
+tRUE :: BOOL
+tRUE = I 1 :$ U :^ Ze
 
 conjunction :: [BOOL] -> BOOL
 conjunction nfs = case partition isLit nfs of
@@ -661,17 +745,43 @@ flexEh _ = pure Nothing
 constraintStatus :: Name -> Elab BOOL
 constraintStatus name = normalise VN (atom STwo) (wrapMeta name)
 
+ensureNull :: NATTY n => Context n -> Typ ^ n -> Norm Chk ^ n -> Elab BOOL
+ensureNull ctx ty tm = case partitionEithers (listView tm) of
+  ([], []) -> pure tRUE
+  (_, _:_) -> pure fALSE
+  (es, []) -> conjunction <$> (for es $ \ e -> do
+      (_, stat) <- constrain "ensureNulls" $ Constraint
+        { constraintCtx = fmap Hom <$> ctx
+        , constraintType = Hom (mk SList ty)
+        , lhs = E $^ e
+        , rhs = nil
+        }
+      pure stat)
+
+ensureCons :: NATTY n => Context n -> Typ ^ n -> Norm Chk ^ n -> Elab (Norm Chk ^ n, Norm Chk ^ n, BOOL)
+ensureCons ctx ty tm = case listView tm of
+  Right x:xs -> pure (x, unviewList ty xs, tRUE)
+  _ -> do
+    x <- invent "ensureHead" ctx ty
+    xs <- invent "ensureTail" ctx (mk SList ty)
+    (_, stat) <- constrain "ensureCons" $ Constraint
+      { constraintCtx = fmap Hom <$> ctx
+      , constraintType = Hom (mk SList ty)
+      , lhs = tm
+      , rhs = cons x xs
+      }
+    pure (x, xs, stat)
+
 constrain :: String -> Constraint -> Elab (Name, BOOL)
-constrain s c | debug ("Constrain call " ++ s ++ " constraint = " ++ show c) False = undefined
 constrain s c = do
+  c <- updateConstraint c
   name <- metaDecl Hoping s emptyContext (atom STwo)
-  solveConstraint name c
+  debug260824 ("Constrain call " ++ s ++ " constraint = " ++ show c) $ solveConstraint name c
   (name,) <$> constraintStatus name
 
--- gets a dismounted frame, tries to solve it, remounts it
+-- gets an updated dismounted frame, tries to solve it, remounts it
 solveConstraint :: Name -> Constraint -> Elab ()
 solveConstraint name c | debug ("Solve constrain call " ++ show name ++ " constraint = " ++ show c) False = undefined
--- TODO: must check if previously heterogeneous constraint has become homogeneous
 solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms  <- gets metaStore
@@ -680,7 +790,7 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
     lhsFlexEh <- flexEh lhs
     rhs <- normalise ctx ty rhs
     rhsFlexEh <- flexEh rhs
-    case debug ("CONSTRAIN " ++ show lhs ++ " = " ++ show rhs) (lhs, rhs) of
+    case debug260824 ("CONSTRAIN " ++ show lhs ++ " = " ++ show rhs) (lhs, rhs) of
       _ | debug "Checking syntactic equality?" (lhs == rhs) -> do
             debug ("Passed syn eq for " ++ show lhs ++ " =?= " ++ show rhs) $ metaDefn name (I 1 :$ U :^ no Zy)
       (_, t :^ ph)
@@ -701,6 +811,63 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
         , s1 /= s2 -> do
             debug ("Push Constraint n-5 " ++ show c) $ push $ ConstraintFrame name c
             debug (concat ["Unifying different atoms: ", s1, " and ", s2, "."]) $ metaDefn name (I 0 :$ U :^ no Zy)
+      _ | Just (SList, [elty])  <- tagEh ty
+        , isUnitType elty -> elabTC ctx (natTermCancel (lhs,rhs)) >>= \case
+            Left err -> error err
+            Right (lhs', rhs') -> if lhs == lhs'
+              then push $ ConstraintFrame name c
+              else do
+                (_, cstat) <- constrain "cancellation" $ Constraint
+                  { constraintCtx = constraintCtx
+                  , constraintType = Hom ty
+                  , lhs = lhs'
+                  , rhs = rhs'
+                  }
+                metaDefn name cstat
+      _ | Just (SList, [elty])  <- tagEh ty -> case mpullback (listView lhs) (listView rhs) of
+            (frontEquals, (l1, l2)) -> case mpullback (reverse l1) (reverse l2) of
+              (backEquals, (r1, r2)) -> case (reverse r1, reverse r2) of
+                ([], []) -> metaDefn name tRUE
+                (Right x:xs, Right y:ys) -> do
+                  (_, hstat) <- constrain "listHeadEqual" $ Constraint
+                    { constraintCtx = constraintCtx
+                    , constraintType = Hom elty
+                    , lhs = x
+                    , rhs = y
+                    }
+                  (_, tstat) <- constrain "listTailEqual" $ Constraint
+                    { constraintCtx = constraintCtx
+                    , constraintType = Hom (mk SList elty)
+                    , lhs = unviewList elty xs
+                    , rhs = unviewList elty ys
+                    }
+                  metaDefn name (conjunction [hstat, tstat])
+                _ | (Right x:xs, Right y:ys) <- (r1, r2) -> do
+                  (_, hstat) <- constrain "listLastEqual" $ Constraint
+                    { constraintCtx = constraintCtx
+                    , constraintType = Hom elty
+                    , lhs = x
+                    , rhs = y
+                    }
+                  (_, tstat) <- constrain "listInitEqual" $ Constraint
+                    { constraintCtx = constraintCtx
+                    , constraintType = Hom (mk SList elty)
+                    , lhs = unviewList elty (reverse xs)
+                    , rhs = unviewList elty (reverse ys)
+                    }
+                  metaDefn name (conjunction [hstat, tstat])
+                ([], l2) -> case partitionEithers l2 of
+                  (_, _:_) -> metaDefn name fALSE
+                  (es, []) | length frontEquals + length backEquals + length es > 1 -> ensureNull ctx elty (unviewList elty (map Left es)) >>= metaDefn name
+                  _ -> push $ ConstraintFrame name Constraint{..}
+                (l1, []) -> case partitionEithers l1 of
+                  (_, _:_) -> metaDefn name fALSE
+                  (es, []) | length frontEquals + length backEquals + length es > 1 -> ensureNull ctx elty (unviewList elty (map Left es)) >>= metaDefn name
+                  _ -> push $ ConstraintFrame name Constraint{..}
+                (l1, l2) -> do
+                  let lhs = unviewList elty l1
+                  let rhs = unviewList elty l2
+                  push $ ConstraintFrame name Constraint{..}
       _ | Just (lt, ls) <- tagEh lhs
         , Just (rt, rs) <- tagEh rhs
         , lt == rt -> case (lt, ls, rs) of
@@ -738,23 +905,27 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
                  metaDefn name $ conjunction [gstat, dstat]
                else do
                  metaDefn name (I 0 :$ U :^ no Zy)
-          (SMatrix, [rowTy, colTy, cellTy, rs, cs], [rowTy', colTy', cellTy', rs', cs'])
+          (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs], [rowGenTy', colGenTy', cellTy', rs', cs'])
             | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
             , Just (r', cellTy') <- lamNameEh cellTy', Just (c', cellTy') <- lamNameEh cellTy' -> do
                 (_, rstat) <- constrain "rowTy" $ Constraint
                   { constraintCtx = constraintCtx
                   , constraintType = Hom (atom SType)
-                  , lhs = rowTy
-                  , rhs = rowTy'
+                  , lhs = rowGenTy
+                  , rhs = rowGenTy'
                   }
                 (_, cstat) <- constrain "colTy" $ Constraint
                   { constraintCtx = constraintCtx
                   , constraintType = Hom (atom SType)
-                  , lhs = colTy
-                  , rhs = colTy'
+                  , lhs = colGenTy
+                  , rhs = colGenTy'
                   }
                 if alive rstat && alive cstat
                   then do
+                    let rowTy = mk SAbel rowGenTy
+                    let rowTy' = mk SAbel rowGenTy'
+                    let colTy = mk SAbel colGenTy
+                    let colTy' = mk SAbel colGenTy'
                     (_, cellStat) <- constrain "cell" $ Constraint
                       { constraintCtx = constraintCtx
                                         \\\\ (r, mkConstraintType rowTy rstat rowTy')
@@ -791,44 +962,173 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
               debug ("Push Constraint n-6 " ++ show c) $ push $ ConstraintFrame name c
           _ -> do
             debug ("Push Constraint n-4 " ++ show c) $ push $ ConstraintFrame name c
-      _ | Just (SList, [elty])  <- tagEh ty
-        , Just (SOne, []) <- tagEh elty -> elabTC ctx (natTermCancel (lhs,rhs)) >>= \case
-            Left err -> error err
-            Right (lhs', rhs') -> if lhs == lhs'
-              then push $ ConstraintFrame name c
-              else do
-                (_, cstat) <- constrain "cancellation" $ Constraint
-                  { constraintCtx = constraintCtx
-                  , constraintType = Hom ty
-                  , lhs = lhs'
-                  , rhs = rhs'
-                  }
-                metaDefn name cstat
       _ -> do
        debug ("Push Constraint n-3 " ++ show c) $ push $ ConstraintFrame name c
   _ -> do
     debug ("Push Constraint n-2 " ++ show c) $ push $ ConstraintFrame name c
-solveConstraint name c@SubtypingConstraint{..} = case (traverse (traverse isHom) constraintCtx) of
-  Just ctx -> let n = vlen constraintCtx in nattily n $ do
-    ms  <- gets metaStore
-    gotType <- normalise ctx (atom SType) gotType
-    gotTypeFlexEh <- flexEh gotType
-    wantType <- normalise ctx (atom SType) wantType
-    wantTypeFlexEh <- flexEh wantType
-    case debug ("CONSTRAIN subtype " ++ show gotType ++ " = " ++ show wantType) (gotType, wantType) of
-      _ | debug "Checking syntactic equality?" (gotType == wantType) -> do
-            debug ("Passed syn eq for " ++ show gotType ++ " =?= " ++ show wantType) $ metaDefn name (I 1 :$ U :^ no Zy)
+
+solveConstraint name c@SubtypingConstraint{..} = let n = vlen constraintCtx in nattily n $ do
+  let gotCtx = fmap lhsType <$> constraintCtx
+  let wantCtx = fmap rhsType <$> constraintCtx
+  gotType <- normalise gotCtx (atom SType) gotType
+  gotTypeFlexEh <- flexEh gotType
+  wantType <- normalise wantCtx (atom SType) wantType
+  wantTypeFlexEh <- flexEh wantType
+  if gotType == wantType then metaDefn name (I 1 :$ U :^ no Zy) else
+    case tagEh gotType of
+      Just (SAbel, [genTyGot]) -> do
+        (genTyWant, aStat) <- ensureAbel wantCtx wantType
+        stat <- subtype "subTypeAbelGot" genTyGot genTyWant
+        metaDefn name (conjunction [aStat, stat])
+      Just (SEnum, [genTyGot]) -> do
+        (genTyWant, eStat) <- ensureEnum wantCtx wantType
+        stat <- prefixConstraint constraintCtx genTyGot genTyWant
+        metaDefn name (conjunction [eStat, stat])
+      Just (SMatrix, [rowGenTyGot, colGenTyGot, cellTyGot, rsGot, csGot]) -> do
+        (rowGenTyWant, colGenTyWant, cellTyWant, rsWant, csWant, mstat) <- ensureMatrix wantCtx wantType
+        subMatrixType "submatrixGot" mstat (rowGenTyGot, colGenTyGot, cellTyGot, rsGot, csGot) (rowGenTyWant, colGenTyWant, cellTyWant, rsWant, csWant)
+      Just (SQuantity, [genTyGot, dimGot]) -> do
+        (genTyWant, dimWant, qStat) <- ensureQuantity wantCtx wantType
+        stat <- subQuantityType "subQuantityGot" (genTyGot, dimGot) (genTyWant, dimWant)
+        metaDefn name (conjunction [qStat, stat])
+      Just (SPi, [srcGot, tgtGot]) -> do
+        (srcWant, tgtWant, pStat) <- ensurePi wantCtx wantType
+        stat <- subPiType "subPiGot" (srcGot, tgtGot) (srcWant, tgtWant)
+        metaDefn name (conjunction [pStat, stat])
+      Just (_, []) -> do
+        (_ , stat) <- constrain "structuralEmptySubTypeGot" $ Constraint
+          { constraintCtx = constraintCtx
+          , constraintType = Hom (atom SType)
+          , lhs = gotType
+          , rhs = wantType
+          }
+        metaDefn name stat
+      _ -> case tagEh wantType of
+        Just (SAbel, [genTyWant]) -> do
+          (genTyGot, aStat) <- ensureAbel gotCtx gotType
+          stat <- subtype "subTypeAbelWant" genTyGot genTyWant
+          metaDefn name (conjunction [aStat, stat])
+        Just (SEnum, [genTyWant]) -> do
+          (genTyGot, eStat) <- ensureEnum gotCtx gotType
+          stat <- prefixConstraint constraintCtx genTyGot genTyWant
+          metaDefn name (conjunction [eStat, stat])
+        Just (SMatrix, [rowGenTyWant, colGenTyWant, cellTyWant, rsWant, csWant]) -> do
+          (rowGenTyGot, colGenTyGot, cellTyGot, rsGot, csGot, mstat) <- ensureMatrix gotCtx gotType
+          subMatrixType "submatrixWant" mstat (rowGenTyGot, colGenTyGot, cellTyGot, rsGot, csGot) (rowGenTyWant, colGenTyWant, cellTyWant, rsWant, csWant)
+        Just (SQuantity, [genTyWant, dimWant]) -> do
+          (genTyGot, dimGot, qStat) <- ensureQuantity gotCtx gotType
+          stat <- subQuantityType "subQuantityWant" (genTyGot, dimGot) (genTyWant, dimWant)
+          metaDefn name (conjunction [qStat, stat])
+        Just (SPi, [srcWant, tgtWant]) -> do
+          (srcGot, tgtGot, pStat) <- ensurePi gotCtx gotType
+          stat <- subPiType "subPiWant" (srcGot, tgtGot) (srcWant, tgtWant)
+          metaDefn name (conjunction [pStat, stat])
+        Just (_, []) -> do
+          (_ , stat) <- constrain "structuralEmptySubTypeWant" $ Constraint
+            { constraintCtx = constraintCtx
+            , constraintType = Hom (atom SType)
+            , lhs = gotType
+            , rhs = wantType
+            }
+          metaDefn name stat
+        _ -> push $ ConstraintFrame name SubtypingConstraint{..}
+ where
+  prefixConstraint :: NATTY n => ConstraintContext n -> Term Chk ^ n -> Term Chk ^ n -> Elab BOOL
+  prefixConstraint ctx Nil ws = pure $ conjunction []
+  prefixConstraint ctx gs Nil = do
+    (_ , stat) <- constrain "enumPrefixNil" $ Constraint
+      { constraintCtx = ctx
+      , constraintType = Hom (mk SList (atom SAtom))
+      , lhs = gs
+      , rhs = nil
+      }
+    pure stat
+  prefixConstraint ctx gs ws = do
+    rs <- invent "rs" (fmap lhsType <$> ctx) (mk SList (atom SAtom))
+    (_ , stat) <- constrain "enumPrefix" $ Constraint
+      { constraintCtx = ctx
+      , constraintType = Hom (mk SList (atom SAtom))
+      , lhs = tag Splus [gs, rs]
+      , rhs = ws
+      }
+    pure stat
+
+  subtype s gotType wantType = snd <$> (constrain s $ SubtypingConstraint{..})
+
+  subMatrixType s stat (rowGenTyGot, colGenTyGot, cellTyGot, rsGot, csGot) (rowGenTyWant, colGenTyWant, cellTyWant, rsWant, csWant)
+    | Just (rGot, cellTyGot) <- lamNameEh cellTyGot, Just (cGot, cellTyGot) <- lamNameEh cellTyGot
+    , Just (rWant, cellTyWant) <- lamNameEh cellTyWant, Just (cWant, cellTyWant) <- lamNameEh cellTyWant = let n = vlen constraintCtx in nattily n $ do
+        let wantCtx = fmap rhsType <$> constraintCtx
+        rstat <- subtype (s ++ "Row") rowGenTyGot rowGenTyWant
+        cstat <- subtype (s ++ "Col") colGenTyGot colGenTyWant
+        if alive rstat && alive cstat then do
+          rowJoinElt <- invent "joinElementRow" wantCtx (mk SAbel rowGenTyWant)
+          (_, headerRowStat) <- constrain (s ++ "HeaderCompatRow") $ HeadersCompatibility
+            { constraintCtx = constraintCtx
+            , leftGenType = rowGenTyGot
+            , rightGenType = rowGenTyWant
+            , joinGenType = rowGenTyWant
+            , joinStatus = rstat
+            , leftList = rsGot
+            , rightList = rsWant
+            , joinElement = rowJoinElt
+            }
+          colJoinElt <- invent "joinElementCol" wantCtx (mk SAbel colGenTyWant)
+          (_, headerColStat) <- constrain (s ++ "HeaderCompatCol") $ HeadersCompatibility
+            { constraintCtx = constraintCtx
+            , leftGenType = colGenTyGot
+            , rightGenType = colGenTyWant
+            , joinGenType = colGenTyWant
+            , joinStatus = cstat
+            , leftList = csGot
+            , rightList = csWant
+            , joinElement = colJoinElt
+            }
+          (_, cellStat) <- constrain (s ++ "Cell") $ SubtypingConstraint
+            { constraintCtx = constraintCtx \\\\ (rGot, Hom (mk SAbel rowGenTyGot)) \\\\ (cGot, Hom (wk $ mk SAbel colGenTyGot))
+            , gotType = cellTyGot
+            , wantType = cellTyWant //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (R $^ (mk Splus (var 1) (wk (wk rowJoinElt)))  <&> wk (wk $ mk SAbel rowGenTyWant))) (R $^ (mk Splus (var 0) (wk (wk colJoinElt))) <&> wk (wk $ mk SAbel colGenTyWant))
+            }
+          metaDefn name $ conjunction [rstat, cstat, cellStat, headerRowStat, headerColStat]
+        else
+          metaDefn name (I 0 :$ U :^ no Zy)
+
+  subPiType s (srcGot, tgtGot) (srcWant, tgtWant)
+   | Just (tGot, tgtGot) <- lamNameEh tgtGot
+   , Just (tWant, tgtWant) <- lamNameEh tgtWant = do
+       srcStat <- subtype (s ++ "Src") srcWant srcGot
+       (_, tgtStat) <- constrain (s ++ "Tgt") $ SubtypingConstraint
+         { constraintCtx = constraintCtx \\\\ (tWant, Hom srcWant)
+         , gotType = tgtGot
+         , wantType = tgtWant
+         }
+       pure $ conjunction [srcStat, tgtStat]
+
+  subQuantityType s (genTyGot, dimGot) (genTyWant, dimWant) = nattily (vlen constraintCtx) $ do
+    gstat <- subtype (s ++ "GenTy") genTyGot genTyWant
+    if alive gstat then do
+      (_, dstat) <- constrain (s ++ "Dim") $ Constraint
+        { constraintCtx = constraintCtx
+        , constraintType = Hom (mk SAbel genTyWant)
+        , lhs = dimGot
+        , rhs = dimWant
+        }
+      pure $ conjunction [gstat, dstat]
+    else pure (I 0 :$ U :^ no Zy)
+
+
+{-
       (_, t :^ ph) -- FIXME: this is NOT CORRECT
         | Just (FlexEh x k ph' th) <- gotTypeFlexEh
         , Just ps <- thicken ph th
         , x `Set.notMember` dependencies t -> do
-              metaDefn x (t :^ (ps -< ph'))
+              debug260824 ("FLEXEH SUBTYPING WANTTYPE" ++ show x ++ " " ++ show wantType) $ metaDefn x (t :^ (ps -< ph'))
               metaDefn name (I 1 :$ U :^ no Zy)
       (t :^ ph, _) -- FIXME: this is NOT CORRECT
         | Just (FlexEh x k ph' th) <- wantTypeFlexEh
         , Just ps <- thicken ph th
         , x `Set.notMember` dependencies t -> do
-              metaDefn x (t :^ (ps -< ph'))
+              debug260824 ("FLEXEH SUBTYPING GOTTYPE" ++ show x ++ " " ++ show gotType) $ metaDefn x (t :^ (ps -< ph'))
               metaDefn name (I 1 :$ U :^ no Zy)
       _ | Just (lt, ls) <- tagEh gotType
         , Just (rt, rs) <- tagEh wantType
@@ -916,29 +1216,30 @@ solveConstraint name c@SubtypingConstraint{..} = case (traverse (traverse isHom)
                                         \\\\ (r, Hom rowTy)
                                         \\\\ (c, Hom (wk colTy))
                       , gotType = cellTy
-                      , wantType = cellTy' //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (R $^ (mk Splus (var 1) (wk (wk rowJoinElt)))  <&> wk (wk rowTy'))) (R $^ (mk Splus (var 0) (wk (wk colJoinElt))) <&> wk (wk colTy')) -- subSnoc (sub0 (R $^ (mk Splus (var 1) (wk (wk rowJoinElt)))  <&> rowTy')) (R $^ (mk Splus (var 0) (wk (wk colJoinElt))) <&> colTy')
+                      , wantType = cellTy' //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (R $^ (mk Splus (var 1) (wk (wk rowJoinElt)))  <&> wk (wk rowTy'))) (R $^ (mk Splus (var 0) (wk (wk colJoinElt))) <&> wk (wk colTy'))
+                                                                             -- subSnoc (sub0 (R $^ (mk Splus (var 1) (wk (wk rowJoinElt)))  <&>        rowTy'))  (R $^ (mk Splus (var 0) (wk (wk colJoinElt))) <&>        colTy')
                       }
                     metaDefn name $ conjunction [rstat, cstat, cellStat, headerRowStat, headerColStat]
                   else
                     debug "RowTy/ColTy constraints - bad solution" $ metaDefn name (I 0 :$ U :^ no Zy)
-      _ -> push $ ConstraintFrame name c
+-}
 solveConstraint name c@Multiplicable{..}
  | Just ctx <- traverse (traverse isHom) constraintCtx = let n = vlen constraintCtx in nattily n $ do
-     let (rowTy, leftMidTy, leftCellType) = leftTypes
-     let (rightMidTy, colTy, rightCellType) = rightTypes
-     rowTy <- normalise ctx (atom SType) rowTy
-     leftMidTy <- normalise ctx (atom SType) leftMidTy
-     rightMidTy <- normalise ctx (atom SType) rightMidTy
-     colTy <- normalise ctx (atom SType) colTy
-     leftCellType <- normalise (ctx \\\ ("i", rowTy) \\\ ("j", wk leftMidTy)) (atom SType) leftCellType
-     rightCellType <- normalise (ctx \\\ ("i", rightMidTy) \\\ ("j", wk colTy)) (atom SType) rightCellType
-     let returnCtx = ctx \\\ ("i", rowTy) \\\ ("k", wk colTy)
+     let (rowGenTy, leftMidGenTy, leftCellType) = leftTypes
+     let (rightMidGenTy, colGenTy, rightCellType) = rightTypes
+     rowGenTy <- normalise ctx (atom SType) rowGenTy
+     leftMidGenTy <- normalise ctx (atom SType) leftMidGenTy
+     rightMidGenTy <- normalise ctx (atom SType) rightMidGenTy
+     colGenTy <- normalise ctx (atom SType) colGenTy
+     leftCellType <- normalise (ctx \\\ ("i", mk SAbel rowGenTy) \\\ ("j", wk $ mk SAbel leftMidGenTy)) (atom SType) leftCellType
+     rightCellType <- normalise (ctx \\\ ("i", mk SAbel rightMidGenTy) \\\ ("j", wk $ mk SAbel colGenTy)) (atom SType) rightCellType
+     let returnCtx = ctx \\\ ("i", mk SAbel rowGenTy) \\\ ("k", wk $ mk SAbel colGenTy)
      returnCellType <- normalise returnCtx (atom SType) returnCellType
-     joinType <- normalise ctx (atom SType) joinType
-     joinElement <- normalise ctx joinType joinElement
+     joinGenType <- normalise ctx (atom SType) joinGenType
+     joinElement <- normalise ctx (mk SAbel joinGenType) joinElement
      awaitingStatus <- normalise emptyContext (atom STwo) awaitingStatus
-     let leftTypes = (rowTy, leftMidTy, leftCellType)
-     let rightTypes = (rightMidTy, colTy, rightCellType)
+     let leftTypes = (rowGenTy, leftMidGenTy, leftCellType)
+     let rightTypes = (rightMidGenTy, colGenTy, rightCellType)
      case awaitingStatus of
        Intg 0 -> metaDefn name (I 0 :$ U :^ no Zy)
        Intg 1 -> do
@@ -966,9 +1267,9 @@ solveConstraint name c@Multiplicable{..}
                g <- invent "generatorType" ctx (atom SType)
                (_, gstat) <- constrain "joinyThing" $ JoinConstraint
                  { constraintCtx = fmap Hom <$> ctx
-                 , leftType = g0
-                 , rightType = g1
-                 , joinType = g
+                 , leftGenType = g0
+                 , rightGenType = g1
+                 , joinGenType = g
                  }
                pure (g, [gstat])
              d <- invent "answer" returnCtx (wk (wk (mk SAbel g)))
@@ -980,14 +1281,14 @@ solveConstraint name c@Multiplicable{..}
                }
              (_ , noMidDepStat) <- constrain "noMiddleDep" $ NoMiddleDependency
                { constraintCtx = fmap Hom <$> ctx
-               , extension = (rowTy, joinType, colTy)
+               , extension = (mk SAbel rowGenTy, mk SAbel joinGenType, mk SAbel colGenTy)
                , joinGenStatus = conjunction gstats
                , joinGenType = g
                , destination = d
                , candidate = mk Splus (wk d0)
                                       (d1 //^ subSnoc
                                                 (subSnoc (idSubst n :^ No (No (No (io n))))
-                                                         (R $^ tag Splus [E $^ var 1, wk (wk (wk joinElement))] <&> (wk (wk (wk joinType)))))
+                                                         (R $^ tag Splus [E $^ var 1, wk (wk (wk joinElement))] <&> (wk (wk (wk $ mk SAbel joinGenType)))))
                                                 (var 0))
                }
              metaDefn name (conjunction [retCellstat, noMidDepStat])
@@ -996,10 +1297,11 @@ solveConstraint name c@Multiplicable{..}
 
 solveConstraint name c@JoinConstraint{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
-      leftType <- normalise ctx (atom SType) leftType
-      rightType <- normalise ctx (atom SType) rightType
-      joinType <- normalise ctx (atom SType) joinType
-      case (tagEh leftType, tagEh rightType, tagEh joinType) of
+      leftGenType <- normalise ctx (atom SType) leftGenType
+      rightGenType <- normalise ctx (atom SType) rightGenType
+      joinTGenype <- normalise ctx (atom SType) joinGenType
+      case (tagEh leftGenType, tagEh rightGenType, tagEh joinGenType) of
+{-
         (Just (SOne, []), _ , _) -> do
           (_, rjstat) <- constrain "leftOne" $ Constraint
             { constraintCtx = constraintCtx
@@ -1030,10 +1332,11 @@ solveConstraint name c@JoinConstraint{..}
             , rhs = joinType
             }
           metaDefn name (conjunction [lstat, rstat])
+-}
         (a, b, c) | not $ null [x | Just (SEnum, [x]) <- [a, b, c]] -> do
-          (as, asStat) <- ensureEnum ctx leftType
-          (bs, bsStat) <- ensureEnum ctx rightType
-          (cs, csStat) <- ensureEnum ctx joinType
+          (as, asStat) <- ensureEnum ctx leftGenType
+          (bs, bsStat) <- ensureEnum ctx rightGenType
+          (cs, csStat) <- ensureEnum ctx joinGenType
           (_ , pushStat) <- constrain "listpushout" $ ListAtomPushout
             { constraintCtx = constraintCtx
             , leftList = as
@@ -1041,40 +1344,57 @@ solveConstraint name c@JoinConstraint{..}
             , joinList = cs
             }
           metaDefn name (conjunction [asStat, bsStat, csStat, pushStat])
-        (a, b, c) | not $ null [x | Just (SAbel, [x]) <- [a, b, c]] -> do
-          (a, aStat) <- ensureAbel ctx leftType
-          (b, bStat) <- ensureAbel ctx rightType
-          (c, cStat) <- ensureAbel ctx joinType
-          (_ , joinStat) <- constrain "listpushout" $ JoinConstraint
-            { constraintCtx = constraintCtx
-            , leftType = a
-            , rightType = b
-            , joinType = c
-            }
-          metaDefn name (conjunction [aStat, bStat, cStat, joinStat])
         _ -> push $ ConstraintFrame name JoinConstraint{..}
 
-solveConstraint name c@HeaderCompatibility{..}
+solveConstraint name c@HeadersCompatibility{..} = nattily (vlen constraintCtx) $ do
+      let leftCtx = fmap lhsType <$> constraintCtx
+      let rightCtx = fmap rhsType <$> constraintCtx
+      leftGenType <- normalise leftCtx (atom SType) leftGenType
+      rightGenType <- normalise rightCtx (atom SType) rightGenType
+      leftList <- normalise leftCtx (mk SList (tag SAbel [leftGenType])) leftList
+      rightList <- normalise rightCtx (mk SList (tag SAbel [rightGenType])) rightList
+      let consCase (leftElement , leftList) (rightElement, rightList) stat = do
+            (_, hstat) <- constrain "headCompat" $ HeaderCompatibility{..}
+            (_, tstat) <- constrain "tailCompat" $ HeadersCompatibility{..}
+            metaDefn name (conjunction [tstat, hstat])
+      case listView leftList of
+        [] -> ensureNull rightCtx (mk SAbel rightGenType) rightList >>= metaDefn name
+        Right x:xs -> do
+          (y, ys, stat) <- ensureCons rightCtx (mk SAbel rightGenType) rightList
+          consCase (x , unviewList (mk SAbel leftGenType) xs) (y, ys) stat
+        _ -> case listView rightList of
+          [] -> ensureNull leftCtx (mk SAbel leftGenType) leftList >>= metaDefn name
+          Right y:ys -> do
+            (x, xs, stat) <- ensureCons leftCtx (mk SAbel leftGenType) leftList
+            consCase (x , xs) (y, unviewList (mk SAbel rightGenType) ys) stat
+          _ -> push $ ConstraintFrame name HeadersCompatibility{..}
+
+solveConstraint name HeaderCompatibility{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
-      leftType <- normalise ctx (atom SType) leftType
-      rightType <- normalise ctx (atom SType) rightType
-      joinType <- normalise ctx (atom SType) joinType
-      leftList <- normalise ctx (mk SList leftType) leftList
-      rightList <- normalise ctx (mk SList rightType) rightList
-      joinElement <- normalise ctx joinType joinElement
-      case (listView leftList, listView rightList) of
-        (LIsNull, LIsNull) -> metaDefn name (I 1 :$ U :^ no Zy)
-        (LIsCons (x, xs), LIsCons (y, ys)) -> do
+      leftGenType <- normalise ctx (atom SType) leftGenType
+      rightGenType <- normalise ctx (atom SType) rightGenType
+      joinGenType <- normalise ctx (atom SType) joinGenType
+      leftElement <- normalise ctx (mk SAbel leftGenType) leftElement
+      rightElement <- normalise ctx (mk SAbel rightGenType) rightElement
+      joinElement <- normalise ctx (mk SAbel joinGenType) joinElement
+      joinStatus <- normalise emptyContext (atom STwo) joinStatus
+      case joinStatus of
+        Intg 0 -> metaDefn name fALSE
+        Intg 1 -> do
+          (_, hstat) <- constrain "headerCompat" $ Constraint
+            { constraintCtx = constraintCtx
+            , constraintType = Hom (mk SAbel joinGenType)
+            , lhs = joinElement
+            , rhs = mk Splus (negTm leftElement) rightElement
+            }
+          metaDefn name hstat
+        _ -> push $ ConstraintFrame name HeaderCompatibility{..}
+
+        {-
+        (LIsCons (x, xs), ) -> do
           hstats <- case tagEh joinType of
             Just (SAbel, [_]) -> do
-              (_, hstat) <- constrain "headCompat" $ Constraint
-                { constraintCtx = constraintCtx
-                , constraintType = Het joinType joinStatus joinType
-                , lhs = joinElement
-                , rhs = mk Splus (negTm x) y
-                }
               pure [hstat]
-            Just (SOne, []) -> pure []
             _ -> do  -- TODO: check if this really makes sense, sometime
               (_, hstat) <- constrain "headEqual" $ Constraint
                 { constraintCtx = constraintCtx
@@ -1089,7 +1409,8 @@ solveConstraint name c@HeaderCompatibility{..}
             , ..
             }
           metaDefn name (conjunction (tstat : hstats))
-        _ -> push $ ConstraintFrame name HeaderCompatibility{..}
+        _ -> 
+-}
 
 solveConstraint name c@NoMiddleDependency{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
@@ -1141,7 +1462,7 @@ solveConstraint name c@ListAtomPushout{..}
                 , rhs = leftList
                 }
               metaDefn name jStat
-        (LIsNull, _, _) -> do
+        ([], _, _) -> do
             (_ , jStat) <- constrain "leftEmpty" $ Constraint
               { constraintCtx = constraintCtx
               , constraintType = Hom (mk SList (atom SAtom))
@@ -1149,7 +1470,7 @@ solveConstraint name c@ListAtomPushout{..}
               , rhs = rightList
               }
             metaDefn name jStat
-        (_ , LIsNull, _) -> do
+        (_ , [], _) -> do
             (_ , jStat) <- constrain "rightEmpty" $ Constraint
               { constraintCtx = constraintCtx
               , constraintType = Hom (mk SList (atom SAtom))
@@ -1157,7 +1478,7 @@ solveConstraint name c@ListAtomPushout{..}
               , rhs = leftList
               }
             metaDefn name jStat
-        (_ , _, LIsNull) -> do
+        (_ , _, []) -> do
             (_ , lStat) <- constrain "leftEmptyJ" $ Constraint
               { constraintCtx = constraintCtx
               , constraintType = Hom (mk SList (atom SAtom))
@@ -1171,7 +1492,7 @@ solveConstraint name c@ListAtomPushout{..}
               , rhs = nil
               }
             metaDefn name (conjunction [lStat, rStat])
-        (LIsCons (x, xs), LIsCons (y, ys), _) -> do
+        (Right x:xs, Right y:ys, _) -> do
             (_ , headStat) <- constrain "headEqual" $ Constraint
               { constraintCtx = constraintCtx
               , constraintType = Hom (atom SAtom)
@@ -1181,8 +1502,8 @@ solveConstraint name c@ListAtomPushout{..}
             joinTail <- invent "joinTail" ctx (mk SList (atom SAtom))
             (_ , tailStat) <- constrain "tailConstraint" $ ListAtomPushout
               { constraintCtx = constraintCtx
-              , leftList = xs
-              , rightList = ys
+              , leftList = unviewList (atom SAtom) xs
+              , rightList = unviewList (atom SAtom) ys
               , joinList = joinTail
               }
             (_ , resStat) <- constrain "resJoinList" $ Constraint
@@ -1285,8 +1606,7 @@ metaDefn x def = getMeta x >>= \case
 invent' :: Status -> String -> Context n -> Typ ^ n -> Elab (Term Chk ^ n)
 invent' stat x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \case
   ty
-    | Just (SOne, []) <- tagEh ty ->
-      pure nil
+    | isUnitType ty -> pure nil
     | Just (SPi, [s, t]) <- tagEh ty, Just (y, t) <- lamNameEh t ->
       lam y <$> invent x (ctx \\\ (y, s)) t
     | Just (SSig, [s, t]) <- tagEh ty, Just (y, t) <- lamNameEh t -> do
@@ -1585,25 +1905,25 @@ elab x ctx ty (etask :<=: src) =
   fmap (Sourced . (:<=: src)) <$> elab' x ctx ty etask
 
 
-ensureMatrixType :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, NmTy ^ n, Norm Chk ^ n, Norm Chk ^ n, BOOL)
-ensureMatrixType ctxt ty
-  | Just (SMatrix, [rowTy, colTy, cellTy, rs, cs]) <- tagEh ty
+ensureMatrix :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, NmTy ^ n, Norm Chk ^ n, Norm Chk ^ n, BOOL)
+ensureMatrix ctxt ty
+  | Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs]) <- tagEh ty
   {- , Just cellTy <- lamEh cellTy
-  , Just cellTy <- lamEh cellTy -} = pure (rowTy, colTy, cellTy, rs, cs, conjunction [])
+  , Just cellTy <- lamEh cellTy -} = pure (rowGenTy, colGenTy, cellTy, rs, cs, conjunction [])
   | otherwise = nattily (vlen ctxt) $ do
-      rowTy <- invent "rowType" ctxt (atom SType)
-      colTy <- invent "colType" ctxt (atom SType)
-      let ctxtRC = ctxt \\\ ("r", rowTy) \\\ ("c", wk colTy)
+      rowGenTy <- invent "rowType" ctxt (atom SType)
+      colGenTy <- invent "colType" ctxt (atom SType)
+      let ctxtRC = ctxt \\\ ("r", mk SAbel rowGenTy) \\\ ("c", wk $ mk SAbel colGenTy)
       cellTy <- lam "r" . lam "c" <$> invent "cellType" ctxtRC (atom SType)
-      rs <- invent "rs" ctxt (mk SList rowTy)
-      cs <- invent "cs" ctxt (mk SList colTy)
+      rs <- invent "rs" ctxt (mk SList (tag SAbel [rowGenTy]))
+      cs <- invent "cs" ctxt (mk SList (tag SAbel [colGenTy]))
       (_, cstat) <- constrain "ensureMat" $ Constraint
         { constraintCtx = fmap Hom <$> ctxt
         , constraintType = Hom (atom SType)
-        , lhs = mk SMatrix rowTy colTy cellTy rs cs
+        , lhs = mk SMatrix rowGenTy colGenTy cellTy rs cs
         , rhs = ty
         }
-      pure (rowTy, colTy, cellTy, rs, cs, cstat)
+      pure (rowGenTy, colGenTy, cellTy, rs, cs, cstat)
 
 ensureEnum :: Context n -> NmTy ^ n -> Elab (Norm Chk ^ n, BOOL)
 ensureEnum ctxt ty | Just (SEnum, [xs]) <- tagEh ty = pure (xs, conjunction [])
@@ -1629,6 +1949,32 @@ ensureAbel ctxt ty | Just (SAbel, [g]) <- tagEh ty = pure (g, conjunction [])
        }
      pure (g, gStat)
 
+ensurePi :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, NmTy ^ n, BOOL)
+ensurePi ctxt ty | Just (SPi, [src, tgt]) <- tagEh ty = pure (src, tgt, conjunction [])
+  | otherwise = nattily (vlen ctxt) $ do
+     src <- invent "srcTy" ctxt (atom SType)
+     tgt <- invent "tgtTy" (ctxt \\\ ("x", src)) (atom SType)
+     let ltgt = lam "x" tgt
+     (_ , pStat) <- constrain "pi" $ Constraint
+       { constraintCtx = fmap Hom <$> ctxt
+       , constraintType = Hom (atom SType)
+       , lhs = ty
+       , rhs = mk SPi src ltgt
+       }
+     pure (src, ltgt, pStat)
+
+ensureQuantity :: Context n -> NmTy ^ n -> Elab (NmTy ^ n, Norm Chk ^ n, BOOL)
+ensureQuantity ctxt ty | Just (SQuantity, [genTy, dim]) <- tagEh ty = pure (genTy, dim, conjunction [])
+  | otherwise = nattily (vlen ctxt) $ do
+     genTy <- invent "genTy" ctxt (atom SType)
+     dim <- invent "dim" ctxt (mk SAbel genTy)
+     (_ , qStat) <- constrain "quantity" $ Constraint
+       { constraintCtx = fmap Hom <$> ctxt
+       , constraintType = Hom (atom SType)
+       , lhs = ty
+       , rhs = mk SQuantity genTy dim
+       }
+     pure (genTy, dim, qStat)
 
 
 doubleType :: Term Chk ^ Z
@@ -1644,14 +1990,16 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
   mtype <- normalise mctxt (atom SType) mtype
   case etask of
     TensorTask (Tensor ((x, xs :<=: xSrc), (y, ys :<=: ySrc)) (eTy :<=: eSrc)) -> do
-      xTy <- invent (x ++ "Type") mctxt (atom SType)
-      yTy <- invent (y ++ "Type") mctxt (atom SType)
+      xGenTy <- invent (x ++ "GenType") mctxt (atom SType)
+      yGenTy <- invent (y ++ "GenType") mctxt (atom SType)
+      let xTy = mk SAbel xGenTy
+      let yTy = mk SAbel yGenTy
       (xsSol, xsProb) <- elab (x ++ "List") mctxt (mk SList xTy) (TypeExprTask LabMate EnsureCompatibility xs :<=: xSrc)
       (ysSol, ysProb) <- elab (y ++ "List") mctxt (mk SList yTy) (TypeExprTask LabMate EnsureCompatibility ys :<=: ySrc)
       let ctx = mctxt \\\ (x, xTy) \\\ (y, wk yTy)
       (eSol, eProb) <- elab "entryType" ctx (atom SType) (TypeExprTask LabMate EnsureCompatibility eTy :<=: eSrc)
       pushProblems [xsProb, ysProb, eProb]
-      metaDefn sol (mk SMatrix xTy yTy (lam x . lam y $ eSol) xsSol ysSol)
+      metaDefn sol (mk SMatrix xGenTy yGenTy (lam x . lam y $ eSol) xsSol ysSol)
       newProb $ Done nil
       move winning
     TypeExprTask LabMate _ (TyVar Ldouble) | Just (SType, []) <- tagEh mtype -> do
@@ -1659,7 +2007,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       newProb $ Done nil
       move winning
     TypeExprTask LabMate _ (TyVar Lint) | Just (SType, []) <- tagEh mtype -> do
-      metaDefn sol $ mk SAbel (atom SOne) -< no (vlen mctxt)
+      metaDefn sol $ mk SAbel oneType -< no (vlen mctxt)
       newProb $ Done nil
       move winning
     TypeExprTask LabMate _ (TyVar Lstring) | Just (SType, []) <- tagEh mtype -> do
@@ -1736,7 +2084,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           { constraintCtx = fmap Hom <$> mctxt
           , constraintType = Hom (atom SType)
           , lhs = genTy
-          , rhs = atom SOne
+          , rhs = oneType
           }
         case () of
           _ | k >= 0 -> do
@@ -1750,12 +2098,14 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           { constraintCtx = fmap Hom <$> mctxt
           , constraintType = Hom (atom SType)
           , lhs = genTy
-          , rhs = atom SOne
+          , rhs = oneType
           }
         newProb . Elab sol $ Await cs (ixKI mtype (lit k))
         run
-      Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+      Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs])
         | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
+            let rowTy = mk SAbel rowGenTy
+            let colTy = mk SAbel colGenTy
             r <- invent r mctxt rowTy
             c <- invent c mctxt colTy
             (_, rcs) <- constrain "IsSingletonR" $ Constraint
@@ -1778,13 +2128,13 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
                   { constraintCtx = fmap Hom <$> mctxt
                   , constraintType = Hom (atom SType)
                   , lhs = rowTy
-                  , rhs = atom SOne
+                  , rhs = oneType
                   }
                 (_, cstat) <- constrain "coltyIsOne" $ Constraint
                   { constraintCtx = fmap Hom <$> mctxt
                   , constraintType = Hom (atom SType)
                   , lhs = colTy
-                  , rhs = atom SOne
+                  , rhs = oneType
                   }
                 {-
                 (_, runitstat) <- constrain "rIsUnit" $ Constraint
@@ -1807,7 +2157,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       _ -> do
         newProb . Elab sol $ TypeExprTask whereAmI synthMode (TyDouble (fromIntegral k))
         run
-             
+
     TypeExprTask whereAmI synthMode (TyDouble d) -> case tagEh mtype of
       Just (SQuantity, [genTy, dim]) -> case d of
         0 -> do
@@ -1823,8 +2173,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             }
           newProb . Elab sol $ Await cstat (inContext mctxt $ lit d)
           run
-      Just (SMatrix, [rowTy, colTy, cellTy, rs, cs])
+      Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs])
         | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
+          let rowTy = mk SAbel rowGenTy
+          let colTy = mk SAbel colGenTy
           r <- invent r mctxt rowTy
           c <- invent c mctxt colTy
           (_, rcs) <- constrain "IsSingletonR" $ Constraint
@@ -1847,13 +2199,13 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
                 { constraintCtx = fmap Hom <$> mctxt
                 , constraintType = Hom (atom SType)
                 , lhs = rowTy
-                , rhs = atom SOne
+                , rhs = oneType
                 }
               (_, cstat) <- constrain "coltyIsOne" $ Constraint
                 { constraintCtx = fmap Hom <$> mctxt
                 , constraintType = Hom (atom SType)
                 , lhs = colTy
-                , rhs = atom SOne
+                , rhs = oneType
                 }
               {-
               (_, runitstat) <- constrain "rIsUnit" $ Constraint
@@ -1896,13 +2248,13 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           yTy <- invent "yType" mctxt (atom SType)
           (_ , jc) <- constrain "xyJoin" $ JoinConstraint
             { constraintCtx = fmap Hom <$> mctxt
-            , leftType = xTy
-            , rightType = yTy
-            , joinType = mtype
+            , leftGenType = xTy
+            , rightGenType = yTy
+            , joinGenType = mtype
             }
           pure (xTy, yTy, [jc])
-      (xSol, xProb) <- elab "plusXTy" mctxt xTy (TypeExprTask whereAmI synthMode <$> x)
-      (ySol, yProb) <- elab "plusYTy" mctxt yTy (TypeExprTask whereAmI synthMode <$> y)
+      (xSol, xProb) <- elab "plusXTy" mctxt xTy (TypeExprTask whereAmI FindSimplest <$> x)
+      (ySol, yProb) <- elab "plusYTy" mctxt yTy (TypeExprTask whereAmI FindSimplest <$> y)
       pushProblems [xProb, yProb]
       newProb . Elab sol $ Await (conjunction stats) (mk Splus xSol ySol) -- FIXME: do proper addition, eg if mtype is a matrix type
       move winning
@@ -1914,27 +2266,27 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       -- guessing which multiplication case we are in (try them all):
       -- scalar * mx, mx * scalar, mx * mx
       -- (do we need two phase commit to metastore, local metastores?)
-      rowTy <- invent "rowType" mctxt (atom SType)
-      leftMidTy <- invent "middleTypeL" mctxt (atom SType)
-      rightMidTy <- invent "middleTypeR" mctxt (atom SType)
-      joinMidTy <- invent "middleTypeJ" mctxt (atom SType)
-      colTy <- invent "colType" mctxt (atom SType)
+      rowGenTy <- invent "rowType" mctxt (atom SType)
+      leftMidGenTy <- invent "middleTypeL" mctxt (atom SType)
+      rightMidGenTy <- invent "middleTypeR" mctxt (atom SType)
+      joinMidGenTy <- invent "middleTypeJ" mctxt (atom SType)
+      colGenTy <- invent "colType" mctxt (atom SType)
 
-      rx <- invent "rowX" mctxt (mk SList rowTy)
-      leftcxry <- invent "colXrowY" mctxt (mk SList leftMidTy)
-      rightcxry <- invent "colXrowY" mctxt (mk SList rightMidTy)
-      cy <- invent "colY" mctxt (mk SList colTy)
+      rx <- invent "rowX" mctxt (mk SList (tag SAbel [rowGenTy]))
+      leftcxry <- invent "colXrowY" mctxt (mk SList (tag SAbel [leftMidGenTy]))
+      rightcxry <- invent "colXrowY" mctxt (mk SList (tag SAbel [rightMidGenTy]))
+      cy <- invent "colY" mctxt (mk SList (tag SAbel [colGenTy]))
 
-      cellXTy <- invent "cellX" (mctxt \\\ ("i", rowTy) \\\ ("j", wk leftMidTy)) (atom SType)
-      cellYTy <- invent "cellY" (mctxt \\\ ("j'", rightMidTy) \\\ ("k", wk colTy)) (atom SType)
+      cellXTy <- invent "cellX" (mctxt \\\ ("i", mk SAbel rowGenTy) \\\ ("j", wk $ mk SAbel leftMidGenTy)) (atom SType)
+      cellYTy <- invent "cellY" (mctxt \\\ ("j'", mk SAbel rightMidGenTy) \\\ ("k", wk $ mk SAbel colGenTy)) (atom SType)
 
-      let xTy = mk SMatrix rowTy leftMidTy (lam "i" . lam "j" $ cellXTy) rx leftcxry
-      let yTy = mk SMatrix rightMidTy colTy (lam "j'" . lam "k" $ cellYTy) rightcxry cy
+      let xTy = mk SMatrix rowGenTy leftMidGenTy (lam "i" . lam "j" $ cellXTy) rx leftcxry
+      let yTy = mk SMatrix rightMidGenTy colGenTy (lam "j'" . lam "k" $ cellYTy) rightcxry cy
 
       -- 1. Invent the cell type for the result
-      cellZTy <- invent "cellZ" (mctxt \\\ ("i", rowTy) \\\ ("k", wk colTy)) (atom SType)
+      cellZTy <- invent "cellZ" (mctxt \\\ ("i", mk SAbel rowGenTy) \\\ ("k", wk $ mk SAbel colGenTy)) (atom SType)
       -- 2. Construct the matrix type for the result
-      let zTy = mk SMatrix rowTy colTy (lam "i" . lam "k" $ cellZTy) rx cy
+      let zTy = mk SMatrix rowGenTy colGenTy (lam "i" . lam "k" $ cellZTy) rx cy
       -- 3. Constrain it to the type we are checking against
       (_, zstat) <- constrain "Zmatrix" $ case synthMode of
         FindSimplest ->
@@ -1953,16 +2305,16 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       -- 3.5 Find the shared type for the middle and check header compatibility.
       (_ , jc) <- constrain "middleJoins" $ JoinConstraint
         { constraintCtx = fmap Hom <$> mctxt
-        , leftType = leftMidTy
-        , rightType = rightMidTy
-        , joinType = joinMidTy
+        , leftGenType = leftMidGenTy
+        , rightGenType = rightMidGenTy
+        , joinGenType = joinMidGenTy
         }
-      middle <- invent "middle" mctxt joinMidTy
-      (_, hc) <- constrain "headerCompat" $ HeaderCompatibility
+      middle <- invent "middle" mctxt (mk SAbel joinMidGenTy)
+      (_, hc) <- constrain "headerCompat" $ HeadersCompatibility
         { constraintCtx = fmap Hom <$> mctxt
-        , leftType = leftMidTy
-        , rightType = rightMidTy
-        , joinType = joinMidTy
+        , leftGenType = leftMidGenTy
+        , rightGenType = rightMidGenTy
+        , joinGenType = joinMidGenTy
         , joinStatus = jc
         , leftList = leftcxry
         , rightList = rightcxry
@@ -1973,10 +2325,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       -- 4. Switch to the problem of ensuring the cell types are compatible
       let mulConstraint = ("ZMultiplicable", Multiplicable
             { constraintCtx = fmap Hom <$> mctxt
-            , leftTypes = (rowTy, leftMidTy, cellXTy)
-            , rightTypes = (rightMidTy, colTy, cellYTy)
+            , leftTypes = (rowGenTy, leftMidGenTy, cellXTy)
+            , rightTypes = (rightMidGenTy, colGenTy, cellYTy)
             , returnCellType = cellZTy
-            , joinType = joinMidTy
+            , joinGenType = joinMidGenTy
             , joinElement = middle
             , awaitingStatus = conjunction [hc, jc]
             })
@@ -2007,8 +2359,8 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       _ -> move worried
 -}
     TypeExprTask MatLab EnsureCompatibility (TyJux dir x (TyNil _ :<=: _)) -> do
-      (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
-      (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs cs) (TypeExprTask MatLab EnsureCompatibility <$> x)
+      (rowGenTy, colGenTy, cellTy, rs, cs, tystat) <- ensureMatrix mctxt mtype
+      (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowGenTy colGenTy cellTy rs cs) (TypeExprTask MatLab EnsureCompatibility <$> x)
       pushProblems [xProb]
       newProb . Elab sol $ Await tystat $ xSol
       run
@@ -2036,35 +2388,35 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             run
      -}
     TypeExprTask MatLab EnsureCompatibility (TyJux dir x y) -> do
-      (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
+      (rowGenTy, colGenTy, cellTy, rs, cs, tystat) <- ensureMatrix mctxt mtype
       case dir of
         Vertical -> do
-          rs0 <- debugMatrix ("VJUX matrix #### " ++ show mtype) $ invent "rs0" mctxt (mk SList rowTy)
-          rs1 <- invent "rs1" mctxt (mk SList rowTy)
+          rs0 <- debug260824 ("VJUX matrix #### " ++ show mtype) $ invent "rs0" mctxt (mk SList (tag SAbel [rowGenTy]))
+          rs1 <- invent "rs1" mctxt (mk SList (tag SAbel [rowGenTy]))
           (_, cstat) <- constrain "SplitRs" $ Constraint
             { constraintCtx = fmap Hom <$> mctxt
-            , constraintType = Hom (mk SList rowTy)
+            , constraintType = Hom (mk SList (tag SAbel [rowGenTy]))
             , lhs = mk Splus rs0 rs1
             , rhs = rs
             }
-          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowTy colTy cellTy rs0 cs) (TypeExprTask MatLab EnsureCompatibility <$> x)
-          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowTy colTy cellTy rs1 cs) (TypeExprTask MatLab EnsureCompatibility <$> y)
+          (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowGenTy colGenTy cellTy rs0 cs) (TypeExprTask MatLab EnsureCompatibility <$> x)
+          (ySol, yProb) <- elab "vjuxBot" mctxt (mk SMatrix rowGenTy colGenTy cellTy rs1 cs) (TypeExprTask MatLab EnsureCompatibility <$> y)
           pushProblems [xProb, yProb]
           let cstat' = conjunction [tystat, cstat]
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
             debugMatrix "Making vjux..." (mk Svjux xSol ySol)
           run
         Horizontal -> do
-          cs0 <- debugMatrix ("HJUX matrix #### " ++ show mtype) $ invent "cs0" mctxt (mk SList colTy)
-          cs1 <- invent "cs1" mctxt (mk SList colTy)
+          cs0 <- debug260824 ("HJUX matrix #### " ++ show mtype) $ invent "cs0" mctxt (mk SList (tag SAbel [colGenTy]))
+          cs1 <- invent "cs1" mctxt (mk SList (tag SAbel [colGenTy]))
           (_, cstat) <- constrain "SplitCs" $ Constraint
             { constraintCtx = fmap Hom <$> mctxt
-            , constraintType = Hom (mk SList colTy)
+            , constraintType = Hom (mk SList (tag SAbel [colGenTy]))
             , lhs = mk Splus cs0 cs1
             , rhs = cs
             }
-          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowTy colTy cellTy rs cs0) (TypeExprTask MatLab EnsureCompatibility <$> x)
-          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowTy colTy cellTy rs cs1) (TypeExprTask MatLab EnsureCompatibility <$> y)
+          (xSol, xProb) <- elab "hjuxLeft" mctxt (mk SMatrix rowGenTy colGenTy cellTy rs cs0) (TypeExprTask MatLab EnsureCompatibility <$> x)
+          (ySol, yProb) <- elab "hjuxRight" mctxt (mk SMatrix rowGenTy colGenTy cellTy rs cs1) (TypeExprTask MatLab EnsureCompatibility <$> y)
           pushProblems [xProb, yProb]
           let cstat' = conjunction [tystat, cstat]
           newProb . Elab sol $ Await (debugMatrix ("CStat = " ++ show cstat') cstat') $
@@ -2111,7 +2463,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       run
     TypeExprTask LabMate synthMode (TyApp f args) -> do
       fTy <- invent "fTy" mctxt (atom SType)
-      (fSol, fProb) <- elab "func" mctxt fTy (TypeExprTask LabMate synthMode <$> f)
+      (fSol, fProb) <- elab "func" mctxt fTy (TypeExprTask LabMate FindSimplest <$> f)
       pushProblems [fProb]
       newProb . Elab sol $ ElimTask (vlen mctxt) (fSol, fTy) args
       run
@@ -2390,11 +2742,11 @@ metaStatus x = do
 unelabType :: TYPE -> Elab [Tok]
 unelabType ty | Just ct <- tagEh ty = case ct of
   -- TODO: cover all types properly
-  (SMatrix, [rowTy, colTy, cellTy, Intg 1, Intg 1]) -- 1 x 1 matrix
+  (SMatrix, [rowGenTy, colGenTy, cellTy, Intg 1, Intg 1]) -- 1 x 1 matrix
     | Just cellTy <- lamEh cellTy, Just cellTy <- lamEh cellTy -> do
-        let sig = subSnoc (sub0 (R $^ nil <&> rowTy)) (R $^ nil <&> colTy)
+        let sig = subSnoc (sub0 (R $^ nil <&> mk SAbel rowGenTy)) (R $^ nil <&> mk SAbel colGenTy)
         unelabType =<< normalise emptyContext (atom SType) (cellTy //^ sig)
-  (SAbel, [ty]) | Just (SOne, []) <- tagEh ty -> pure [nom "int"]
+  (SAbel, [ty]) | isUnitType ty -> pure [nom "int"]
   (SList, [ty]) | Just (SChar, []) <- tagEh ty -> pure [nom "string"]
   (SEnum, [as]) -> do
     tas <- unelabTerm (mk SList $ atom SAtom) as
