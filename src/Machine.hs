@@ -587,6 +587,20 @@ data Constraint = forall n . Constraint
   , destination :: Term Chk ^ S (S n)
   , candidate :: Term Chk ^ S (S (S n))
   }
+  | forall n . SameLength
+  { constraintCtx :: ConstraintContext n
+  , leftEltType :: Term Chk ^ n
+  , leftList :: Term Chk ^ n
+  , rightEltType :: Term Chk ^ n
+  , rightList :: Term Chk ^ n
+  }
+  | forall n . InverseQuantities
+  { constraintCtx :: ConstraintContext n
+  , rowGenType :: Term Chk ^ n
+  , colGenType :: Term Chk ^ n
+  , cellTy :: Term Chk ^ n
+  , invCellTy :: Term Chk ^ n
+  }
   | DummyConstraint
 
 instance Show Constraint where
@@ -662,6 +676,22 @@ instance Show Constraint where
     , ", joinGenType = ", show joinGenType
     , ", destination = ", show destination
     , ", candidate = ", show candidate
+    , " }"
+    ]
+  show SameLength{..} = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", leftEltType = ", show leftEltType
+    , ", leftList = ", show leftList
+    , ", rightEltType = ", show rightEltType
+    , ", rightList = ", show rightList
+    , " }"
+    ]
+  show InverseQuantities{..}  = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", rowGenType = ", show rowGenType
+    , ", colGenType = ", show colGenType
+    , ", cellTy = ", show cellTy
+    , ", invCellTy = ", show invCellTy
     , " }"
     ]
   show DummyConstraint = "DummyConstraint"
@@ -1122,6 +1152,54 @@ solveConstraint name c@SubtypingConstraint{..} = let n = vlen constraintCtx in n
         }
       pure $ conjunction [gstat, dstat]
     else pure (I 0 :$ U :^ no Zy)
+
+solveConstraint name c@SameLength{..} = nattily (vlen constraintCtx) $ do
+  let leftCtx = fmap lhsType <$> constraintCtx
+  let rightCtx = fmap rhsType <$> constraintCtx
+  leftEltType <- normalise leftCtx (atom SType) leftEltType
+  rightEltType <- normalise rightCtx (atom SType) rightEltType
+  leftList <- normalise leftCtx (mk SList leftEltType) leftList
+  rightList <- normalise rightCtx (mk SList rightEltType) rightList
+  let ((llefts, lrights), (rlefts, rrights)) =
+        (partitionEithers $ listView leftList, partitionEithers $ listView rightList)
+  let (ps, (lstuck, rstuck)) = mpullback (bag llefts) (bag rlefts)
+  let (Sum sameLen, (Sum lextra, Sum rextra)) = mpullback (Sum $ length lrights) (Sum $ length rrights)
+  let leftList' = (map Left $ sortBag lstuck) ++ map Right (drop sameLen lrights)
+  let leftList = unviewList leftEltType leftList'
+  let rightList' = (map Left $ sortBag rstuck) ++ map Right (drop sameLen rrights)
+  let rightList = unviewList rightEltType rightList'
+  case () of
+    _ | null leftList' && null rightList' -> metaDefn name tRUE
+    _ | bagSize lstuck + lextra == 0 && rextra > 0 -> metaDefn name fALSE
+    _ | bagSize rstuck + rextra == 0 && lextra > 0 -> metaDefn name fALSE
+    _ -> push $ ConstraintFrame name SameLength{..}
+
+solveConstraint name InverseQuantities{..}
+ | Just ctx <- traverse (traverse isHom) constraintCtx
+ , Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
+ , Just (ic, invCellTy) <- lamNameEh invCellTy, Just (ir, invCellTy) <- lamNameEh invCellTy
+  = let n = vlen constraintCtx in nattily n $ do
+     rowGenType <- normalise ctx (atom SType) rowGenType
+     colGenType <- normalise ctx (atom SType) colGenType
+     let cellCtx = ctx \\\ (r, mk SAbel rowGenType) \\\ (c, wk $ mk SAbel colGenType)
+     let invCtx = ctx \\\ (ic, mk SAbel colGenType) \\\ (ir, wk $ mk SAbel rowGenType)
+     cellTy' <- normalise cellCtx (atom SType) cellTy
+     invCellTy' <- normalise invCtx (atom SType) invCellTy
+     let cellTy = lam r $ lam c $ cellTy'
+     let invCellTy = lam ic $ lam ir $ invCellTy'
+     case [() | Just (SQuantity, _) <- map tagEh [cellTy', invCellTy']] of
+       [] -> push $ ConstraintFrame name InverseQuantities{..}
+       _ -> do
+--         (genTy, dim, cstat) <- ensureQuantity cellCtx cellTy'
+         (invGenTy, invDim, istat) <- ensureQuantity invCtx invCellTy'
+         let sg = subSnoc (subSnoc (idSubst n :^ No (No (io n))) (var 0)) (var 1)
+         (_ , tstat) <- constrain "quantityTypesEqual" $ Constraint
+           { constraintCtx = fmap Hom <$> cellCtx
+           , constraintType = Hom (atom SType)
+           , lhs = cellTy'
+           , rhs = mk SQuantity invGenTy (tup [lit (-1::Integer), invDim]) //^ sg
+           }
+         metaDefn name (conjunction [istat, tstat])
 
 solveConstraint name c@Multiplicable{..}
  | Just ctx <- traverse (traverse isHom) constraintCtx = let n = vlen constraintCtx in nattily n $ do
@@ -2149,6 +2227,33 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             }
           newProb . Elab sol $ Await stat (inContext mctxt $ lit d)
           run
+    TypeExprTask whereAmI synthMode (TyUnaryOp UInvert x) -> do
+      (rowGenTy, colGenTy, cellTy, rs, cs, stat) <- ensureMatrix mctxt mtype
+      case synthMode of
+        EnsureCompatibility -> do
+          move worried
+        FindSimplest -> do
+          invCellTy <- invent "invCellTy" (mctxt \\\ ("j", mk SAbel colGenTy) \\\ ("i", mk SAbel (wk rowGenTy))) (atom SType)
+          (_, lstat) <- constrain "sameLength" $ SameLength
+            { constraintCtx = fmap Hom <$> mctxt
+            , leftEltType = mk SAbel rowGenTy
+            , leftList = rs
+            , rightEltType = mk SAbel colGenTy
+            , rightList = cs
+            }
+          (_, istat) <- constrain "inverseCell" $ InverseQuantities
+            { constraintCtx = fmap Hom <$> mctxt
+            , rowGenType = rowGenTy
+            , colGenType = colGenTy
+            , cellTy = cellTy
+            , invCellTy = lam "j" $ lam "i" $ invCellTy
+            }
+          let invTy = mk SMatrix colGenTy rowGenTy (lam "j" $ lam "i" $ invCellTy) cs rs
+          (xSol, xProb) <- elab "invertee" mctxt invTy (TypeExprTask whereAmI FindSimplest <$> x)
+          pushProblems [xProb]
+          newProb . Elab sol $ Await (conjunction [stat, lstat, istat]) (E $^ (matrixInverse (R $^ xSol <&> invTy)))
+          move worried
+
 
     TypeExprTask whereAmI synthMode (TyBinaryOp Plus x y) -> do
       -- TODO:

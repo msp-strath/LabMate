@@ -9,8 +9,8 @@
 26.08.2024
 
 [ ] Emacs minor mode to hide generated code
-[ ] Combine dimensions directive with standard units (add comment explaining that generated code is in order to make sense for MATLAB)
-[ ] Make One = Abel (Enum nil)
+[ ] HIGHER PRIORITY: Combine dimensions directive with standard units (add comment explaining that generated code is in order to make sense for MATLAB)
+[X] Make One = Abel (Enum nil)
 [ ] Do division
 [ ] Do transpose
 [ ] Main target: Matrices of dimensioned constants
@@ -19,3 +19,7 @@
 27.08.2024
 
 [ ] Do addition
+
+29.08.2024
+
+[ ] Normalisation should happen in updateConstraint (and every constraint insisting on isHom should be updated)

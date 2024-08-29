@@ -17,6 +17,7 @@ pattern SQuantity = "Quantity"
 -- eliminators
 pattern Sfst  = "fst"
 pattern Ssnd  = "snd"
+pattern Sinverse = "inverse"
 -- constructors
 pattern Splus = "plus"
 pattern Sone = "one"

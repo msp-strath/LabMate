@@ -121,6 +121,16 @@ toTypeExpr' (IntLiteral n) = pure $ TyNum n
 toTypeExpr' (DoubleLiteral d) = pure $ TyDouble d
 toTypeExpr' (StringLiteral s) = pure $ TyStringLiteral s
 toTypeExpr' (UnaryOp op x) = tyUnaryOp op <$> toTypeExpr x
+toTypeExpr' (BinaryOp (Mul d RDiv) x y) = do
+  let ysrc = source y
+  x <- toTypeExpr x
+  y <- toTypeExpr y
+  pure (TyBinaryOp (Mul d Times) x (TyUnaryOp UInvert y :<=: ysrc))
+toTypeExpr' (BinaryOp (Mul d LDiv) x y) = do
+  let xsrc = source x
+  x <- toTypeExpr x
+  y <- toTypeExpr y
+  pure (TyBinaryOp (Mul d Times) (TyUnaryOp UInvert x :<=: xsrc) y)
 toTypeExpr' (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
 toTypeExpr' (Mat exps) = do
    exps <- traverse (traverse toTypeExpr) exps
@@ -150,6 +160,7 @@ data UnOperator
   | UMinus
   | UTilde -- logical negation
   | UTranspose
+  | UInvert
   | UDotTranspose
   deriving (Show)
 

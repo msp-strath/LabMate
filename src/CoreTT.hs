@@ -510,6 +510,13 @@ evalSynth tm = withScope $ case tm of
             | Just tgt <- E $? tgt -> ( E $^ D $^ (tgt <&> atom Ssnd)
                                       , t' //^ sub0 (D $^ tgt <&> atom Sfst))
             | otherwise -> error "evalSynth: funny pair"
+      Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs])
+        | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
+        , Just (SQuantity, [genTy, dim]) <- tagEh cellTy
+        , Atom Sinverse <- dstr -> do
+            retDim <- under (r, mk SAbel rowGenTy) $ under (c, mk SAbel (wk colGenTy)) $ checkNormEval (mk SAbel genTy) (tup [lit (-1::Integer), dim])
+            let sg = subSnoc (subSnoc (idSubst natty :^ No (No (io natty))) (var 0)) (var 1)
+            pure (E $^ D $^ ((R $^ (tgt <&> tgtTy)) <&> dstr), mk SMatrix colGenTy rowGenTy (lam c $ lam r $ mk SQuantity genTy retDim //^ sg) cs rs)
       _ -> fail "evalSynth: eliminator for an unknown type"
   tm | Just tm <- MX $? tm, (lmx, rmx) <- split tm -> do
     (lmx, lmxTy) <- evalSynth lmx

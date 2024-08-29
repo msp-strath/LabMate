@@ -17,7 +17,10 @@ import Data.Kind
 
 import Debug.Trace
 import Data.List (intercalate)
+
 import MissingLibrary
+
+import MagicStrings
 
 truck = const id
 
@@ -53,6 +56,9 @@ data Ctor (s :: Sort) (t :: Sort) where
   -- subst
   S0 :: Ctor One (Sub Z)
   ST :: Ctor (Prd (Sub n) Syn) (Sub (S n))
+
+matrixInverse :: Term Syn ^ n -> Term Syn ^ n
+matrixInverse t = withScopeOf t $ (D $^ t <&> atom Sinverse)
 
 type Root = Bwd (String, Int)
 type NameSupply = (Root, Int)
