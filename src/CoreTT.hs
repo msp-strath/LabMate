@@ -5,6 +5,7 @@ import qualified Data.Map as Map
 
 import Control.Applicative
 import Control.Monad
+import Control.Arrow ((***))
 import Data.List (stripPrefix)
 import NormalForm
 import MagicStrings
@@ -239,9 +240,9 @@ checkCanMatrixEh ty@(rowGenTy, colGenTy, cellTy) mx@(rs, cs) tm
          subtypeEh colGenTy' colGenTy
          under (r, mk SAbel rowGenTy') $ under (c, wk $ mk SAbel colGenTy') $ subtypeEh cellTy' cellTy
          True <- track "after subtyping" $ pure True
-         rs1 <- prefixEh rowTy rs0 rs
+         (rs0, rs1) <- prefixEh rowTy rs0 rs
          True <- track ("row leftovers " ++ show rs1) $ pure True
-         cs1 <- prefixEh colTy cs0 cs
+         (cs0, cs1) <- prefixEh colTy cs0 cs
          True <- track ("col leftovers " ++ show cs1) $ pure True
          pure ((rs1, cs0), (rs0, cs1))
      _ -> fail "checkCanMatrixEh: malformed cell type"
@@ -309,23 +310,20 @@ singMatTy c = nattily (scopeOf c) $ mk SMatrix (tag SEnum [nil]) (tag SEnum [nil
 
 prefixEh
   :: Typ ^ n
-  -> Term Chk ^ n -- prefix
+  -> Term Chk ^ n -- candidate prefix modulo subtyping
   -> Term Chk ^ n -- whole list
-  -> TC n (Term Chk ^ n)
+  -> TC n (Term Chk ^ n, Term Chk ^ n) -- (prefix and suffix from whole list)
 prefixEh elty pr l = withScope $ propEh elty >>= \case
   True -> do
-    True <- track ("in prefixEh pr " ++ show pr) $ pure True
-    True <- track ("in prefixEh  l " ++ show l) $ pure True
     pr@NFAbel{nfConst = n, nfStuck = tns} <- termToNFAbel elty pr
     l@NFAbel{nfConst = m, nfStuck = tms}  <- termToNFAbel elty l
-    True <- track ("NFAbel pr=" ++ show pr) $ pure True
-    True <- track ("NFAbel  l=" ++ show l) $ pure True
     guard $ n <= m
-    nfAbelToTerm . NFAbel (m - n) <$> must "prefixEh:nfAbelToTerm" (sub tns tms)
+    suffix <- nfAbelToTerm . NFAbel (m - n) <$> must "prefixEh:nfAbelToTerm" (sub tns tms)
+    pure (nfAbelToTerm pr, suffix)
   False -> do
     pr <- termToNFList elty pr
     l  <- termToNFList elty l
-    nfListToTerm <$> must "prefixEh:nfListToTerm" (stripPrefix pr l)
+    pure $ (nfListToTerm *** nfListToTerm) $ splitAt (length pr) l
   where
     sub :: [(Norm Chk ^ n, Integer)]
         -> [(Norm Chk ^ n, Integer)]
@@ -661,8 +659,8 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
        Nothing -> checkEvalMatrixNF nf ty mx tm
        Just tm -> case tagEh ty' of
          Just (SMatrix, [_, _, _,  rs0, cs0]) -> do
-           rs1 <- track ("Are we here " ++ show tm) $ prefixEh rowTy rs0 rs
-           cs1 <- prefixEh colTy cs0 cs
+           (rs0, rs1) <- prefixEh rowTy rs0 rs
+           (cs0, cs1) <- prefixEh colTy cs0 cs
            h   <- nf rowTy rs0
            pure ([(h, [NFNeutral tm])], ((rs1, cs0), (rs0, cs1)))
          _ -> fail "checkEvalMatrixAbel"

@@ -2,17 +2,12 @@
 
 %> unit metre :: Q({ `Length })
 %> unit kg :: Q({ `Mass })
-%> unit sec :: Q({ `Time })
+%> unit hz :: Q({ 1/`Time })
 
 %> x :: [i <- [{} {`Time}] x j <- [{} {`Length}]] Q({`Mass * j / i})
 x = [ 2*kg       5*kg*metre
-      3*kg/sec   4*kg*metre/sec ]
-%x = [  9; 9 9 ]
+      3*kg*hz   4*kg*metre*hz ]
 %> typeof x
 
 %  [ {`Mass}       {`Mass * `Length}
 %    {`Mass/`Time} {`Mass * `Length / `Time } ]
-
-%%> y :: [j <- [{} {`Length} ] x k <- [{}, {1/`Mass}]] Q({j/k})
-%y = [ 7        3/kg
-%      5/metre  2/kg/metre ]
