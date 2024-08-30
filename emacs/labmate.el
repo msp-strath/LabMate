@@ -49,11 +49,14 @@
   (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%\n]+" . 'labmate-response-success)))
   (font-lock-add-keywords nil '(("^\s*%<\s*.*::[^%\n]+" . 'labmate-response-success)))
   (font-lock-add-keywords nil '(("^\s*%<\s*LabMate[^%\n]+" . 'labmate-response-success)))
+  (hs-minor-mode)
   (setq mode-name "labmate")
   ;; clear memory
   ;;(setq typos-keywords-regexp nil)
   ;;(setq typos-operators-regexp nil)
 )
+
+
 
 ;; Customisation options
 
@@ -95,7 +98,9 @@
 (defun labmate-run (override-options)
   "Run LabMate on the current file."
   (interactive "P")
-    (labmate-run-on-file (shell-quote-argument (buffer-file-name))))
+  (labmate-run-on-file (shell-quote-argument (buffer-file-name)))
+  ;;(hs-hide-all)
+)
 
 (define-key labmate-mode-map (kbd "C-c C-l") 'labmate-run)
 
