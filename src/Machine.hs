@@ -1520,7 +1520,10 @@ solveConstraint name c@ListAtomPushout{..}
 solveConstraint name c@Abel1{..} = case abelView abelExp of
   NFAbel{nfConst = 0, nfStuck = []} -> metaDefn name tRUE
   NFAbel{nfConst = _, nfStuck = []} -> metaDefn name fALSE
-  NFAbel{..} -> push $ ConstraintFrame name Abel1{..}
+  NFAbel{..} -> do
+    if Set.null (foldMap (dependencies . fst) nfStuck)
+      then metaDefn name fALSE
+      else push $ ConstraintFrame name Abel1{..}
 
 solveConstraint name c = debug ("Push Constraint n " ++ show c) $ push $ ConstraintFrame name c
 

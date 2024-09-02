@@ -19,7 +19,7 @@ y = [ 7        3/kg
 
 %> typeof y
 
-%> z :: [i <- [{} {`Time}] x k <- [{}, {1/`Mass}]] Q({`Mass * k / i})
+%> z :: [i <- [{} {`Time}] x k <- [{}, {`Mass}]] Q({`Mass * k / i})
 z = x * y
 
 %> typeof z
