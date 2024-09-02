@@ -513,6 +513,12 @@ updateConstraint SubtypingConstraint{..} = nattily (vlen constraintCtx) $ do
   gotType <- normalise (fmap lhsType <$> constraintCtx) (atom SType) gotType
   wantType <- normalise (fmap rhsType <$> constraintCtx) (atom SType) wantType
   pure SubtypingConstraint{..}
+updateConstraint Abel1{..} =  nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  -- we know that the context is homogeneous
+  genType <- normalise (fmap lhsType <$> constraintCtx) (atom SType) genType
+  abelExp <- normalise (fmap lhsType <$> constraintCtx) (mk SAbel genType) abelExp
+  pure Abel1{..}
 updateConstraint c = pure c
 
 
@@ -600,6 +606,11 @@ data Constraint = forall n . Constraint
   , colGenType :: Term Chk ^ n
   , cellTy :: Term Chk ^ n
   , invCellTy :: Term Chk ^ n
+  }
+  | forall n. Abel1
+  { constraintCtx :: ConstraintContext n
+  , genType :: Term Chk ^ n
+  , abelExp :: Term Chk ^ n
   }
   | DummyConstraint
 
@@ -692,6 +703,12 @@ instance Show Constraint where
     , ", colGenType = ", show colGenType
     , ", cellTy = ", show cellTy
     , ", invCellTy = ", show invCellTy
+    , " }"
+    ]
+  show Abel1{..} = nattily (vlen constraintCtx) $ concat
+    [ "{ constraintCtx = ", show constraintCtx
+    , ", genType = ", show genType
+    , ", abelExp = ", show abelExp
     , " }"
     ]
   show DummyConstraint = "DummyConstraint"
@@ -897,6 +914,13 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
                   let lhs = unviewList elty l1
                   let rhs = unviewList elty l2
                   push $ ConstraintFrame name Constraint{..}
+      _ | Just (SAbel, [genTy]) <- tagEh ty -> do
+          (_, stat) <- constrain "abel1" $ Abel1
+            { constraintCtx = constraintCtx
+            , genType = genTy
+            , abelExp = mk Splus lhs (tup [lit (-1::Integer), rhs])
+            }
+          metaDefn name stat
       _ | Just (lt, ls) <- tagEh lhs
         , Just (rt, rs) <- tagEh rhs
         , lt == rt -> case (lt, ls, rs) of
@@ -1387,7 +1411,7 @@ solveConstraint name HeaderCompatibility{..}
             , ..
             }
           metaDefn name (conjunction (tstat : hstats))
-        _ -> 
+        _ ->
 -}
 
 solveConstraint name c@NoMiddleDependency{..}
@@ -1493,6 +1517,10 @@ solveConstraint name c@ListAtomPushout{..}
             metaDefn name (conjunction [headStat, tailStat, resStat])
         _ -> push $ ConstraintFrame name ListAtomPushout{..}
 
+solveConstraint name c@Abel1{..} = case abelView abelExp of
+  NFAbel{nfConst = 0, nfStuck = []} -> metaDefn name tRUE
+  NFAbel{nfConst = _, nfStuck = []} -> metaDefn name fALSE
+  NFAbel{..} -> push $ ConstraintFrame name Abel1{..}
 
 solveConstraint name c = debug ("Push Constraint n " ++ show c) $ push $ ConstraintFrame name c
 

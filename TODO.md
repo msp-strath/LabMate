@@ -11,7 +11,7 @@
 [ ] Emacs minor mode to hide generated code
 [ ] HIGHER PRIORITY: Combine dimensions directive with standard units (add comment explaining that generated code is in order to make sense for MATLAB)
 [X] Make One = Abel (Enum nil)
-[ ] Do division
+[X] Do division
 [ ] Do transpose
 [ ] Main target: Matrices of dimensioned constants
 [ ] Main target: Matrix multiplication

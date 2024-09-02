@@ -299,6 +299,18 @@ unviewList ty [Right x] = mk Sone x
 unviewList ty [Left x] = E $^ x
 unviewList ty (x:xs) = mk Splus (unviewList ty [x]) (unviewList ty xs)
 
+abelView :: Norm Chk ^ n -> NFAbel n
+abelView tm
+  | Intg i  <- tm  = NFAbel { nfConst = i, nfStuck = [] }
+  | Nil <- tm  = mempty
+  | Just (Sone, [t]) <- tagEh tm = withScopeOf t $ case t of
+     Nil -> NFAbel 1 []
+     t   -> NFAbel 0 [(mk Sone t, 1)]
+  | Just (Splus, [s, t]) <- tagEh tm = abelView s <> abelView t
+  | Just [Intg i, t] <- tupEh tm =
+      if i == 0 then mempty else (i *) <$> abelView t
+  | otherwise = NFAbel 0 [(tm, 1)]
+
 oneType :: NATTY n => Typ ^ n
 oneType = tag SAbel [tag SEnum [nil]]
 
@@ -603,7 +615,8 @@ termToNFAbel
   -> Term Chk ^ n
   -> TC n (NFAbel n)
 termToNFAbel ty tm
-  | Just tm <- E $? tm = evalSynth tm >>= \(tm, _) -> case E $? tm of
+  | Just tm <- E $? tm = evalSynth tm >>= \(tm, ty') -> case E $? tm of
+     _ | isUnitType ty' -> pure mempty
      Just _ -> pure $ NFAbel 0 [(tm, 1)]
      Nothing -> termToNFAbel ty tm
   | Intg i  <- tm  = pure $ NFAbel { nfConst = i, nfStuck = [] }
