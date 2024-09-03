@@ -126,6 +126,8 @@ instance PrettyPrint DiagnosticData where
   pprint (UnitD un stat tn) = do
     stat <- pptm stat
     pure ["unit $" ++ show un ++ " " ++ stat ++ " $" ++ show tn]
+  pprint (UnitDs units) =
+    pure ["units" ++ foldMap (\u -> " $" ++ show (nonce u)) units]
 
 instance PrettyPrint Frame where
   pprint (Declaration n UserDecl{..}) = do
@@ -162,6 +164,7 @@ data DiagnosticData
       TERM {- t :: T -}
       Expr {- e, t = elab e -}
   | UnitD Nonce BOOL Nonce
+  | UnitDs [WithSource String]
   deriving Show
 
 data Frame where
@@ -489,7 +492,6 @@ simplifyContext :: ConstraintContext m -> SimplifiedContext m
 simplifyContext ga = case nonUnitTypes ga of
   Ex (Flip th) -> let sg = strengthenNil th :^ io (weeEnd th) in
                     SimplifiedContext (fmap (fmap (fmap (//^ sg))) (th ?^ ga)) sg
-
 
 
 updateConstraintType :: ConstraintContext n -> ConstraintType n -> Elab (ConstraintType n)
@@ -832,10 +834,10 @@ solveConstraint name c | debug ("Solve constrain call " ++ show name ++ " constr
 solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms  <- gets metaStore
-    ty  <- normalise ctx (atom SType) ty
-    lhs <- normalise ctx ty lhs
+    -- ty  <- normalise ctx (atom SType) ty
+    -- lhs <- normalise ctx ty lhs
     lhsFlexEh <- flexEh lhs
-    rhs <- normalise ctx ty rhs
+    -- rhs <- normalise ctx ty rhs
     rhsFlexEh <- flexEh rhs
     case (lhs, rhs) of
       _ | lhs == rhs -> metaDefn name (I 1 :$ U :^ no Zy)
@@ -1555,9 +1557,12 @@ findDeclaration UserDecl{varTy = ty, currentName = old, seen, newNames = news, w
       _ -> shup f >> go b
 
 makeDeclaration :: DeclarationType TYPE -> Elab (Name, TYPE)
-makeDeclaration d@UserDecl{varTy, currentName} = excursion $ do
+makeDeclaration d@UserDecl{varTy, currentName, whereAmI} = excursion $ do
   findLocale
-  x <- metaDecl ProgramVar currentName emptyContext (mk SDest varTy)
+  let xty = case whereAmI of
+        LabMate -> varTy
+        MatLab  -> mk SDest varTy
+  x <- metaDecl ProgramVar currentName emptyContext xty
   (x, varTy) <$ push (Declaration x d)
   where
     findLocale = pull >>= \case
@@ -1852,8 +1857,8 @@ runDirective rl (dir :<=: src, body) = do
       push $ Diagnostic rl (SynthD ty eSol e)
       newProb eProb
       run
-    Dimensions (g :<=: gsrc) (q :<=: qsrc) atoms -> do
-      let generators = mk SEnum $ foldr (mk Splus . (mk Sone :: TERM -> TERM) . atom . what) nil atoms :: TERM
+    Dimensions (g :<=: gsrc) (q :<=: qsrc) unitAtoms -> do
+      let generators = mk SEnum $ foldr (mk Splus . (mk Sone :: TERM -> TERM) . atom . what) nil (snd <$> unitAtoms) :: TERM
       let gdef = mk SAbel generators :: TERM
       let gdecl = UserDecl
             { varTy = mk SType
@@ -1879,6 +1884,16 @@ runDirective rl (dir :<=: src, body) = do
             Nothing -> move worried
             Just (q, qty) -> do
               pushDefinition q (lam "d" $ mk SQuantity (wk generators) (evar 0))
+              ps <- fmap concat . for (zip [0..] unitAtoms) $ \case
+                (_, (Nothing, _)) -> pure []
+                (i, (Just u, _)) -> do
+                  let uty = singMatTy (mk SQuantity generators (tag Sone [lit (i :: Integer)]))
+                  (ltm, lhsProb) <- elab "unitFakeLHS" emptyContext (mk SDest uty) (LHSTask . LVar <$> u)
+                  excursion $ postRight [Currently uty ltm (mk Sone (lit (1::Double)))]
+                  pure [(lhsProb, u)]
+              unless (null ps) $ do
+                push . Diagnostic rl $ UnitDs (snd <$> ps)
+                pushProblems (fst <$> ps)
               newProb $ Done nil
               run
     Unit u ty -> do
@@ -2722,6 +2737,7 @@ normaliseFrame = \case
     normaliseDiagnostic (UnitD un stat tn) = do
       stat <- normalise VN (atom STwo) stat
       pure $ UnitD un stat tn
+    normaliseDiagnostic d@(UnitDs _) = pure d
 
 cleanup :: Mood -> Elab ()
 cleanup mood = do
@@ -2793,6 +2809,17 @@ diagnosticRun = llup >>= \case
           , spc dent, sym "%<", spc 1, sym "I cannot make", spc 1, non un, spc 1
                     , sym "a unit yet, because I do not see why", spc 1, non tn, spc 1, sym "is a quantity type."
           ]
+      UnitDs units -> pure $
+          [ Tok "\n" Ret dump
+          , spc dent, sym "%<", spc 1, sym "LabMate tells Matlab that units are 1s", Tok "\n" Ret dump
+          , spc dent, sym "%<{", Tok "\n" Ret dump
+          ] ++
+          foldMap (\u ->
+                    [spc dent, non (nonce u), spc 1, sym "=", spc 1, Tok "1" Dig dump, sym ";", Tok "\n" Ret dump])
+          units ++
+          [ spc dent, sym "%<}"
+          ]
+
 
 metaStatus :: Name -> Elab Status
 metaStatus x = do

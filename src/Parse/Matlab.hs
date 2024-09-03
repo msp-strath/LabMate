@@ -127,7 +127,10 @@ pdirhead = Declare <$> psep1 (pspc <|> punc ",") (pws pnomNotLabMateKey) <* posp
                    <* pkin Blk "for" <* pspc
                    <*> pws pnomNotLabMateKey <* pspc
                    <* pkin Nom "over" <* pspc
-                   <*> psep0 (pspc <|> punc ",") (pws patom)
+                   <*> psep0 (pspc <|> punc ",")
+                         ((,) <$> optional (pws pnomNotLabMateKey <* pspc <* pkin Blk "for" <* pspc)
+                              <*> pws patom
+                         )
     <|> Unit <$ pkin Nom "unit" <* pspc
              <*> pws pnomNotLabMateKey <* pospc
              <* psym "::" <* pospc <*> ptypeexpr topCI

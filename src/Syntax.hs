@@ -37,7 +37,7 @@ data DirHeader
   | Dimensions
       (WithSource String) -- name of the Abelian group
       (WithSource String) -- name of the quantity semiring
-      [WithSource String] -- the set of generators (quoted)
+      [(Maybe (WithSource String), WithSource String)] -- the set of generators (quoted)
   | Unit
       (WithSource String)
       TypeExpr

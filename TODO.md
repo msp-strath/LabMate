@@ -9,7 +9,7 @@
 26.08.2024
 
 [ ] Emacs minor mode to hide generated code
-[ ] HIGHER PRIORITY: Combine dimensions directive with standard units (add comment explaining that generated code is in order to make sense for MATLAB)
+[X] HIGHER PRIORITY: Combine dimensions directive with standard units (add comment explaining that generated code is in order to make sense for MATLAB)
 [X] Make One = Abel (Enum nil)
 [X] Do division
 [ ] Do transpose
