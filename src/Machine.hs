@@ -1709,10 +1709,23 @@ run = prob >>= \case
       newProb $ Expression r
       run
   Command (Assign lhs rhs) -> do
+    synthMode <- case lhs of
+      LVar x :<=: _ -> do
+        m <- findDeclaration $
+          UserDecl{ varTy = Nothing
+                  , currentName = x
+                  , seen = True
+                  , newNames = []
+                  , capturable = True
+                  , whereAmI = MatLab}
+        case m of
+          Nothing -> pure FindSimplest
+          Just _ -> pure EnsureCompatibility
+      _ -> pure FindSimplest
     -- TODO: optimise for the case when we know the LHS type
     ty <- invent "assignTy" emptyContext (atom SType)
     (ltm, lhsProb) <- elab "AssignLHS" emptyContext (mk SDest ty) (LHSTask <$> lhs)
-    (rtm, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask MatLab EnsureCompatibility <$> rhs)
+    (rtm, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask MatLab synthMode <$> rhs)
     excursion $ postRight [Currently ty ltm rtm]
     pushProblems [rhsProb]
     newProb lhsProb
