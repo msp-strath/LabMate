@@ -515,6 +515,97 @@ updateConstraint SubtypingConstraint{..} = nattily (vlen constraintCtx) $ do
   gotType <- normalise (fmap lhsType <$> constraintCtx) (atom SType) gotType
   wantType <- normalise (fmap rhsType <$> constraintCtx) (atom SType) wantType
   pure SubtypingConstraint{..}
+updateConstraint SameLength{..} = nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  let leftCtx = fmap lhsType <$> constraintCtx
+  let rightCtx = fmap rhsType <$> constraintCtx
+  leftEltType <- normalise leftCtx (atom SType) leftEltType
+  rightEltType <- normalise rightCtx (atom SType) rightEltType
+  leftList <- normalise leftCtx (mk SList leftEltType) leftList
+  rightList <- normalise rightCtx (mk SList rightEltType) rightList
+  pure SameLength{..}
+updateConstraint InverseQuantities{..}
+  | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
+  , Just (ic, invCellTy) <- lamNameEh invCellTy, Just (ir, invCellTy) <- lamNameEh invCellTy
+  = nattily (vlen constraintCtx) $ do
+    constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+    let ctx = fmap lhsType <$> constraintCtx
+    rowGenType <- normalise ctx (atom SType) rowGenType
+    colGenType <- normalise ctx (atom SType) colGenType
+    let cellCtx = ctx \\\ (r, mk SAbel rowGenType) \\\ (c, wk $ mk SAbel colGenType)
+    let invCtx = ctx \\\ (ic, mk SAbel colGenType) \\\ (ir, wk $ mk SAbel rowGenType)
+    cellTy <- lam r . lam c <$> normalise cellCtx (atom SType) cellTy
+    invCellTy <- lam ic . lam ir <$> normalise invCtx (atom SType) invCellTy
+    pure InverseQuantities{..}
+updateConstraint Multiplicable{..} = nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  let ctx = fmap lhsType <$> constraintCtx
+  let (rowGenTy, leftMidGenTy, leftCellType) = leftTypes
+  let (rightMidGenTy, colGenTy, rightCellType) = rightTypes
+  rowGenTy <- normalise ctx (atom SType) rowGenTy
+  leftMidGenTy <- normalise ctx (atom SType) leftMidGenTy
+  rightMidGenTy <- normalise ctx (atom SType) rightMidGenTy
+  colGenTy <- normalise ctx (atom SType) colGenTy
+  leftCellType <- normalise (ctx \\\ ("i", mk SAbel rowGenTy) \\\ ("j", wk $ mk SAbel leftMidGenTy)) (atom SType) leftCellType
+  rightCellType <- normalise (ctx \\\ ("i", mk SAbel rightMidGenTy) \\\ ("j", wk $ mk SAbel colGenTy)) (atom SType) rightCellType
+  let returnCtx = ctx \\\ ("i", mk SAbel rowGenTy) \\\ ("k", wk $ mk SAbel colGenTy)
+  returnCellType <- normalise returnCtx (atom SType) returnCellType
+  joinGenType <- normalise ctx (atom SType) joinGenType
+  joinElement <- normalise ctx (mk SAbel joinGenType) joinElement
+  awaitingStatus <- normalise emptyContext (atom STwo) awaitingStatus
+  let leftTypes = (rowGenTy, leftMidGenTy, leftCellType)
+  let rightTypes = (rightMidGenTy, colGenTy, rightCellType)
+  pure Multiplicable{..}
+updateConstraint JoinConstraint{..} = nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  leftGenType  <- normalise (fmap lhsType <$> constraintCtx) (atom SType) leftGenType
+  rightGenType <- normalise (fmap rhsType <$> constraintCtx) (atom SType) rightGenType
+  joinTGenype  <- normalise (fmap lhsType <$> constraintCtx) (atom SType) joinGenType
+  pure JoinConstraint{..}
+updateConstraint HeadersCompatibility{..} = nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  let leftCtx = fmap lhsType <$> constraintCtx
+  let rightCtx = fmap rhsType <$> constraintCtx
+  leftGenType <- normalise leftCtx (atom SType) leftGenType
+  rightGenType <- normalise rightCtx (atom SType) rightGenType
+  joinGenType <- normalise leftCtx (atom SType) joinGenType
+  joinStatus <- normalise emptyContext (atom STwo) joinStatus
+  leftList <- normalise leftCtx (mk SList (tag SAbel [leftGenType])) leftList
+  rightList <- normalise rightCtx (mk SList (tag SAbel [rightGenType])) rightList
+  joinElement <- normalise leftCtx (mk SAbel joinGenType) joinElement
+  pure HeadersCompatibility{..}
+updateConstraint HeaderCompatibility{..} = nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  let ctx = fmap lhsType <$> constraintCtx
+  leftGenType <- normalise ctx (atom SType) leftGenType
+  rightGenType <- normalise ctx (atom SType) rightGenType
+  joinGenType <- normalise ctx (atom SType) joinGenType
+  leftElement <- normalise ctx (mk SAbel leftGenType) leftElement
+  rightElement <- normalise ctx (mk SAbel rightGenType) rightElement
+  joinElement <- normalise ctx (mk SAbel joinGenType) joinElement
+  joinStatus <- normalise emptyContext (atom STwo) joinStatus
+  pure HeaderCompatibility{..}
+updateConstraint NoMiddleDependency{..} = nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  let ctx = fmap lhsType <$> constraintCtx
+  joinGenStatus <- normalise emptyContext (atom STwo) joinGenStatus
+  joinGenType <- normalise ctx (atom SType) joinGenType
+  let (i, j, k) = extension
+  candidate <- case joinGenStatus of
+   Intg 1 -> normalise (ctx \\\ ("i", i) \\\ ("j", wk j) \\\ ("k", wk (wk k))) (mk SAbel (wk (wk (wk joinGenType)))) candidate
+   _ -> pure candidate
+  pure NoMiddleDependency{..}
+updateConstraint ElemConstraint{..} = nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  hayStack <- normalise (fmap lhsType <$> constraintCtx) (mk SList (atom SAtom)) hayStack
+  pure ElemConstraint{..}
+updateConstraint ListAtomPushout{..} =  nattily (vlen constraintCtx) $ do
+  constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
+  let ctx = fmap lhsType <$> constraintCtx
+  leftList <- normalise ctx (mk SList (atom SAtom)) leftList
+  rightList <- normalise ctx (mk SList (atom SAtom)) rightList
+  joinList <- normalise ctx (mk SList (atom SAtom)) joinList
+  pure ListAtomPushout{..}
 updateConstraint Abel1{..} =  nattily (vlen constraintCtx) $ do
   constraintCtx <- traverse (traverse (updateConstraintType constraintCtx)) constraintCtx
   -- we know that the context is homogeneous
@@ -834,10 +925,7 @@ solveConstraint name c | debug ("Solve constrain call " ++ show name ++ " constr
 solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms  <- gets metaStore
-    -- ty  <- normalise ctx (atom SType) ty
-    -- lhs <- normalise ctx ty lhs
     lhsFlexEh <- flexEh lhs
-    -- rhs <- normalise ctx ty rhs
     rhsFlexEh <- flexEh rhs
     case (lhs, rhs) of
       _ | lhs == rhs -> metaDefn name (I 1 :$ U :^ no Zy)
@@ -1025,10 +1113,6 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
 solveConstraint name c@SubtypingConstraint{..} = let n = vlen constraintCtx in nattily n $ do
   let gotCtx = fmap lhsType <$> constraintCtx
   let wantCtx = fmap rhsType <$> constraintCtx
-  gotType <- normalise gotCtx (atom SType) gotType
-  gotTypeFlexEh <- flexEh gotType
-  wantType <- normalise wantCtx (atom SType) wantType
-  wantTypeFlexEh <- flexEh wantType
   if gotType == wantType then metaDefn name (I 1 :$ U :^ no Zy) else
     case tagEh gotType of
       Just (SAbel, [genTyGot]) -> do
@@ -1180,12 +1264,6 @@ solveConstraint name c@SubtypingConstraint{..} = let n = vlen constraintCtx in n
     else pure (I 0 :$ U :^ no Zy)
 
 solveConstraint name c@SameLength{..} = nattily (vlen constraintCtx) $ do
-  let leftCtx = fmap lhsType <$> constraintCtx
-  let rightCtx = fmap rhsType <$> constraintCtx
-  leftEltType <- normalise leftCtx (atom SType) leftEltType
-  rightEltType <- normalise rightCtx (atom SType) rightEltType
-  leftList <- normalise leftCtx (mk SList leftEltType) leftList
-  rightList <- normalise rightCtx (mk SList rightEltType) rightList
   let ((llefts, lrights), (rlefts, rrights)) =
         (partitionEithers $ listView leftList, partitionEithers $ listView rightList)
   let (ps, (lstuck, rstuck)) = mpullback (bag llefts) (bag rlefts)
@@ -1202,27 +1280,21 @@ solveConstraint name c@SameLength{..} = nattily (vlen constraintCtx) $ do
 
 solveConstraint name InverseQuantities{..}
  | Just ctx <- traverse (traverse isHom) constraintCtx
- , Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
- , Just (ic, invCellTy) <- lamNameEh invCellTy, Just (ir, invCellTy) <- lamNameEh invCellTy
+ , Just (r, cellTy') <- lamNameEh cellTy, Just (c, cellTy'') <- lamNameEh cellTy'
+ , Just (ic, invCellTy') <- lamNameEh invCellTy, Just (ir, invCellTy'') <- lamNameEh invCellTy'
   = let n = vlen constraintCtx in nattily n $ do
-     rowGenType <- normalise ctx (atom SType) rowGenType
-     colGenType <- normalise ctx (atom SType) colGenType
      let cellCtx = ctx \\\ (r, mk SAbel rowGenType) \\\ (c, wk $ mk SAbel colGenType)
      let invCtx = ctx \\\ (ic, mk SAbel colGenType) \\\ (ir, wk $ mk SAbel rowGenType)
-     cellTy' <- normalise cellCtx (atom SType) cellTy
-     invCellTy' <- normalise invCtx (atom SType) invCellTy
-     let cellTy = lam r $ lam c $ cellTy'
-     let invCellTy = lam ic $ lam ir $ invCellTy'
-     case [() | Just (SQuantity, _) <- map tagEh [cellTy', invCellTy']] of
+     case [() | Just (SQuantity, _) <- map tagEh [cellTy'', invCellTy'']] of
        [] -> push $ ConstraintFrame name InverseQuantities{..}
        _ -> do
 --         (genTy, dim, cstat) <- ensureQuantity cellCtx cellTy'
-         (invGenTy, invDim, istat) <- ensureQuantity invCtx invCellTy'
+         (invGenTy, invDim, istat) <- ensureQuantity invCtx invCellTy''
          let sg = subSnoc (subSnoc (idSubst n :^ No (No (io n))) (var 0)) (var 1)
          (_ , tstat) <- constrain "quantityTypesEqual" $ Constraint
            { constraintCtx = fmap Hom <$> cellCtx
            , constraintType = Hom (atom SType)
-           , lhs = cellTy'
+           , lhs = cellTy''
            , rhs = mk SQuantity invGenTy (tup [lit (-1::Integer), invDim]) //^ sg
            }
          metaDefn name (conjunction [istat, tstat])
@@ -1231,19 +1303,8 @@ solveConstraint name c@Multiplicable{..}
  | Just ctx <- traverse (traverse isHom) constraintCtx = let n = vlen constraintCtx in nattily n $ do
      let (rowGenTy, leftMidGenTy, leftCellType) = leftTypes
      let (rightMidGenTy, colGenTy, rightCellType) = rightTypes
-     rowGenTy <- normalise ctx (atom SType) rowGenTy
-     leftMidGenTy <- normalise ctx (atom SType) leftMidGenTy
-     rightMidGenTy <- normalise ctx (atom SType) rightMidGenTy
-     colGenTy <- normalise ctx (atom SType) colGenTy
-     leftCellType <- normalise (ctx \\\ ("i", mk SAbel rowGenTy) \\\ ("j", wk $ mk SAbel leftMidGenTy)) (atom SType) leftCellType
-     rightCellType <- normalise (ctx \\\ ("i", mk SAbel rightMidGenTy) \\\ ("j", wk $ mk SAbel colGenTy)) (atom SType) rightCellType
      let returnCtx = ctx \\\ ("i", mk SAbel rowGenTy) \\\ ("k", wk $ mk SAbel colGenTy)
-     returnCellType <- normalise returnCtx (atom SType) returnCellType
-     joinGenType <- normalise ctx (atom SType) joinGenType
-     joinElement <- normalise ctx (mk SAbel joinGenType) joinElement
-     awaitingStatus <- normalise emptyContext (atom STwo) awaitingStatus
-     let leftTypes = (rowGenTy, leftMidGenTy, leftCellType)
-     let rightTypes = (rightMidGenTy, colGenTy, rightCellType)
+
      case awaitingStatus of
        Intg 0 -> metaDefn name (I 0 :$ U :^ no Zy)
        Intg 1 -> do
@@ -1300,10 +1361,7 @@ solveConstraint name c@Multiplicable{..}
        _ -> push $ ConstraintFrame name Multiplicable{..}
 
 solveConstraint name c@JoinConstraint{..}
-  | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
-      leftGenType <- normalise ctx (atom SType) leftGenType
-      rightGenType <- normalise ctx (atom SType) rightGenType
-      joinTGenype <- normalise ctx (atom SType) joinGenType
+  | Just ctx <- traverse (traverse isHom) constraintCtx = do
       case (tagEh leftGenType, tagEh rightGenType, tagEh joinGenType) of
 {-
         (Just (SOne, []), _ , _) -> do
@@ -1353,10 +1411,6 @@ solveConstraint name c@JoinConstraint{..}
 solveConstraint name c@HeadersCompatibility{..} = nattily (vlen constraintCtx) $ do
       let leftCtx = fmap lhsType <$> constraintCtx
       let rightCtx = fmap rhsType <$> constraintCtx
-      leftGenType <- normalise leftCtx (atom SType) leftGenType
-      rightGenType <- normalise rightCtx (atom SType) rightGenType
-      leftList <- normalise leftCtx (mk SList (tag SAbel [leftGenType])) leftList
-      rightList <- normalise rightCtx (mk SList (tag SAbel [rightGenType])) rightList
       let consCase (leftElement , leftList) (rightElement, rightList) stat = do
             (_, hstat) <- constrain "headCompat" $ HeaderCompatibility{..}
             (_, tstat) <- constrain "tailCompat" $ HeadersCompatibility{..}
@@ -1375,13 +1429,6 @@ solveConstraint name c@HeadersCompatibility{..} = nattily (vlen constraintCtx) $
 
 solveConstraint name HeaderCompatibility{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
-      leftGenType <- normalise ctx (atom SType) leftGenType
-      rightGenType <- normalise ctx (atom SType) rightGenType
-      joinGenType <- normalise ctx (atom SType) joinGenType
-      leftElement <- normalise ctx (mk SAbel leftGenType) leftElement
-      rightElement <- normalise ctx (mk SAbel rightGenType) rightElement
-      joinElement <- normalise ctx (mk SAbel joinGenType) joinElement
-      joinStatus <- normalise emptyContext (atom STwo) joinStatus
       case joinStatus of
         Intg 0 -> metaDefn name fALSE
         Intg 1 -> do
@@ -1416,15 +1463,12 @@ solveConstraint name HeaderCompatibility{..}
         _ ->
 -}
 
-solveConstraint name c@NoMiddleDependency{..}
+solveConstraint name c@NoMiddleDependency{ candidate = candidate@(cand' :^ th), ..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
-  joinGenStatus <- normalise emptyContext (atom STwo) joinGenStatus
-  joinGenType <- normalise ctx (atom SType) joinGenType
   case joinGenStatus of
     Intg 0 -> metaDefn name (I 0 :$ U :^ no Zy)
     Intg 1 -> do
       let (i, j, k) = extension
-      candidate@(cand' :^ th) <- normalise (ctx \\\ ("i", i) \\\ ("j", wk j) \\\ ("k", wk (wk k))) (mk SAbel (wk (wk (wk joinGenType)))) candidate
       -- TODO: this will say no incorrectly when the only occurrence of j is as a permitted dependency of a meta variable; the right thing to do is to prune this dependency
       case (case th of { Su (No th) -> Just (Su th) ; No (No th) -> Just (No th) ; _ -> Nothing}) of
         Just th -> do
@@ -1439,8 +1483,8 @@ solveConstraint name c@NoMiddleDependency{..}
     _ -> push $ ConstraintFrame name NoMiddleDependency{..}
 
 solveConstraint name c@ElemConstraint{..}
-  | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
-      (as, Any b) <- knownElems <$> normalise ctx (mk SList (atom SAtom)) hayStack
+  | Just ctx <- traverse (traverse isHom) constraintCtx = do
+      let (as, Any b) = knownElems hayStack
       if needle `elem` as
         then metaDefn name (I 1 :$ U :^ no Zy)
         else if b then push $ ConstraintFrame name c else metaDefn name (I 0 :$ U :^ no Zy)
@@ -1454,9 +1498,6 @@ solveConstraint name c@ElemConstraint{..}
     knownElems t = ([], Any $ not (Set.null (dependencies t))) -- TODO: over approximation; will sometimes say maybe when it should say no
 solveConstraint name c@ListAtomPushout{..}
   | Just ctx <- traverse (traverse isHom) constraintCtx = nattily (vlen constraintCtx) $ do
-      leftList <- normalise ctx (mk SList (atom SAtom)) leftList
-      rightList <- normalise ctx (mk SList (atom SAtom)) rightList
-      joinList <- normalise ctx (mk SList (atom SAtom)) joinList
       case (listView leftList, listView rightList, listView joinList) of
         _ | leftList == rightList -> do
               (_ , jStat) <- constrain "equalInputs" $ Constraint

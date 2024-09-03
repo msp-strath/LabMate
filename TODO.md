@@ -22,4 +22,4 @@
 
 29.08.2024
 
-[ ] Normalisation should happen in updateConstraint (and every constraint insisting on isHom should be updated)
+[X] Normalisation should happen in updateConstraint (and every constraint insisting on isHom should be updated)
