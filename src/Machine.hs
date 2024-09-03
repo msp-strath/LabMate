@@ -2811,8 +2811,8 @@ diagnosticRun = llup >>= \case
           ]
       UnitDs units -> pure $
           [ Tok "\n" Ret dump
-          , spc dent, sym "%<", spc 1, sym "LabMate tells Matlab that units are 1s", Tok "\n" Ret dump
           , spc dent, sym "%<{", Tok "\n" Ret dump
+          , spc dent, sym "%", spc 1, sym "LabMate tells MATLAB that units are 1s", Tok "\n" Ret dump
           ] ++
           foldMap (\u ->
                     [spc dent, non (nonce u), spc 1, sym "=", spc 1, Tok "1" Dig dump, sym ";", Tok "\n" Ret dump])

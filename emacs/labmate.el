@@ -49,11 +49,10 @@
   (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%\n]+" . 'labmate-response-success)))
   (font-lock-add-keywords nil '(("^\s*%<\s*.*::[^%\n]+" . 'labmate-response-success)))
   (font-lock-add-keywords nil '(("^\s*%<\s*LabMate[^%\n]+" . 'labmate-response-success)))
+  ;; Fold generated code
   (hs-minor-mode)
+
   (setq mode-name "labmate")
-  ;; clear memory
-  ;;(setq typos-keywords-regexp nil)
-  ;;(setq typos-operators-regexp nil)
 )
 
 
@@ -68,6 +67,12 @@
   "The path to the LabMate command to run."
   :type 'string
   :group 'labmate)
+
+(defcustom labmate-hide-generated-code nil
+  "Determine if generated code should be hidden after running LabMate."
+  :type 'boolean
+  :group 'labmate)
+
 
 (defface labmate-highlight-error-face
   '((t (:underline (:color "red" :style wave))))
@@ -99,7 +104,7 @@
   "Run LabMate on the current file."
   (interactive "P")
   (labmate-run-on-file (shell-quote-argument (buffer-file-name)))
-  ;;(hs-hide-all)
+  (when labmate-hide-generated-code (hs-hide-all))
 )
 
 (define-key labmate-mode-map (kbd "C-c C-l") 'labmate-run)
