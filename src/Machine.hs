@@ -152,7 +152,7 @@ instance PrettyPrint MachineState where
   pprint st = do
     let (fz :<+>: fs) = position st
     lines <- pprint (fz <>> fs, problem st)
-    pure (show (metaStore st) : show (constraintStore st) : lines)
+    pure ({-show (metaStore st) : show (constraintStore st) :-} lines)
 
 type TERM = Term Chk ^ Z
 type TYPE = Typ ^ Z
@@ -1362,40 +1362,16 @@ solveConstraint name c@Multiplicable{..}
        _ -> push $ ConstraintFrame name Multiplicable{..}
 
 solveConstraint name c@JoinConstraint{..}
-  | Just ctx <- traverse (traverse isHom) constraintCtx = do
+  | Just ctx <- traverse (traverse isHom) constraintCtx = let n = vlen constraintCtx in nattily n $
       case (tagEh leftGenType, tagEh rightGenType, tagEh joinGenType) of
-{-
-        (Just (SOne, []), _ , _) -> do
-          (_, rjstat) <- constrain "leftOne" $ Constraint
+        _ | leftGenType == rightGenType -> do
+          (_, stat) <- constrain "leftRightEqualJoin" $ Constraint
             { constraintCtx = constraintCtx
             , constraintType = Hom (atom SType)
-            , lhs = rightType
-            , rhs = joinType
+            , lhs = leftGenType
+            , rhs = joinGenType
             }
-          metaDefn name rjstat
-        (_, Just (SOne, []), _) -> do
-          (_, ljstat) <- constrain "rightOne" $ Constraint
-            { constraintCtx = constraintCtx
-            , constraintType = Hom (atom SType)
-            , lhs = leftType
-            , rhs = joinType
-            }
-          metaDefn name ljstat
-        (_, _, Just (SOne, [])) -> do -- if join is least, both left and right must be least
-          (_, lstat) <- constrain "joinLeftOne" $ Constraint
-            { constraintCtx = constraintCtx
-            , constraintType = Hom (atom SType)
-            , lhs = leftType
-            , rhs = joinType
-            }
-          (_, rstat) <- constrain "joinRightOne" $ Constraint
-            { constraintCtx = constraintCtx
-            , constraintType = Hom (atom SType)
-            , lhs = rightType
-            , rhs = joinType
-            }
-          metaDefn name (conjunction [lstat, rstat])
--}
+          metaDefn name stat
         (a, b, c) | not $ null [x | Just (SEnum, [x]) <- [a, b, c]] -> do
           (as, asStat) <- ensureEnum ctx leftGenType
           (bs, bsStat) <- ensureEnum ctx rightGenType
@@ -1407,6 +1383,71 @@ solveConstraint name c@JoinConstraint{..}
             , joinList = cs
             }
           metaDefn name (conjunction [asStat, bsStat, csStat, pushStat])
+        (a, b, c) | not $ null [() | Just (SMatrix, _) <- [a, b, c]] -> do
+          (rowGenTyLeft, colGenTyLeft, cellTyLeft, rsLeft, csLeft, lstat) <- ensureMatrix ctx leftGenType
+          (rowGenTyRight, colGenTyRight, cellTyRight, rsRight, csRight, rstat) <- ensureMatrix ctx rightGenType
+          (rowGenTyJoin, colGenTyJoin, cellTyJoin, rsJoin, csJoin, jstat) <- ensureMatrix ctx joinGenType
+          (i, j, cellTyLeft, cellTyRight, cellTyJoin) <- case () of
+            _ | Just (i, cellTyLeft) <- lamNameEh cellTyLeft, Just (j, cellTyLeft) <- lamNameEh cellTyLeft
+              , Just cellTyRight <- lamEh cellTyRight, Just cellTyRight <- lamEh cellTyRight
+              , Just cellTyJoin <- lamEh cellTyJoin, Just cellTyJoin <- lamEh cellTyJoin
+              -> pure (i, j, cellTyLeft, cellTyRight, cellTyJoin)
+          (_, rowStat) <- constrain "plusJoinRows" $ JoinConstraint
+            { constraintCtx = constraintCtx
+            , leftGenType = rowGenTyLeft
+            , rightGenType = rowGenTyRight
+            , joinGenType = rowGenTyJoin
+            }
+          (_, colStat) <- constrain "plusJoinCols" $ JoinConstraint
+            { constraintCtx = constraintCtx
+            , leftGenType = colGenTyLeft
+            , rightGenType = colGenTyRight
+            , joinGenType = colGenTyJoin
+            }
+          if alive rowStat && alive colStat then do
+            rowJoinElt <- invent "joinElementRow" ctx (mk SAbel rowGenTyJoin)
+            (_, headerRowStat) <- constrain "HeaderCompatRow" $ HeadersCompatibility
+              { constraintCtx = constraintCtx
+              , leftGenType = rowGenTyLeft
+              , rightGenType = rowGenTyRight
+              , joinGenType = rowGenTyJoin
+              , joinStatus = rowStat
+              , leftList = rsLeft
+              , rightList = rsRight
+              , joinElement = rowJoinElt
+              }
+            colJoinElt <- invent "joinElementCol" ctx (mk SAbel colGenTyJoin)
+            (_, headerColStat) <- constrain "HeaderCompatCol" $ HeadersCompatibility
+              { constraintCtx = constraintCtx
+              , leftGenType = colGenTyLeft
+              , rightGenType = colGenTyRight
+              , joinGenType = colGenTyJoin
+              , joinStatus = colStat
+              , leftList = csLeft
+              , rightList = csRight
+              , joinElement = colJoinElt
+              }
+            (_, rjStat) <- constrain "rowsOut" $ Constraint
+              { constraintCtx = constraintCtx
+              , constraintType = Hom (mk SList (tag SAbel [rowGenTyJoin]))
+              , lhs = rsLeft
+              , rhs = rsJoin
+              }
+            (_, cjStat) <- constrain "rowsOut" $ Constraint
+              { constraintCtx = constraintCtx
+              , constraintType = Hom (mk SList (tag SAbel [colGenTyJoin]))
+              , lhs = csLeft
+              , rhs = csJoin
+              }
+            (_, cellStat) <- constrain "Cell" $ JoinConstraint
+              { constraintCtx = constraintCtx \\\\ (i, Hom (mk SAbel rowGenTyJoin)) \\\\ (j, Hom (wk $ mk SAbel colGenTyJoin))
+              , leftGenType = cellTyLeft
+              , rightGenType = cellTyRight //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (R $^ (mk Splus (var 1) (wk (wk rowJoinElt)))  <&> wk (wk $ mk SAbel rowGenTyJoin))) (R $^ (mk Splus (var 0) (wk (wk colJoinElt))) <&> wk (wk $ mk SAbel colGenTyJoin))
+              , joinGenType = cellTyJoin
+              }
+            metaDefn name $ conjunction [lstat,rstat,jstat,rowStat,colStat,headerRowStat,headerColStat,rjStat,cjStat,cellStat]
+          else metaDefn name fALSE
+          
         _ -> push $ ConstraintFrame name JoinConstraint{..}
 
 solveConstraint name c@HeadersCompatibility{..} = nattily (vlen constraintCtx) $ do
@@ -2769,7 +2810,7 @@ diagnosticRun = llup >>= \case
             resp ++ [sym "There is no sensible type for", spc 1, non en]
           (hopingTy, hopingTm) ->
             debug ("%%%% Puzzle" ++ show (dependencies ty) ++ " and terms " ++ show (dependencies tm)) $
-              resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is quite a puzzle"]
+              resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is such a puzzle"]
       -- _ -> pure [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Goodbye" Nom dump]
       UnitD un stat tn -> case stat of
         Intg 1 -> pure
