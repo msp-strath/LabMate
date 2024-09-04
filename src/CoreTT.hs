@@ -664,7 +664,7 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
     let sig = subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)
     v <- checkEval (cellTy //^ sig) t
     h <- nf rowTy $ mk Sone r
-    pure ([(h, [NFCell v])] , ((rs', mk Sone c), (mk Sone r, cs')))
+    pure ([[(h, [NFCell v])]] , ((rs', mk Sone c), (mk Sone r, cs')))
   | Just (Shjux, [l, r]) <- tagEh tm = withScope $ do
     (lm, ((rs', cs0), rt@(rs0, _))) <- checkEvalMatrixNF nf ty mx l
     (rm, ((_, cs1), (_, cs''))) <- checkEvalMatrixNF nf ty rt r
@@ -673,17 +673,21 @@ checkEvalMatrixNF nf ty@(rowTy, colTy, cellTy) mx@(rs, cs) tm
     (tm, (lb@(_, cs0), (rs0, cs'))) <- track ("checkEval VJUX " ++ show tm) $ checkEvalMatrixNF nf ty mx t
     (bm, ((rs'', _), (rs1, _))) <- checkEvalMatrixNF nf ty lb b
     pure (tm `vjux` bm, ((rs'', cs0), (mk Splus rs0 rs1, cs')))
+  | Just (Splus, [x, y]) <- tagEh tm = withScope $ do
+    (xm, corners) <- checkEvalMatrixNF nf ty mx x
+    (ym, _) <- checkEvalMatrixNF nf ty mx y
+    pure (xm `madd` ym, corners)
   | Just tm <- E $? tm = withScope $ do
-     (tm, ty') <- evalSynthNmTy tm
-     case E $? tm of
-       Nothing -> checkEvalMatrixNF nf ty mx tm
-       Just tm -> case tagEh ty' of
-         Just (SMatrix, [_, _, _,  rs0, cs0]) -> do
-           (rs0, rs1) <- prefixEh rowTy rs0 rs
-           (cs0, cs1) <- prefixEh colTy cs0 cs
-           h   <- nf rowTy rs0
-           pure ([(h, [NFNeutral tm])], ((rs1, cs0), (rs0, cs1)))
-         _ -> fail "checkEvalMatrixAbel"
+    (tm, ty') <- evalSynthNmTy tm
+    case E $? tm of
+      Nothing -> checkEvalMatrixNF nf ty mx tm
+      Just tm -> case tagEh ty' of
+        Just (SMatrix, [_, _, _,  rs0, cs0]) -> do
+          (rs0, rs1) <- prefixEh rowTy rs0 rs
+          (cs0, cs1) <- prefixEh colTy cs0 cs
+          h   <- nf rowTy rs0
+          pure ([[(h, [NFNeutral tm])]], ((rs1, cs0), (rs0, cs1)))
+        _ -> fail "checkEvalMatrixAbel"
   | otherwise = withScope $ fail $ "checkEvalMatrixNF: not a valid matrix ctor " ++ show tm
 
 

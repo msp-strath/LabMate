@@ -115,8 +115,11 @@ type NFMatrix
   h  -- the type of heights of rows (either NFList or NFAbel)
   c  -- the type for singletons/cells (Norm)
   u  -- the type for neutrals
-  = [(h, [NFMatrixComponent h c u])]
-         -- ^ both the outer and inner lists should be non-empty!
+--  ,- a nonempty sum of
+--  | ,- nonempty vertical juxtapositions of
+--  | |    ,- nonempty horizontal juxtapositions of components
+--  v v    v
+  = [ [(h, [NFMatrixComponent h c u])] ]
 
 data NFMatrixComponent h c u
   = NFNeutral u
@@ -124,11 +127,15 @@ data NFMatrixComponent h c u
   | NFCompound (NFMatrix h c u)
   deriving Show
 
+height :: forall h c u . (Eq h, Monoid h) => NFMatrix h c u -> h
+height (rows:_) = foldMap fst rows
+
 nfMatrixToTerm
   :: NATTY n
   => NFMatrix h (Norm Chk ^ n) (Norm Syn ^ n)
   -> Norm Chk ^ n
-nfMatrixToTerm rows =
+nfMatrixToTerm [] = nil
+nfMatrixToTerm [rows] =
   glom (mk Svjux)  $ map (glom (mk Shjux) . map compToTerm . snd) rows
   where
     glom :: (t -> t -> t) -> [t] -> t
@@ -143,12 +150,14 @@ nfMatrixToTerm rows =
       NFNeutral t -> E $^ t
       NFCell c -> mk Sone c
       NFCompound m -> nfMatrixToTerm m
+nfMatrixToTerm (rows:summands) = mk Splus (nfMatrixToTerm [rows]) (nfMatrixToTerm summands)
 
-vjux :: NFMatrix h c u -> NFMatrix h c u -> NFMatrix h c u
-vjux = (++)
+vjux ::  forall h c u . (Eq h, Monoid h) => NFMatrix h c u -> NFMatrix h c u -> NFMatrix h c u
+vjux [trows] [brows] = [trows ++ brows]
+vjux tsum bsum = [[(height tsum, [NFCompound tsum]) , (height bsum, [NFCompound bsum])]]
 
 hjux :: forall h c u . (Eq h, Monoid h) => NFMatrix h c u -> NFMatrix h c u -> NFMatrix h c u
-hjux lrs rrs = post B0  (accum mempty lrs) (accum mempty rrs)
+hjux [lrs] [rrs] = [post B0 (accum mempty lrs) (accum mempty rrs)]
   where
    accum :: forall a. h -> [(h, a)] -> [(h, (h, a))]
    accum d [] = []
@@ -157,7 +166,7 @@ hjux lrs rrs = post B0  (accum mempty lrs) (accum mempty rrs)
    post :: Bwd  (h, [NFMatrixComponent h c u])
         -> [(h, (h, [NFMatrixComponent h c u]))]
         -> [(h, (h, [NFMatrixComponent h c u]))]
-        -> NFMatrix h c u
+        -> [(h, [NFMatrixComponent h c u])]
    post B0  [] [] = []
    post lrz ((ld, lr) : ldrs) rdrs =
      case break ((ld ==) . fst) rdrs of
@@ -165,11 +174,15 @@ hjux lrs rrs = post B0  (accum mempty lrs) (accum mempty rrs)
        (rdas, (_, rr) : rdrs) -> jux (lrz <>> [lr]) (map snd rdas ++ [rr]) : post B0 ldrs rdrs
    post _ _ _ = error "hjux: no"
 
-   jux :: NFMatrix h c u -> NFMatrix h c u -> (h, [NFMatrixComponent h c u])
+   jux :: [(h, [NFMatrixComponent h c u])] -> [(h, [NFMatrixComponent h c u])] -> (h, [NFMatrixComponent h c u])
    jux [(h, lcs)] [(_, rcs)] = (h, lcs ++ rcs)
-   jux [(h, lcs)] r          = (h, lcs ++ [NFCompound r])
-   jux l          [(h, rcs)] = (h, NFCompound l : rcs)
-   jux l          r          = (foldMap fst l, [NFCompound l, NFCompound r])
+   jux [(h, lcs)] r          = (h, lcs ++ [NFCompound [r]])
+   jux l          [(h, rcs)] = (h, NFCompound [l] : rcs)
+   jux l          r          = (foldMap fst l, [NFCompound [l], NFCompound [r]])
+hjux tsum bsum = [ [ (height tsum, [NFCompound tsum, NFCompound bsum]) ] ]
+
+madd :: NFMatrix h c u -> NFMatrix h c u -> NFMatrix h c u
+madd = (++)
 
 data NFBool tm
   = FALSE

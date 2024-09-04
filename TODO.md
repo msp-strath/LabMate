@@ -8,13 +8,13 @@
 
 26.08.2024
 
-[ ] Emacs minor mode to hide generated code
+[X] Emacs minor mode to hide generated code
 [X] HIGHER PRIORITY: Combine dimensions directive with standard units (add comment explaining that generated code is in order to make sense for MATLAB)
 [X] Make One = Abel (Enum nil)
 [X] Do division
 [ ] Do transpose
-[ ] Main target: Matrices of dimensioned constants
-[ ] Main target: Matrix multiplication
+[X] Main target: Matrices of dimensioned constants
+[X] Main target: Matrix multiplication
 
 27.08.2024
 

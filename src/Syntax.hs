@@ -92,6 +92,11 @@ tyUnaryOp UMinus (TyDouble i :<=: src) = TyDouble (negate i)
 tyUnaryOp UPlus  (TyDouble i :<=: src) = TyDouble i
 tyUnaryOp op e = TyUnaryOp op e
 
+tyConstantCellEh :: TypeExpr' -> Bool
+tyConstantCellEh (TyNum _) = True
+tyConstantCellEh (TyDouble _) = True
+tyConstantCellEh _ = False
+
 type Res = [Tok]
 
 type ConcreteType = TensorType

@@ -265,6 +265,7 @@ data ElabTask where
   ConstrainTask :: NATTY n => WhereAmI -> (String, Constraint) -> Term Chk ^ n -> ElabTask
   ElimTask :: NATTY n => Natty n -> (Term Chk ^ n, Typ ^ n) -> [TypeExpr] -> ElabTask
   AbelTask :: TypeExpr' -> ElabTask -- the problem type must be Abel genTy for some genTy
+  ConstantCellTask :: SynthesisMode -> TypeExpr' -> ElabTask
   Abandon :: ElabTask -> ElabTask
 deriving instance Show ElabTask
 
@@ -2169,102 +2170,11 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
               pushProblems [Elab sol $ Await (conjunction [xstat, vstat]) (rhs -< no (vlen mctxt))]
           newProb . Done $ FreeVar x
           run
-    TypeExprTask whereAmI synthMode (TyNum k) -> case tagEh mtype of
-      Just (SList, [genTy]) -> do
-        (_, cs) <- constrain "IsOne" $ Constraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , constraintType = Hom (atom SType)
-          , lhs = genTy
-          , rhs = oneType
-          }
-        case () of
-          _ | k >= 0 -> do
-            newProb . Elab sol $ Await cs (ixKI mtype (lit k))
-          _ | True -> do
-            cry sol
-            newProb . Elab sol $ Abandon etask
-        run
-      Just (SAbel, [genTy]) -> do
-        (_, cs) <- constrain "IsOne" $ Constraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , constraintType = Hom (atom SType)
-          , lhs = genTy
-          , rhs = oneType
-          }
-        newProb . Elab sol $ Await cs (ixKI mtype (lit k))
-        run
-      Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs])
-        | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
-            let rowTy = mk SAbel rowGenTy
-            let colTy = mk SAbel colGenTy
-            r <- invent r mctxt rowTy
-            c <- invent c mctxt colTy
-            (_, rcs) <- constrain "IsSingletonR" $ Constraint
-              { constraintCtx = fmap Hom <$> mctxt
-              , constraintType = Hom (mk SList rowTy)
-              , lhs = mk Sone r
-              , rhs = rs
-              }
-            (_, ccs) <- constrain "IsSingletonC" $ Constraint
-              { constraintCtx = fmap Hom <$> mctxt
-              , constraintType = Hom (mk SList colTy)
-              , lhs = mk Sone c
-              , rhs = cs
-              }
-            (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
-            extraStats <- case synthMode of
-              EnsureCompatibility -> pure []
-              FindSimplest -> do
-                (_, rstat) <- constrain "rowtyIsOne" $ Constraint
-                  { constraintCtx = fmap Hom <$> mctxt
-                  , constraintType = Hom (atom SType)
-                  , lhs = rowTy
-                  , rhs = oneType
-                  }
-                (_, cstat) <- constrain "coltyIsOne" $ Constraint
-                  { constraintCtx = fmap Hom <$> mctxt
-                  , constraintType = Hom (atom SType)
-                  , lhs = colTy
-                  , rhs = oneType
-                  }
-                {-
-                (_, runitstat) <- constrain "rIsUnit" $ Constraint
-                  { constraintCtx = fmap Hom <$> mctxt
-                  , constraintType = Het (atom SOne) rstat rowTy
-                  , lhs = nil
-                  , rhs = r
-                  }
-                (_, cunitstat) <- constrain "cIsUnit" $ Constraint
-                  { constraintCtx = fmap Hom <$> mctxt
-                  , constraintType = Het (atom SOne) cstat colTy
-                  , lhs = nil
-                  , rhs = c
-                  }
-                -}
-                pure [rstat, cstat] -- , runitstat, cunitstat]
-            pushProblems [cellProb]
-            newProb . Elab sol $ Await (conjunction ([rcs, ccs] ++ extraStats)) (mk Sone cellSol)
-            run
-      _ -> do
-        newProb . Elab sol $ TypeExprTask whereAmI synthMode (TyDouble (fromIntegral k))
-        run
-
-    TypeExprTask whereAmI synthMode (TyDouble d) -> case tagEh mtype of
-      Just (SQuantity, [genTy, dim]) -> case d of
-        0 -> do
-          metaDefn sol (inContext mctxt $ lit (0::Double))
-          newProb $ Done nil
-          run
-        d -> do
-          (_ , cstat) <- constrain "dimensionless" $ Constraint
-            { constraintCtx = fmap Hom <$> mctxt
-            , constraintType = Hom (mk SAbel genTy)
-            , lhs = dim
-            , rhs = nil
-            }
-          newProb . Elab sol $ Await cstat (inContext mctxt $ lit d)
-          run
-      Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs])
+    TypeExprTask LabMate synthMode expr | tyConstantCellEh expr -> do
+      newProb . Elab sol $ ConstantCellTask synthMode expr
+      run
+    TypeExprTask MatLab synthMode expr | tyConstantCellEh expr -> ensureMatrix mctxt mtype >>= \case
+      (rowGenTy, colGenTy, cellTy, rs, cs, stat)
         | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy -> do
           let rowTy = mk SAbel rowGenTy
           let colTy = mk SAbel colGenTy
@@ -2282,7 +2192,8 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , lhs = mk Sone c
             , rhs = cs
             }
-          (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) etask
+          let task = ConstantCellTask synthMode expr
+          (cellSol, cellProb) <- elab' "cell" mctxt (cellTy //^ subSnoc (sub0 (R $^ r <&> rowTy)) (R $^ c <&> colTy)) task
           extraStats <- case synthMode of
             EnsureCompatibility -> pure []
             FindSimplest -> do
@@ -2298,35 +2209,11 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
                 , lhs = colTy
                 , rhs = oneType
                 }
-              {-
-              (_, runitstat) <- constrain "rIsUnit" $ Constraint
-                { constraintCtx = fmap Hom <$> mctxt
-                , constraintType = Het (mk SOne) rstat rowTy
-                , lhs = nil
-                , rhs = r
-                }
-              (_, cunitstat) <- constrain "cisUnit" $ Constraint
-                { constraintCtx = fmap Hom <$> mctxt
-                , constraintType = Het (mk SOne) cstat colTy
-                , lhs = nil
-                , rhs = c
-                }
-              -}
-              pure [rstat, cstat] -- , runitstat, cunitstat]
+              pure [rstat, cstat]
           pushProblems [cellProb]
           newProb . Elab sol $ Await (conjunction ([rcs, ccs] ++ extraStats)) (mk Sone cellSol)
           run
-      _ -> case synthMode of
-        EnsureCompatibility -> debug ("Unresolved overloading of numerical constant " ++ show d ++ " at type " ++ show mtype) $ move worried
-        FindSimplest -> do
-          (_, stat) <- constrain "toilTrouble" $ Constraint
-            { constraintCtx = fmap Hom <$> mctxt
-            , constraintType = Hom (atom SType)
-            , lhs = mtype
-            , rhs = doubleType -< no (vlen mctxt)
-            }
-          newProb . Elab sol $ Await stat (inContext mctxt $ lit d)
-          run
+
     TypeExprTask whereAmI synthMode (TyUnaryOp UInvert x) -> do
       (rowGenTy, colGenTy, cellTy, rs, cs, stat) <- ensureMatrix mctxt mtype
       case synthMode of
@@ -2585,6 +2472,59 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       pushProblems [fProb]
       newProb . Elab sol $ ElimTask (vlen mctxt) (fSol, fTy) args
       run
+    ConstantCellTask synthMode (TyNum k) -> case tagEh mtype of
+      Just (SList, [genTy]) -> do
+        (_, cs) <- constrain "IsOne" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , lhs = genTy
+          , rhs = oneType
+          }
+        case () of
+          _ | k >= 0 -> do
+            newProb . Elab sol $ Await cs (ixKI mtype (lit k))
+          _ | True -> do
+            cry sol
+            newProb . Elab sol $ Abandon etask
+        run
+      Just (SAbel, [genTy]) -> do
+        (_, cs) <- constrain "IsOne" $ Constraint
+          { constraintCtx = fmap Hom <$> mctxt
+          , constraintType = Hom (atom SType)
+          , lhs = genTy
+          , rhs = oneType
+          }
+        newProb . Elab sol $ Await cs (ixKI mtype (lit k))
+        run
+      _ -> do
+        newProb . Elab sol $ ConstantCellTask synthMode (TyDouble (fromIntegral k))
+        run
+    ConstantCellTask synthMode (TyDouble d) -> case tagEh mtype of
+      Just (SQuantity, [genTy, dim]) -> case d of
+        0 -> do
+          metaDefn sol (inContext mctxt $ lit (0::Double))
+          newProb $ Done nil
+          run
+        d -> do
+          (_ , cstat) <- constrain "dimensionless" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (mk SAbel genTy)
+            , lhs = dim
+            , rhs = nil
+            }
+          newProb . Elab sol $ Await cstat (inContext mctxt $ lit d)
+          run
+      _ -> case synthMode of
+        EnsureCompatibility -> debug ("Unresolved overloading of numerical constant " ++ show d ++ " at type " ++ show mtype) $ move worried
+        FindSimplest -> do
+          (_, stat) <- constrain "toilTrouble" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Hom (atom SType)
+            , lhs = mtype
+            , rhs = doubleType -< no (vlen mctxt)
+            }
+          newProb . Elab sol $ Await stat (inContext mctxt $ lit d)
+          run
     ElimTask n (tgt, tty) [] -> nattyEqOi n (vlen mctxt) $ do
       (_, cstat) <- debug ("!!!ElimTask[] " ++ show tty) $ constrain "elimFits" $ Constraint
         { constraintCtx = fmap Hom <$> mctxt
