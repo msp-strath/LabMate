@@ -2797,7 +2797,7 @@ diagnosticRun = llup >>= \case
         let resp = [Tok "\n" Ret dump, spc dent, sym "%<", spc 1]
         statTy <- traverse metaStatus . Set.toList $ dependencies ty
         statTm <- traverse metaStatus . Set.toList $ dependencies tm
-        sty <- unelabType ty
+        sty <- unelabType emptyContext ty
         pure $ case (filter (<= Hoping) statTy, filter (<= Hoping) statTm) of
           ([], []) -> resp ++ [non en, spc 1, sym "::", spc 1] ++ sty
           ([], _) | Crying `elem` statTm ->
@@ -2850,73 +2850,105 @@ metaStatus x = do
     Just m -> pure (mstat m)
     Nothing -> error $ "metaStatus: " ++ show x
 
-unelabType :: TYPE -> Elab [Tok]
-unelabType ty | Just ct <- tagEh ty = case ct of
+unelabType :: forall n . NATTY n => Context n -> Typ ^ n -> Elab [Tok]
+unelabType ctx ty | Just ct <- tagEh ty = case ct of
   -- TODO: cover all types properly
-  (SMatrix, [rowGenTy, colGenTy, cellTy, Intg 1, Intg 1]) -- 1 x 1 matrix
-    | Just cellTy <- lamEh cellTy, Just cellTy <- lamEh cellTy -> do
-        let sig = subSnoc (sub0 (R $^ nil <&> mk SAbel rowGenTy)) (R $^ nil <&> mk SAbel colGenTy)
-        unelabType =<< normalise emptyContext (atom SType) (cellTy //^ sig)
+  (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs]) -- 1 x 1 matrix
+    | Just (i, cellTy) <- lamNameEh cellTy, Just (j, cellTy) <- lamNameEh cellTy ->
+        case (rowGenTy, colGenTy, cellTy, rs, cs) of
+          (_, _, _, Intg r, Intg c) -> do
+            let sig = subSnoc (sub0 (R $^ nil <&> mk SAbel rowGenTy)) (R $^ nil <&> mk SAbel colGenTy)
+            cellTy <- unelabType ctx =<< normalise ctx (atom SType) (cellTy //^ sig)
+            case (r, c) of
+              (1, 1) -> pure cellTy
+              _ -> pure $ intersperse (spc 1) [sym "[", sym (show r), sym "x", sym (show c), sym "]"] ++ cellTy
+          (_, _, cellTy' :^ Su (Su th), _, _) -> do
+            rs <- unelabTerm ctx (mk SList (tag SAbel [rowGenTy])) rs
+            cs <- unelabTerm ctx (mk SList (tag SAbel [colGenTy])) cs
+            cellTy <- unelabType (ctx \\\ (i, mk SAbel rowGenTy) \\\ (j, wk $ mk SAbel colGenTy)) cellTy
+            pure $ concat
+              [ intersperse (spc 1) [sym "[", sym i, sym "<-"]
+              , [spc 1]
+              , rs
+              , [spc 1]
+              , intersperse (spc 1) [sym "x", sym j, sym "<-"]
+              , [spc 1]
+              , cs
+              , [spc 1, sym "]", spc 1]
+              , cellTy
+              ]
+          _ -> pure [sym $ show ty]
   (SAbel, [ty]) | isUnitType ty -> pure [nom "int"]
   (SList, [ty]) | Just (SChar, []) <- tagEh ty -> pure [nom "string"]
   (SEnum, [as]) -> do
-    tas <- unelabTerm (mk SList $ atom SAtom) as
+    tas <- unelabTerm ctx (mk SList $ atom SAtom) as
     pure $ [sym "Enum", spc 1] ++ tas
   (SQuantity, [enumTy, exp]) -> do
-        tenum <- unelabType enumTy
-        texp <- unelabTerm (mk SAbel enumTy) exp
+        tenum <- unelabType ctx enumTy
+        texp <- unelabTerm ctx (mk SAbel enumTy) exp
         pure $ [sym "Quantity", spc 1, sym "("] ++ tenum ++ [sym ")" , spc 1] ++ texp
   _ -> pure [sym $ show ty]
-unelabType ty = pure [sym $ show ty]
+unelabType ctx ty = pure [sym $ show ty]
 
-unelabTerm :: TYPE -> TERM -> Elab [Tok]
-unelabTerm ty tm | Just ty <- tagEh ty = case ty of
+unelabTerm :: forall n . NATTY n => Context n -> Typ ^ n -> Term Chk ^ n -> Elab [Tok]
+unelabTerm ctx ty (E :$ V :^ th) = case th ?^ ctx of
+  VN :# (v, _) -> pure [sym v]
+unelabTerm ctx ty tm | Just ty <- tagEh ty = case ty of
   (SList, [genTy]) -> do
-    elabTC VN (termToNFList genTy tm) >>= \case
+    elabTC ctx (termToNFList genTy tm) >>= \case
       Left err -> error err
-      Right xs -> go genTy xs False
+      Right xs -> go ctx genTy xs False
     where
-      go :: TYPE -> NFList Z
+      go :: Context n -> Typ ^ n
+         -> NFList n
          -> Bool -- are we in the middle of printing rights
          -> Elab [Tok]
-      go ty [] True = pure [sym "]"]
-      go ty [] False = pure []
-      go ty [Left x] rightEh = do
-        ttm <- unelabTerm ty (E $^ x)
+      go ctx ty [] True = pure [sym "]"]
+      go ctx ty [] False = pure []
+      go ctx ty [Left x] rightEh = do
+        ttm <- unelabTerm ctx ty (E $^ x)
         pure $ (if rightEh then [sym "]"] else []) ++ ttm
-      go ty (Left x : xs) rightEh = do
-        ttm <- unelabTerm ty (E $^ x)
-        xs <- go ty xs False
+      go ctx ty (Left x : xs) rightEh = do
+        ttm <- unelabTerm ctx ty (E $^ x)
+        xs <- go ctx ty xs False
         pure $ (if rightEh then [sym "]"] else []) ++ ttm ++ [ sym "++"] ++ xs
-      go ty (Right x : xs) rightEh = do
-        ttm <- unelabTerm ty x
-        xs <- go ty xs True
+      go ctx ty (Right x : xs) rightEh = do
+        ttm <- unelabTerm ctx ty x
+        xs <- go ctx ty xs True
         pure $ (if rightEh then [sym "," , spc 1] else [sym "["]) ++ ttm ++ xs
   (SAbel, [genTy]) -> case tupEh tm of
-    (Just [Intg 1, t]) -> unelabTerm (mk SAbel genTy) t
-    (Just [Intg n, t]) -> (++ [sym "^", Tok (show n) Dig dump]) <$> unelabTerm (mk SAbel genTy) t
-    _ | Just (Sone, [g]) <- tagEh tm -> do
-          g <- unelabTerm genTy g
-          pure $ [sym "{"] ++ g ++ [sym "}"]
-    _ | Just (Splus, [x, y]) <- tagEh tm -> do
-          x <- unelabTerm (mk SAbel genTy) x
-          case tupEh y of
-            Just [Intg n, y] | n < 0 -> do
-               y <- unelabTerm (mk SAbel genTy) (tup [lit (-n), y])
-               pure $ x ++ [sym "/"] ++ y
-            _ -> do
-               y <- unelabTerm (mk SAbel genTy) y
-               pure $ x ++ [sym "*"] ++ y
     _ | Intg 0 <- tm -> pure [sym "{}"]
+    Just ts -> do
+      tm <- go genTy tm
+      pure $ [sym "{"] ++ tm ++ [sym "}"]
     _ -> pure [sym $ show tm]
   (SEnum, [as]) | Intg i <- tm -> do
-      as <- elabTC VN (termToNFList (atom SAtom) as)
+      as <- elabTC ctx (termToNFList (atom SAtom) as)
       case as of
         Left err -> error err
         Right as -> case indexInEnum i as of
-          Just x -> unelabTerm (atom SAtom) x
+          Just x -> unelabTerm ctx (atom SAtom) x
           Nothing -> pure [sym $ show tm]
   _ -> pure [sym $ show tm]
+  where
+    go genTy (E :$ V :^ th) = case th ?^ ctx of
+      VN :# (v, _) -> pure [sym v]
+    go genTy tm | Just (Sone, [g]) <- tagEh tm = unelabTerm ctx genTy g
+    go genTy tm | Just [Intg n, t] <- tupEh tm = do
+              t <- go genTy t
+              pure $ case n of
+                1 -> t
+                _ -> t ++ [sym "^", Tok (show n) Dig dump]
+    go genTy tm | Just (Splus, [x, y]) <- tagEh tm = do
+       x <- go genTy x
+       case tupEh y of
+         Just [Intg n, y] | n < 0 -> do
+            y <- go genTy (tup [lit (-n), y])
+            pure $ x ++ [spc 1, sym "/", spc 1] ++ y
+         _ -> do
+            y <- go genTy y
+            pure $ x ++ [spc 1, sym "*", spc 1] ++ y
+    go genTy tm = pure [sym $ show tm]
 
 diagnosticMove :: ForkCompleteStatus -> Elab ()
 diagnosticMove stat = pull >>= \case
