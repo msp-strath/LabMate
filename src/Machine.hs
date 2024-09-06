@@ -875,7 +875,7 @@ flexEh (E :$ (M (x, k) :$ sig) :^ th) = do
        case (nattyEqEh k (bigEnd ph), nattyEqEh (weeEnd th) (weeEnd ph)) of
          (Just Refl, Just Refl)
            | sig == idSub
-               -> pure (Just (FlexEh x k ph th))
+               -> pure (Just (FlexEh x k th (idSubst (weeEnd ph) :^ ph)))
          _ -> pure Nothing
      _ -> pure Nothing
 flexEh _ = pure Nothing
@@ -928,16 +928,16 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
     case (lhs, rhs) of
       _ | lhs == rhs -> metaDefn name (I 1 :$ U :^ no Zy)
       (_, t :^ ph)
-        | Just (FlexEh x k ph' th) <- lhsFlexEh
+        | Just (FlexEh x k th ta) <- lhsFlexEh
         , Just ps <- thicken ph th
         , x `Set.notMember` dependencies t -> do
-              metaDefn x (t :^ (ps -< ph'))
+              metaDefn x ((t :^ ps) //^ ta)
               metaDefn name (I 1 :$ U :^ no Zy)
       (t :^ ph, _)
-        | Just (FlexEh x k ph' th) <- rhsFlexEh
+        | Just (FlexEh x k th ta) <- rhsFlexEh
         , Just ps <- thicken ph th
         , x `Set.notMember` dependencies t -> do
-              metaDefn x (t :^ (ps -< ph'))
+              metaDefn x ((t :^ ps) //^ ta)
               metaDefn name (I 1 :$ U :^ no Zy)
       -- different atoms are never unifiable, raise the constraint as impossible
       _ | Just (s1, []) <- tagEh lhs
