@@ -2861,7 +2861,7 @@ unelabType ctx ty | Just ct <- tagEh ty = case ct of
             cellTy <- unelabType ctx =<< normalise ctx (atom SType) (cellTy //^ sig)
             case (r, c) of
               (1, 1) -> pure cellTy
-              _ -> pure $ intersperse (spc 1) [sym "[", sym (show r), sym "x", sym (show c), sym "]"] ++ cellTy
+              _ -> pure $ intersperse (spc 1) [sym "[", sym (show r), sym "x", sym (show c), sym "]"] ++ [spc 1] ++ cellTy
           (_, _, cellTy' :^ Su (Su th), _, _) -> do
             rs <- unelabTerm ctx (mk SList (tag SAbel [rowGenTy])) rs
             cs <- unelabTerm ctx (mk SList (tag SAbel [colGenTy])) cs
