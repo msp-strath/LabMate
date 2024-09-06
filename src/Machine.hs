@@ -865,20 +865,65 @@ data FlexEh (gamma :: Nat) where
     -> Subst n ^ delta -- how to map the permitted variables into the
                        -- flex variable's context
     -> FlexEh gamma
+    
+data FlexEhWork (gamma' :: Nat)(delta' :: Nat) where
+  FlexEhWork
+    :: n <= gamma'      -- the thinning for the candidate solution's
+                        -- permitted dependencies
+    -> Subst n ^ delta' -- how to map the permitted variables into the
+                        -- flex variable's context
+    -> FlexEhWork gamma' delta'
 
-flexEh :: Norm Chk ^ m -> Elab (Maybe (FlexEh m))
-flexEh (E :$ (M (x, k) :$ sig) :^ th) = do
-   ms <- gets metaStore
-   case  x `Map.lookup` ms of
-     Just meta@Meta{..} | Hoping <- mstat -> do
-       idSub :^ ph <- normalIdSubst mctxt
-       case (nattyEqEh k (bigEnd ph), nattyEqEh (weeEnd th) (weeEnd ph)) of
-         (Just Refl, Just Refl)
-           | sig == idSub
-               -> pure (Just (FlexEh x k th (idSubst (weeEnd ph) :^ ph)))
-         _ -> pure Nothing
-     _ -> pure Nothing
-flexEh _ = pure Nothing
+var0Insert :: S Z <= gamma'  -- we hope this...
+           -> n <= gamma'    -- ...is disjoint form these
+           -> Subst n ^ delta'
+           -> Maybe (FlexEhWork gamma' (S delta'))
+var0Insert (Su _) (No ph) (ta :^ ps) = nattily (bigEnd ps) $ Just
+  (FlexEhWork (Su ph) (subSnoc (ta :^ No ps) (var 0)))
+var0Insert (No up) (No ph) taps = do
+  FlexEhWork ph taps <- var0Insert up ph taps
+  Just $ FlexEhWork (No ph) taps
+var0Insert (No up) (Su ph) (ST :$ P ta u s :^ ps) = do
+  FlexEhWork ph tala <- var0Insert up ph (ta :^ (covl u -< ps))
+  Just $ FlexEhWork (Su ph) (subSnoc tala (s :^ (No (covr u -< ps))))
+var0Insert _ _ _ = Nothing
+
+flexEhWorker
+  :: (Context delta, Context gamma, Subst delta ^ gamma)
+  -> Vec delta' (String, Typ ^ delta)
+  -> Subst delta' gamma'
+  -> Vec gamma' (String, Typ ^ gamma)
+  -> gamma' <= gamma
+  -> Elab (Maybe (FlexEhWork gamma' delta'))
+flexEhWorker _ VN Sub0 VN _ = pure . Just $ FlexEhWork Ze (S0 :$ U :^ Ze)
+flexEhWorker dg@(delta, gamma, d2g) (delta' :# (x, xTy)) (ST :$ P sg u t) gamma' th = do
+  xTy <- withScopeOf xTy $ normalise delta (atom SType) xTy
+  flexEhWorker dg delta' sg (covl u ?^ gamma') (covl u -< th) >>= \case
+    Nothing -> pure Nothing
+    Just (FlexEhWork ph (ta :^ ps)) -> case weeEnd (covr u) of
+      Sy (Sy _) -> pure Nothing
+      Zy | isUnitType xTy -> pure . Just $ FlexEhWork (ph -< covl u) (ta :^ No ps)
+         | otherwise -> pure Nothing
+      Sy Zy -> case covr u ?^ gamma' of
+        VN :# (y, yTy) -> do
+          let up = covr u -< th
+          let ytm = E :$ V :^ up
+          ytm <- normalise gamma yTy ytm
+          t <- normalise gamma (xTy //^ d2g) (E :$ t :^ up)
+          if ytm /= t then pure Nothing else pure $ var0Insert (covr u) (ph -< covl u) (ta :^ ps)
+
+flexEh :: Context gamma -> NmTy ^ gamma -> Norm Chk ^ gamma
+         -> Elab (Maybe (FlexEh gamma))
+flexEh gamma ty (E :$ (M (x, k) :$ sig) :^ th) = do
+  ms <- gets metaStore
+  case  x `Map.lookup` ms of
+    Just meta@Meta{..} | Hoping <- mstat -> case nattyEqEh k (vlen mctxt) of
+      Just Refl -> flexEhWorker (mctxt, gamma, sig :^ th) mctxt sig (th ?^ gamma) th >>= \case
+        Just (FlexEhWork ph ta) -> pure $ Just (FlexEh x k (ph -< th) ta)
+        Nothing -> pure Nothing
+      _ -> error "flexEh mismatch in meta arity"
+    _ -> pure Nothing
+flexEh _ _ _ = pure Nothing
 
 constraintStatus :: Name -> Elab BOOL
 constraintStatus name = normalise VN (atom STwo) (wrapMeta name)
@@ -923,8 +968,8 @@ solveConstraint name c | debug ("Solve constrain call " ++ show name ++ " constr
 solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constraintCtx, constraintType) of
   (Just ctx, Hom ty) -> nattily (vlen constraintCtx) $ do
     ms  <- gets metaStore
-    lhsFlexEh <- flexEh lhs
-    rhsFlexEh <- flexEh rhs
+    lhsFlexEh <- flexEh ctx ty lhs
+    rhsFlexEh <- flexEh ctx ty rhs
     case (lhs, rhs) of
       _ | lhs == rhs -> metaDefn name (I 1 :$ U :^ no Zy)
       (_, t :^ ph)
