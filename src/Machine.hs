@@ -854,20 +854,17 @@ normalIdSubst ctx = elabTC ctx (evalSubst (fmap (//^ (sig :^ th)) <$> ctx) (sig 
     th = io n
 
 -- we have successfully detected that one side of the equation is
--- using a flex variable, pack the data to show that; `m` is the scope
--- of the constraint
-data FlexEh (m :: Nat) where
+-- using a flex variable, pack the data to show that; `gamma` is the
+-- scope of the constraint
+data FlexEh (gamma :: Nat) where
   FlexEh
-    :: Name     -- the name of the flex variable
-    -> Natty k  -- the scope of the flex variable
-    -> n <= k   -- `n` is the support of the id subst at which the
-                -- flex variable is used; eta expansion at type `One`
-                -- can make `n` less than `k`
-    -> n <= m   -- the thinning for the flex variable's permitted
-                -- dependencies; the same eta expansion on the other
-                -- side of the equation will eliminate occurences of
-                -- variables in `k`, but not `n`
-    -> FlexEh m
+    :: Name            -- the name of the flex variable
+    -> Natty delta     -- the scope of the flex variable
+    -> n <= gamma      -- the thinning for the candidate solution's
+                       -- permitted dependencies
+    -> Subst n ^ delta -- how to map the permitted variables into the
+                       -- flex variable's context
+    -> FlexEh gamma
 
 flexEh :: Norm Chk ^ m -> Elab (Maybe (FlexEh m))
 flexEh (E :$ (M (x, k) :$ sig) :^ th) = do
@@ -1447,7 +1444,7 @@ solveConstraint name c@JoinConstraint{..}
               }
             metaDefn name $ conjunction [lstat,rstat,jstat,rowStat,colStat,headerRowStat,headerColStat,rjStat,cjStat,cellStat]
           else metaDefn name fALSE
-          
+
         _ -> push $ ConstraintFrame name JoinConstraint{..}
 
 solveConstraint name c@HeadersCompatibility{..} = nattily (vlen constraintCtx) $ do
@@ -2045,6 +2042,11 @@ ensureMatrix ctxt ty
         }
       pure (rowGenTy, colGenTy, cellTy, rs, cs, cstat)
 
+unpackCellType :: Term Chk ^ n -> ((String, String), Term Chk ^ S (S n))
+unpackCellType tm
+  | Just (r, tm) <- lamNameEh tm, Just (c, tm) <- lamNameEh tm = ((r, c), tm)
+  | otherwise = error "unpackCellType: malformed cell type"
+
 ensureUTag :: String -> Context n -> NmTy ^ n -> Elab (Norm Chk ^ n, BOOL)
 ensureUTag tag ctxt ty | Just (tag, [t]) <- tagEh ty = pure (t, tRUE)
   | otherwise = nattily (vlen ctxt) $ do
@@ -2056,7 +2058,6 @@ ensureUTag tag ctxt ty | Just (tag, [t]) <- tagEh ty = pure (t, tRUE)
        , rhs = mk tag t
        }
      pure (t, tStat)
-
 
 ensureEnum :: Context n -> NmTy ^ n -> Elab (Norm Chk ^ n, BOOL)
 ensureEnum ctxt ty | Just (SEnum, [xs]) <- tagEh ty = pure (xs, tRUE)
@@ -2279,10 +2280,17 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           let invTy = mk SMatrix colGenTy rowGenTy (lam "j" $ lam "i" $ invCellTy) cs rs
           (xSol, xProb) <- elab "invertee" mctxt invTy (TypeExprTask whereAmI FindSimplest <$> x)
           pushProblems [xProb]
-          newProb . Elab sol $ Await (conjunction [stat, lstat, istat]) (E $^ (matrixInverse (R $^ xSol <&> invTy)))
-          move worried
-
-
+          newProb . Elab sol $ Await (conjunction [stat, lstat, istat]) (E $^ matrixInverse (R $^ xSol <&> invTy))
+          run
+    TypeExprTask whereAmI synthMode (TyUnaryOp UTranspose x) -> let n = vlen mctxt in nattily n $ do
+      (rowGenTy, colGenTy, cellTy, rs, cs, stat) <- ensureMatrix mctxt mtype
+      ((r, c), cellTy) <- pure $ unpackCellType cellTy
+      let cellTy' = lam c $ lam r $ cellTy //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (var 0)) (var 1)
+      let transposeTy = mk SMatrix colGenTy rowGenTy cellTy' cs rs
+      (xSol, xProb) <- elab "transposee" mctxt transposeTy (TypeExprTask whereAmI synthMode <$> x)
+      pushProblems [xProb]
+      newProb . Elab sol $ Await stat (E $^ matrixTranspose (R $^ xSol <&> transposeTy))
+      run
     TypeExprTask whereAmI synthMode (TyBinaryOp Plus x y) -> do
       -- TODO:
       -- 1. make sure `mtype` admits plus

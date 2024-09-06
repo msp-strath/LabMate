@@ -529,6 +529,11 @@ evalSynth tm = withScope $ case tm of
             retDim <- under (r, mk SAbel rowGenTy) $ under (c, mk SAbel (wk colGenTy)) $ checkNormEval (mk SAbel genTy) (tup [lit (-1::Integer), dim])
             let sg = subSnoc (subSnoc (idSubst natty :^ No (No (io natty))) (var 0)) (var 1)
             pure (E $^ D $^ ((R $^ (tgt <&> tgtTy)) <&> dstr), mk SMatrix colGenTy rowGenTy (lam c $ lam r $ mk SQuantity genTy retDim //^ sg) cs rs)
+      Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs])
+        | Just (r, cellTy) <- lamNameEh cellTy, Just (c, cellTy) <- lamNameEh cellTy
+        , Atom Stranspose <- dstr -> do
+            let sg = subSnoc (subSnoc (idSubst natty :^ No (No (io natty))) (var 0)) (var 1)
+            pure (E $^ D $^ ((R $^ (tgt <&> tgtTy)) <&> dstr), mk SMatrix colGenTy rowGenTy (lam c $ lam r $ cellTy //^ sg) cs rs)
       _ -> fail "evalSynth: eliminator for an unknown type"
   tm | Just tm <- MX $? tm, (lmx, rmx) <- split tm -> do
     (lmx, lmxTy) <- evalSynth lmx

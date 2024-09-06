@@ -18,6 +18,8 @@ pattern SQuantity = "Quantity"
 pattern Sfst  = "fst"
 pattern Ssnd  = "snd"
 pattern Sinverse = "inverse"
+pattern Stranspose = "transpose"
+
 -- constructors
 pattern Splus = "plus"
 pattern Sone = "one"

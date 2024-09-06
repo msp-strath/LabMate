@@ -60,6 +60,9 @@ data Ctor (s :: Sort) (t :: Sort) where
 matrixInverse :: Term Syn ^ n -> Term Syn ^ n
 matrixInverse t = withScopeOf t $ (D $^ t <&> atom Sinverse)
 
+matrixTranspose :: Term Syn ^ n -> Term Syn ^ n
+matrixTranspose t = withScopeOf t $ (D $^ t <&> atom Stranspose)
+
 type Root = Bwd (String, Int)
 type NameSupply = (Root, Int)
 newtype Name = Name { longname :: [(String, Int)] }
