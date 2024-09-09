@@ -1,0 +1,19 @@
+ret > ExitSuccess
+out >
+out > f1()
+out >
+out > function x = f1()
+out >
+out >   % This should be allowed, because w in f2 is not capturable.
+out >
+out >   w = 5;
+out >   k = f2(43);
+out >   x = w;
+out >
+out >   function y = f2(w)
+out >     w = 7;
+out >     y = w;
+out >   end
+out > end
+out >
+out >

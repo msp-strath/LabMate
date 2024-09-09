@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Parse.Matlab where
 
 import Control.Monad
@@ -112,41 +110,95 @@ pdir' = pvspcaround $
     isLine (Line _) = True
     isLine _ = False
 
-
 pprejunk :: Parser ()
 pprejunk = () <$ pospc <* (psym "%" <|> pure ())  <* psym ">"  <* pospc
 
-pdirhead :: Parser DirHeader
-pdirhead = Declare <$> plarrow ptensortype
-    <|> Rename <$ pkin Nom "rename" <* pospc <*> pnom <* pspc <*> pnom
-    <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom
+patom :: Parser String
+patom = id <$ psym "`" <*> pnom
 
+pdirhead :: Parser DirHeader
+pdirhead = Declare <$> psep1 (pspc <|> punc ",") (pws pnomNotLabMateKey) <* pospc <* psym "::" <* pospc <*> ptensortype
+    <|> Rename <$ pkin Nom "rename" <* pospc <*> pnomNotLabMateKey <* pspc <*> pnomNotLabMateKey
+    <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom
+    <|> Typecheck <$ pkin Nom "typecheck" <* pospc <*> ptensortype <* pspc <*> pexpr topCI
+    <|> SynthType <$ pkin Nom "typeof" <* pospc <*> pexpr topCI
+    <|> Dimensions <$ pkin Nom "dimensions" <* pspc
+                   <*> pws pnomNotLabMateKey <* pspc
+                   <* pkin Blk "for" <* pspc
+                   <*> pws pnomNotLabMateKey <* pspc
+                   <* pkin Nom "over" <* pspc
+                   <*> psep0 (pspc <|> punc ",")
+                         ((,) <$> optional (pws pnomNotLabMateKey <* pspc <* pkin Blk "for" <* pspc)
+                              <*> pws patom
+                         )
+    <|> Unit <$ pkin Nom "unit" <* pspc
+             <*> pws pnomNotLabMateKey <* pospc
+             <* psym "::" <* pospc <*> ptypeexpr topCI
+--    <|> EverythingOkay <$ pkin Nom ""
 
 ptensortype :: Parser TensorType
 ptensortype = pws ptensortype'
 
 ptensortype' :: Parser TensorType'
 ptensortype' = Tensor <$> (pgrp (== Bracket Square) (plink psquex) <* pospc
-                         <|> pure (one , one))
-                     <*> pentrytype
+                           <|> pure (one , one))
+                      <*> ptypeexpr topCI
   where
-  one = ("", IntLiteral 1  :<=: (-1,Hide []))
-  psquex = (,) <$> (plarrow (pexpr topCI) <* pospc <* pkin Nom "x" <* pospc
+  one = ("", TyNum 1  :<=: (-1, Hide []))
+  psquex = (,) <$> (plarrow (ptypeexpr topCI) <* pospc <* pkin Nom "x" <* pospc
                     <|> pure one)
-               <*> plarrow (pexpr topCI)
+               <*> plarrow (ptypeexpr topCI)
 
 plarrow :: Parser a -> Parser (String, a)
 plarrow p = pcond ((,) <$> pnom <* pospc <* psym "<" <* psym "-" <* pospc ) (<$> p)
             (("",) <$> p)
         <|> pgrp (== Bracket Round) (plarrow p)
 
-pentrytype :: Parser EntryType
-pentrytype = pws pentrytype'
+ptypeexpr :: ContextInfo -> Parser TypeExpr
+ptypeexpr ci = go >>= more ci where
+  go :: Parser TypeExpr
+  go = pgrp (== Bracket Round) (id <$ pospc <*> ptypeexpr topCI <* pospc)
+   <|> pws (tyUnaryOp <$> punaryop <* pospc <*> ptypeexpr (ci {precedence = unaryLevel}))
+   <|> lhsstuff ci
+   <|> pws (prawif Dig >>= pnumber >>= \case
+               IntLiteral i -> pure $ TyNum i
+               _ -> mempty)
+   <|> pws (TyStringLiteral <$> pstringlit)
+   <|> pws (TyAtom <$> patom)
+   <|> pws (pgrp (== Bracket Curly) (TyBraces . join <$> optional (plink (id <$ pospc <*> optional (ptypeexpr topCI <* pospc)))))
+  lhsstuff ci = (pws (TyVar <$> pnom) >>= lmore)
+            <|> pws (tyMat <$> pgrp (== Bracket Square) (many (prow ptypeexpr)))
+  lmore l = pcond
+              (pws' (nonce l) (TyApp l <$ pcxspc ci <*> pargs Round (ptypeexpr topCI)))
+              lmore
+              (pure l)
+  yuk = void (psym ".") <* pospc
+    <|> void pspc <* psym "." <* pspc
 
-pentrytype' :: Parser EntryType'
-pentrytype' =
-      Cmhn <$> plarrow (pexpr topCI) <* punc "," <*> pexpr topCI
-  <|> Ty <$> pexpr topCI
+  more :: ContextInfo -> TypeExpr -> Parser TypeExpr
+  more ci e = ppeek >>= \case
+    t1:t2:t3:ts | kin t1 == Spc
+               && matrixMode ci
+               && t2 `elem` [sym "+", sym "-"]
+               && kin t3 /= Spc -> pure e
+    t1:t2:t3:ts | kin t1 == Spc
+               && commandMode ci
+               && (case what e of { (TyVar _) -> True ; _ -> False })
+               && t2 `elem` (sym <$> binOps)
+               && kin t3 /= Spc -> pure e
+    _ -> tight e
+    -- pcond pspc (\ _ -> loose e) (tight e)
+    where
+      trybinop :: Parser (BinOperator, ContextInfo, ContextInfo)
+      trybinop = (id <$ pospc <*> pbinaryop) >>= \ b -> case contextBinop ci b of
+        Nothing -> empty
+        Just (cio, cia) -> pure (b, cio { commandMode = False }
+                                  , cia { commandMode = False })
+      tight :: TypeExpr -> Parser TypeExpr
+      tight e = pcond (pws' (nonce e) trybinop)
+                      (\ ((b, cio, cia) :<=: src) -> pws' (fst src) (TyBinaryOp b e <$ pospc <*> ptypeexpr cio) >>= more cia)
+                      (pcond (pws' (nonce e) ptranspose) (\ (op :<=: src) -> more ci (TyUnaryOp op e :<=: src)) (pure e))
+
 
 pres :: Parser Res
 pres = pgreedy (ptok Just)
@@ -157,7 +209,7 @@ plhs' ci = (pws (LVar <$> pnom) >>= more)
   where
   more :: LHS -> Parser LHS
   more l = pcond
-    (pws' (nonce l) (LApp l <$ pcxspc ci <*> pargs Round <|> LBrp l <$ pcxspc ci <*> pargs Curly
+    (pws' (nonce l) (LApp l <$ pcxspc ci <*> pargs Round (pexpr topCI) <|> LBrp l <$ pcxspc ci <*> pargs Curly (pexpr topCI)
      <|> LDot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
     more
     (pure l)
@@ -240,7 +292,7 @@ pexpr ci = go >>= more ci where
    <|> pws (UnaryOp <$> punaryop <* pospc <*> pexpr (ci {precedence = unaryLevel}))
        -- should UnaryOp check precedence level?
    <|> lhsstuff ci
-   <|> pws (Cell <$> pgrp (== Bracket Curly) (many prow))
+   <|> pws (Cell <$> pgrp (== Bracket Curly) (many $ prow pexpr))
    <|> pws (prawif Dig >>= pnumber)
    <|> pws (ColonAlone <$ psym ":")
    <|> pws (StringLiteral <$> pstringlit)
@@ -249,9 +301,9 @@ pexpr ci = go >>= more ci where
               <*> pgrp (== Bracket Round) (pspcaround $ psep0 (punc ",") pnom)
               <* pospc <*> pexpr (ci { commandMode = False }))
   lhsstuff ci = (pws (Var <$> pnom) >>= lmore)
-            <|> pws (Mat <$> pgrp (== Bracket Square) (many prow))
+            <|> pws (Mat <$> pgrp (== Bracket Square) (many $ prow pexpr))
   lmore l = pcond
-              (pws' (nonce l) (App l <$ pcxspc ci <*> pargs Round <|> Brp l <$ pcxspc ci <*> pargs Curly
+              (pws' (nonce l) (App l <$ pcxspc ci <*> pargs Round (pexpr topCI) <|> Brp l <$ pcxspc ci <*> pargs Curly (pexpr topCI)
                 <|> Dot l <$ (if commandMode ci then yuk else punc ".") <*> pnom))
               lmore
               (pure l)
@@ -291,14 +343,14 @@ pexpr ci = go >>= more ci where
           _ -> tight e
       -}
 
-pargs :: Bracket -> Parser [Expr]
-pargs b = pgrp (== Bracket b) $ wrap b $ pspcaround $ psep0 (punc ",") (pexpr topCI)
+pargs :: Bracket -> Parser a -> Parser [a]
+pargs b p = pgrp (== Bracket b) $ wrap b $ pspcaround $ psep0 (punc ",") p
   where
     wrap Round = id
     wrap _     = plink
 
-prow :: Parser [Expr]
-prow = plink (psep0 (pspc <|> punc ",") (pexpr matrixCI))
+prow :: (ContextInfo -> Parser a) -> Parser [a]
+prow p = plink (psep0 (pspc <|> punc ",") (p matrixCI))
 
 punaryop :: Parser UnOperator
 punaryop = UPlus <$ psym "+"

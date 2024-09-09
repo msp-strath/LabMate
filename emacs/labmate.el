@@ -9,16 +9,22 @@
   '((t :foreground "black"
        :background "pale turquoise"
        :weight bold
-       :underline t
        ))
   "Face for directives."
   :group 'labmate )
+
+(defface labmate-response-delimiter
+  '((t :foreground "black"
+       :background "pale green"
+       ))
+  "Face for response delimiters."
+  :group 'labmate )
+
 
 (defface labmate-response-error
   '((t :foreground "black"
        :background "light salmon"
        :weight bold
-       :underline t
        ))
   "Face for errorneous directive responses."
   :group 'labmate )
@@ -27,7 +33,6 @@
   '((t :foreground "black"
        :background "pale green"
        :weight bold
-       :underline t
        ))
   "Face for successful directive responses."
   :group 'labmate )
@@ -38,15 +43,19 @@
   ;; handling comments
   :syntax-table (make-syntax-table)
   ;; code for syntax highlighting
-  (font-lock-add-keywords nil '(("^\s*%>[^%|^\n]+" . 'labmate-directive)))
+  (font-lock-add-keywords nil '(("^\s*%>[^%\n]+" . 'labmate-directive)))
   (font-lock-add-keywords nil '(("^\s*%<.+" . 'labmate-response-error)))
-  (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%|^\n]+" . 'labmate-response-success)))
-  (font-lock-add-keywords nil '(("^\s*%<\s*LabMate[^%|^\n]+" . 'labmate-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<[{}]$" . 'labmate-response-delimiter)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%\n]+" . 'labmate-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*.*::[^%\n]+" . 'labmate-response-success)))
+  (font-lock-add-keywords nil '(("^\s*%<\s*LabMate[^%\n]+" . 'labmate-response-success)))
+  ;; Fold generated code
+  (hs-minor-mode)
+
   (setq mode-name "labmate")
-  ;; clear memory
-  ;;(setq typos-keywords-regexp nil)
-  ;;(setq typos-operators-regexp nil)
 )
+
+
 
 ;; Customisation options
 
@@ -58,6 +67,12 @@
   "The path to the LabMate command to run."
   :type 'string
   :group 'labmate)
+
+(defcustom labmate-hide-generated-code nil
+  "Determine if generated code should be hidden after running LabMate."
+  :type 'boolean
+  :group 'labmate)
+
 
 (defface labmate-highlight-error-face
   '((t (:underline (:color "red" :style wave))))
@@ -88,7 +103,9 @@
 (defun labmate-run (override-options)
   "Run LabMate on the current file."
   (interactive "P")
-    (labmate-run-on-file (shell-quote-argument (buffer-file-name))))
+  (labmate-run-on-file (shell-quote-argument (buffer-file-name)))
+  (when labmate-hide-generated-code (hs-hide-all))
+)
 
 (define-key labmate-mode-map (kbd "C-c C-l") 'labmate-run)
 

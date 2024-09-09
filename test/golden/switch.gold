@@ -1,0 +1,16 @@
+ret > ExitSuccess
+out > n = input('Enter a number: ');
+out >
+out > switch n
+out >     case -1
+out >         disp('negative one')
+out >     case 0
+out >         disp('zero')
+out >     case {'pie','pie3'}
+out >         disp('positive one')
+out >         x = n
+out >     otherwise
+out >         disp('other value')
+out > end
+out >
+out >

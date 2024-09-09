@@ -1,0 +1,8 @@
+ret > ExitSuccess
+out > function z = typecheck(x, y)
+out >   %> x y :: Int
+out >   z = x + y
+out >   %> typecheck Int z
+out > end
+out >
+out >

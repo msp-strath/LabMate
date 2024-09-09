@@ -29,29 +29,77 @@ type Dir = WithSource Dir'
 type Dir' = (WithSource DirHeader, Maybe DirBody)
 
 data DirHeader
-  = Declare (String, TensorType)
+  = Declare [WithSource String] ConcreteType
   | Rename String String
   | InputFormat String {- name of function -}
- deriving Show
+  | Typecheck ConcreteType Expr
+  | SynthType Expr
+  | Dimensions
+      (WithSource String) -- name of the Abelian group
+      (WithSource String) -- name of the quantity semiring
+      [(Maybe (WithSource String), WithSource String)] -- the set of generators (quoted)
+  | Unit
+      (WithSource String)
+      TypeExpr
+--  | EverythingOkay
+  deriving Show
 
 data DirBody
   = InputFormatBody [String]
  deriving Show
 
 type TensorType = WithSource TensorType'
+type TypeExpr = WithSource TypeExpr'
 
 data TensorType'
-  = Tensor ((String, Expr), (String, Expr)) EntryType
+  = Tensor ((String, TypeExpr), (String, TypeExpr)) TypeExpr
   deriving Show
 
-type EntryType = WithSource EntryType'
+data VOrH = Vertical | Horizontal
+  deriving Show
 
-data EntryType'
-  = Ty Expr
-  | Cmhn (String, Expr) Expr
-  deriving (Show)
+-- possibly incomplete list of type level expressions
+data TypeExpr'
+  = TyVar String -- might also be constants, e.g. Double
+  | TyNum Int
+  | TyDouble Double
+  | TyAtom String
+  | TyApp TypeExpr [TypeExpr]
+  -- | TyMat [[TypeExpr]]
+  | TyJux VOrH TypeExpr TypeExpr
+  | TyNil VOrH
+  | TyBinaryOp BinOperator TypeExpr TypeExpr
+  | TyUnaryOp UnOperator TypeExpr
+  | TyStringLiteral String
+  | TyBraces (Maybe TypeExpr)
+  deriving Show
+
+tyMat :: [[TypeExpr]] -> TypeExpr'
+tyMat exps = what $ go Vertical (go Horizontal id) exps
+  where
+    -- jux _ e (TyNil _ :<=: _) = e -- making more trouble than it's worth?
+    jux dir e e' = noSource $ TyJux dir e e'
+
+    nil dir = noSource $ TyNil dir
+
+    go :: VOrH -> (a -> TypeExpr) -> [a] -> TypeExpr
+    go dir pre = foldr (jux dir . pre) (nil dir)
+
+tyUnaryOp :: UnOperator -> TypeExpr -> TypeExpr'
+tyUnaryOp UMinus (TyNum i :<=: src) = TyNum (negate i)
+tyUnaryOp UPlus  (TyNum i :<=: src) = TyNum i
+tyUnaryOp UMinus (TyDouble i :<=: src) = TyDouble (negate i)
+tyUnaryOp UPlus  (TyDouble i :<=: src) = TyDouble i
+tyUnaryOp op e = TyUnaryOp op e
+
+tyConstantCellEh :: TypeExpr' -> Bool
+tyConstantCellEh (TyNum _) = True
+tyConstantCellEh (TyDouble _) = True
+tyConstantCellEh _ = False
 
 type Res = [Tok]
+
+type ConcreteType = TensorType
 
 type Expr = WithSource Expr'
 
@@ -72,6 +120,37 @@ data Expr'
   | Lambda [String] Expr
   deriving (Show)
 
+toTypeExpr' :: Expr' -> Maybe TypeExpr'
+toTypeExpr' (Var x) = pure $ TyVar x
+toTypeExpr' (IntLiteral n) = pure $ TyNum n
+toTypeExpr' (DoubleLiteral d) = pure $ TyDouble d
+toTypeExpr' (StringLiteral s) = pure $ TyStringLiteral s
+toTypeExpr' (UnaryOp op x) = tyUnaryOp op <$> toTypeExpr x
+toTypeExpr' (BinaryOp (Mul d RDiv) x y) = do
+  let ysrc = source y
+  x <- toTypeExpr x
+  y <- toTypeExpr y
+  pure (TyBinaryOp (Mul d Times) x (TyUnaryOp UInvert y :<=: ysrc))
+toTypeExpr' (BinaryOp (Mul d LDiv) x y) = do
+  let xsrc = source x
+  x <- toTypeExpr x
+  y <- toTypeExpr y
+  pure (TyBinaryOp (Mul d Times) (TyUnaryOp UInvert x :<=: xsrc) y)
+toTypeExpr' (BinaryOp Minus x y) = do
+  let ysrc = source y
+  x <- toTypeExpr x
+  y <- toTypeExpr y
+  pure (TyBinaryOp Plus x (TyUnaryOp UMinus y :<=: ysrc))
+toTypeExpr' (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
+toTypeExpr' (Mat exps) = do
+   exps <- traverse (traverse toTypeExpr) exps
+   pure $ tyMat exps
+-- FIXME : add more
+toTypeExpr' _ = Nothing
+
+toTypeExpr :: Expr -> Maybe TypeExpr
+toTypeExpr = traverse toTypeExpr'
+
 data LHS'
   = LVar String
   | LApp LHS [Expr]
@@ -91,6 +170,7 @@ data UnOperator
   | UMinus
   | UTilde -- logical negation
   | UTranspose
+  | UInvert
   | UDotTranspose
   deriving (Show)
 

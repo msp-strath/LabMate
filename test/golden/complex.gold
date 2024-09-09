@@ -1,0 +1,39 @@
+ret > ExitSuccess
+out > k = 7;
+out > foo()
+out > k % still 7
+out >
+out >   function t = foo()
+out >
+out >     base = 1;
+out >
+out > %< renamed k base % should rename k to base inside foo, but not the outer k
+out >
+out > % if we instead were to do
+out > % %> rename k m
+out > % then this should be an error, because m is captured at a use site of k
+out >
+out > %< renamed m i % this should be an error -- no m in scope in this block
+out >
+out >     t = fac(4);
+out >
+out >     function n = fac(i)
+out > %< renamed m i % should succeed, but not touch fac2
+out >       if i == 0
+out >         n = base;
+out >       else
+out >         n = i * fac(i-1);
+out >       end
+out >     end
+out >
+out >     function n = fac2(m)
+out >       if m == 0
+out >         n = base;
+out >       else
+out >         n = m * fac2(m-1);
+out >       end
+out >     end
+out >
+out >   end
+out >
+out >

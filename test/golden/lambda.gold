@@ -1,0 +1,8 @@
+ret > ExitSuccess
+out > myfunction = @(x,y)x^2 + y^2 + x*y;
+out > foo = @()myfunction ;
+out > x = 1;
+out > y = 10;
+out > z = foo()
+out >
+out >

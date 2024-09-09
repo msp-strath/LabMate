@@ -1,0 +1,2 @@
+%> n :: string
+%> typeof n

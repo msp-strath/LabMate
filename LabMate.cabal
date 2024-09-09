@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               LabMate
-version:            0.1.3.0
+version:            0.2.0.4
 
 -- A short (one-line) description of the package.
 -- synopsis:
@@ -20,15 +20,19 @@ common haskell
                        DeriveTraversable,
                        FlexibleContexts,
                        FlexibleInstances,
+                       GADTs,
                        GeneralizedNewtypeDeriving,
                        MultiParamTypeClasses,
                        NamedFieldPuns,
+                       RankNTypes,
                        RecordWildCards,
                        ScopedTypeVariables,
                        StandaloneDeriving,
+                       PolyKinds,
                        TupleSections,
                        TypeFamilies,
                        TypeSynonymInstances,
+                       TypeOperators,
                        LambdaCase,
                        PatternSynonyms,
                        PatternGuards
@@ -40,16 +44,14 @@ common haskell
                        terminal-size,
                        directory,
                        filepath,
-                       mgen
+                       optparse-applicative,
+                       mgen > 0.1.0.1
   ghc-options:         -Wno-noncanonical-monad-instances
                        -Wno-noncanonical-monoid-instances
 
-executable labmate
+library
     import:           haskell
-    main-is:          Main.hs
-
-    -- Modules included in this executable, other than Main.
-    other-modules:    BRect,
+    exposed-modules:  BRect,
                       Bwd,
                       Hide,
                       Lex,
@@ -59,10 +61,54 @@ executable labmate
                       Syntax,
                       Machine,
                       Machine.Reassemble,
-                      Paths_LabMate
-    autogen-modules:  Paths_LabMate
-
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
+                      MagicStrings,
+                      Term,
+                      Term.Indexed,
+                      Term.Natty,
+                      Term.Thinning,
+                      Term.Vec,
+                      CoreTT,
+                      NormalForm,
+                      MissingLibrary
     hs-source-dirs:   src
     default-language: Haskell2010
+
+executable labmate
+    import:           haskell
+    main-is:          src/Main.hs
+    build-depends:    LabMate
+    other-modules:    Paths_LabMate
+    autogen-modules:  Paths_LabMate
+    default-language: Haskell2010
+
+test-suite coreTT
+  import:              haskell
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test/
+  main-is:             Test/RunCoreTT.hs
+  other-modules:       Test.CoreTT
+  build-depends:       LabMate
+                     , base <5
+                     , tasty
+                     , tasty-hunit
+                     , tasty-autocollect
+  build-tool-depends:  tasty-autocollect:tasty-autocollect
+                     , LabMate:labmate
+  ghc-options:         -F -pgmF=tasty-autocollect
+  default-extensions:  OverloadedStrings
+  default-language:    Haskell2010
+
+test-suite examples
+  import:              haskell
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test/
+  main-is:             Test/RunExamples.hs
+  build-depends:       LabMate
+                     , base <5
+                     , directory
+                     , filepath
+                     , tasty
+                     , tasty-silver
+  build-tool-depends:  LabMate:labmate
+  default-extensions:  OverloadedStrings
+  default-language:    Haskell2010

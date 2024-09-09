@@ -71,6 +71,12 @@ dump = Hide (0,0)
 sym :: String -> Tok
 sym s = Tok s Sym dump
 
+nom :: String -> Tok
+nom s = Tok s Nom dump
+
+spc :: Int -> Tok
+spc n = Tok (replicate n ' ') Spc dump
+
 type Doc = (T.Text, Pos)
 
 lexer :: T.Text -> [Tok]
@@ -383,6 +389,8 @@ symbols = foldr insT empT $ binOps ++
   , "="
   , ".?"
   , "(", ")", "[", "]", "{", "}", ",", ";"
+  , "::"
+  , "`" -- LabMate symbol only
   ]
 
 opener :: Tok -> Maybe Bracket
@@ -434,13 +442,17 @@ nonceExpand _ t = raw t
 type Source = (Nonce, Hide [Tok])
 
 data WithSource a = (:<=:) { what :: a , source :: Source }
-  deriving (Functor, Show)
+  deriving (Functor, Show, Foldable, Traversable)
 
 nonce :: WithSource a -> Nonce
 nonce = fst . source
 
 noSource :: a -> WithSource a
 noSource a = a :<=: (-1, Hide [])
+
+realSourceEh :: Source -> Bool
+realSourceEh (n, _) = n >= 0
+
 {-
 instance Show a => Show (WithSource a) where
   show (a :<=: (n, src)) = "$" ++ show n ++ " = `" ++ (src >>= showEaten) ++ "`" ++ show a

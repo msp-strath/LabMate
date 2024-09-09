@@ -1,8 +1,10 @@
-{- LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections #-}
 
 module BRect where
 
-data BR = BR {wid :: Int, hei :: Int} deriving (Show, Eq)
+data BR where
+  BR :: {wid :: Int, hei :: Int} -> BR
+  deriving (Show, Eq)
 
 -- make sure the BRs have strictly decreasing width
 -- and strictly increasing height

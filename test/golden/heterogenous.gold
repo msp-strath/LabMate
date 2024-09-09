@@ -1,0 +1,33 @@
+ret > ExitSuccess
+out > %{
+out > > input heterogenous
+out > src : this is a comment
+out >   length  : @Number
+out >   array  : @length many elements of @mm, @km, @s
+out > %}
+out > %<{
+out > function src = heterogenous(fname);
+out > f1 = fopen(fname);
+out > c1 = textscan(f1, `%f`);
+out > src0 = c1{1};
+out > fclose(f1);
+out > readPtr = 1;
+out > src.length = src0[readPtr];
+out > readPtr = readPtr + 1;
+out > if 1 <= src.length
+out >     src.array[1] = 1e-3 * src0[readPtr + 1];
+out > end
+out > if 2 <= src.length
+out >     src.array[2] = 1e3 * src0[readPtr + 2];
+out > end
+out > for i = 3:src.length
+out >     src.array[i] = src0[readPtr + i];
+out > end
+out >
+out > %<}
+out >
+out >
+out >
+out >
+out >
+out >

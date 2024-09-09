@@ -1,0 +1,9 @@
+ret > ExitSuccess
+out > fred.thingy = 7;
+out > bar(fred)
+out >
+out > function x = bar(y)
+out >   x = y.thingy;
+out > end
+out >
+out >

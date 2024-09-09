@@ -1,0 +1,403 @@
+\documentclass[]{beamer}
+\usepackage[utf8x]{inputenc}
+\usepackage{pgfpages}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{lstautogobble}
+\usepackage{xspace}
+\usepackage{xparse}
+\usepackage{matlab-prettifier}
+%\setbeameroption{show notes on second screen}
+
+\usepackage{microtype}
+
+\usepackage{tikz}
+\usetikzlibrary{shapes.callouts, shapes.geometric, arrows, arrows.meta, chains}
+
+% speech bubbles
+\tikzset{
+  invisible/.style={opacity=0,text opacity=0},
+  visible on/.style={alt=#1{}{invisible}},
+  alt/.code args={<#1>#2#3}{%
+    \alt<#1>{\pgfkeysalso{#2}}{\pgfkeysalso{#3}} % \pgfkeysalso doesn't change the path
+  },
+}
+\newcommand{\tikzmark}[1]{\tikz[overlay,remember picture,baseline=-0.5ex] \node (#1) {};}
+
+\NewDocumentCommand{\mycallout}{r<> O{opacity=0.8,text opacity=1} m m}{%
+  \tikz[remember picture, overlay]\node[align=center, fill=blue!20, text width=12em,
+  #2,visible on=<#1>, rounded corners,
+  draw,rectangle callout,anchor=pointer,callout relative pointer={(180:1em)}]
+  at (#3) {#4};
+}
+\NewDocumentCommand{\mycalloutup}{r<> O{opacity=0.8,text opacity=1} m m}{%
+  \tikz[remember picture, overlay]\node[align=center, fill=blue!20, text width=12em,
+  #2,visible on=<#1>, rounded corners,
+  draw,rectangle callout,anchor=pointer,callout relative pointer={(240:1em)}]
+  at (#3) {#4};
+}
+
+
+% flowcharts
+\tikzset{
+  reg/.style={
+    rectangle,
+    rounded corners,
+    minimum width=3cm,
+    minimum height=1cm,
+    align=center,
+    draw=black
+  },
+  arrow/.style={thick,->},
+  fade/.style={
+    rectangle,
+    rounded corners,
+    minimum width=3cm,
+    minimum height=1cm,
+    align=center,
+    draw=gray!30,
+    text=gray!30,
+  },
+  fadearrow/.style={thick,->, gray!30},
+  highlight/.style={
+    rectangle,
+    rounded corners,
+    minimum width=3cm,
+    minimum height=1cm,
+    align=center,
+    draw=black,
+    fill=blue!10
+  },
+  end/.style={
+    tape,
+    tape bend top=none,tape bend height=2mm,
+    tape bend bottom=out and in,
+    minimum width=3cm,
+    minimum height=1cm,
+    align=center,
+    draw=black
+  },
+  fadeend/.style={
+  tape,
+  tape bend top=none,tape bend height=2mm,
+  tape bend bottom=out and in,
+  minimum width=3cm,
+  minimum height=1cm,
+  align=center,
+  draw=gray!30,
+  text=gray!30
+  }
+}
+
+\lstset{ %
+  language=Matlab,
+  style=Matlab-editor,
+  autogobble=true,
+  escapechar=!,
+  belowskip=0em
+}
+
+\newcommand{\pct}{\texttt{\symbol{37}}}
+\newcommand{\dir}{\texttt{\symbol{62}}}
+\newcommand{\res}{\texttt{\symbol{60}}}
+\newcommand{\lcb}{\texttt{\symbol{123}}}
+\newcommand{\rcb}{\texttt{\symbol{125}}}
+\newcommand{\lsb}{\texttt{\symbol{91}}}
+\newcommand{\rsb}{\texttt{\symbol{93}}}
+\newcommand{\keyword}[1]{\textcolor{blue}{#1}}
+\newcommand{\lm}{\textsc{LabMate}\xspace}
+\newcommand{\repo}{\url{https://github.com/msp-strath/LabMate}}
+\newcommand{\ma}{\textsc{Matlab}\xspace}
+\newcommand{\List}{\mathsf{List}}
+\newcommand{\Unit}{\mathsf{Unit}}
+\newcommand{\Abel}{\mathsf{Abel}}
+\newcommand{\Int}{\mathsf{Int}}
+\newcommand{\Matrix}{\mathsf{Matrix}}
+\newcommand{\Enum}{\mathsf{Enum}}
+\newcommand{\LL}{\mathsf{L}}
+\newcommand{\TT}{\mathsf{T}}
+\newcommand{\MM}{\mathsf{M}}
+\newcommand{\Kg}{\mathsf{kg}}
+\newcommand{\Sec}{\mathsf{s}}
+\newcommand{\Km}{\mathsf{m}}
+\newcommand{\NameTimes}{\!\!\times\!\!}
+
+\setbeamertemplate{frametitle}[default][center]
+\beamertemplatenavigationsymbolsempty
+
+\defbeamertemplate*{footline}{my theme}
+{
+  \leavevmode%
+  \hbox{%
+    \usebeamerfont{date in head/foot}
+    \hspace*{0.97\paperwidth}\raisebox{2pt}{\insertframenumber{}}}
+  \vskip0pt%
+}
+
+
+\title{\huge \lm: \\ \centerline{Supporting Types for \ma} }
+\author[McBride, Nakov, Nordvall Forsberg et al]{\small Conor McBride$^{1}$, \underline{Georgi Nakov}$^{1}$, Fredrik Nordvall Forsberg$^{1}$,\\ Andr\'e Videla$^{1}$, Alistair Forbes$^{2}$, Keith Lines$^{2}$}
+\institute[]{$^{1}$University of Strathclyde, UK\\$^{2}$National Physical Laboratory, UK}
+
+\begin{document}
+
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+\setcounter{framenumber}{0}
+
+\begin{frame}{The Problem}
+  \begin{itemize}[<+->]
+  \item Much science and engineering software is written in \keyword{\ma}.
+    \smallskip
+    \begin{itemize}[<.->]
+    \item May contain \keyword{errors} and \keyword{bugs}, as with any software.
+    \end{itemize}
+    \bigskip
+  \item Developers often leave comments about how their
+    \keyword{data} should be \keyword{interpreted}, e.g., units of measure for
+    quantities.
+%  \item Developers often leave comments what are the corresponding
+%    physical systems of their data and how it should be interpreted,
+%    e.g., units of measure for quantities.
+    \bigskip
+  \item However \ma is \keyword{oblivious} to these high-level
+    comments, and instead performs \keyword{low-level checks} during
+    execution.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Our Plan}
+  \textit{Can we do better?}
+
+  \begin{itemize}[<+->]
+    \medskip
+  \item Make these developer comments formal.
+    \medskip
+  \item \ldots and create a tool to make use of them --- \lm.
+    \begin{itemize}[<.->]
+      \smallskip
+    \item \keyword{Keep existing} \ma \keyword{code} and toolchains; no need to
+      switch to a new language.
+    \end{itemize}
+    \medskip
+  \item Distill the essence of the developer comments in
+    \lm's \keyword{expressive type system}.
+    \begin{itemize}[<.->]
+      \smallskip
+    \item A set of logical rules that assign domains of admissible
+      values to program expressions.
+    \end{itemize}
+    \medskip
+  \item \lm is meant to be used while writing the code to get
+    \keyword{instant feedback} and guidance --- do not delay until
+    execution.
+  \end{itemize}
+\end{frame}
+
+\definecolor{commentgreen}{RGB}{034,139,034}
+
+\begin{frame}[fragile]{How does \lm Work?}
+  \begin{itemize}[<+->]
+  \item \lm is a \keyword{program transducer}: reads \ma code with formal comments, and outputs a modified version of the input.
+    \medskip
+  \item These formal comments are \keyword{directives} --- they start with \textcolor{commentgreen}{\texttt{\%<}}.
+    \medskip
+  \item Input the program:
+   \begin{lstlisting}[xleftmargin=2em]
+    %> rename n x !\tikzmark{ren}!
+    n = 5;
+    display(n);
+   \end{lstlisting}
+  \pause
+  \mycallout<+>{ren}{this is an input directive to rename a variable}
+\item Run \lm to get:
+  \begin{lstlisting}[xleftmargin=2em]
+%< LabMate 0.2.0.1 !\tikzmark{ver}!
+%< renamed n x !\tikzmark{renr}!
+x = 5;
+display(x);
+   \end{lstlisting}
+  \pause
+  \mycallout<+>{renr}{LabMate response to the input directive}
+  \mycallout<+>{ver}{Mark the file as processed by LabMate}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Matrix Types}
+  \begin{itemize}[<+->]
+  \item \keyword{Matrices} feature heavily in \ma code.
+    \medskip
+  \item \lm supports \keyword{type annotations} for matrices:
+\begin{lstlisting}[xleftmargin=0em, belowskip=-0.5em]
+%> A :: [ 1 x 2 ] int  !\tikzmark{ann1}!
+A = [ 3 4 ]
+%> B :: [ 2 x 4 ] int  !\tikzmark{ann2}!
+B = [ 1 1 1 1
+      5 6 7 8 ]
+C = A * B
+\end{lstlisting}
+  \pause
+  \mycallout<+>{ann1}{type annotations at declaration of A}
+  \mycallout<+>{ann2}{type annotations at declaration of B}
+  \item We can ask for type information:
+\begin{lstlisting}[xleftmargin=0em, belowskip=-0.5em]
+%> typeof C !\tikzmark{query}!
+%< C :: [Matrix 1 4 int]!\tikzmark{resp}!
+\end{lstlisting}
+ \pause
+  \mycallout<+>{query}{query for the type of C}
+  \mycalloutup<+>{resp}{LabMate can infer the dimensions}
+  \item \ldots and can easily spot incompatible sizing:
+\begin{lstlisting}[xleftmargin=0em]
+D = B * A
+%> typeof D
+%< The expression D is!\tikzmark{bad}! quite a puzzle
+\end{lstlisting}
+    \pause
+      \mycalloutup<+>{bad}{LabMate can point out an error with D}
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Matrix Types}
+  \begin{itemize}[<+->]
+  \item \lm processes arbitrary \ma code.
+    \smallskip
+    \begin{itemize}[<.->]
+    \item \lm does not rely on constants, \keyword{variables} work as well.
+    \end{itemize}
+  \item
+\begin{lstlisting}[xleftmargin=0em]
+function B = f(A)
+  %> B :: [ 1 x 3 ] int
+  B = [ 1 A ]
+
+  %> typeof A
+  %< A :: [Matrix 1 2 int]!\tikzmark{fromb}!
+end
+
+A = 'hello'
+%> typeof A
+%< A :: string!\tikzmark{scope}!
+\end{lstlisting}
+   \pause
+   \mycalloutup<+>{fromb}{LabMate infers type of A from the annotation on B}
+   \mycalloutup<+>{scope}{tracks Matlab scope}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Dimensions and Quantities}
+  \begin{itemize}[<+->]
+  \item \lm has support for arbitrary \keyword{quantities}.
+    \begin{lstlisting}[xleftmargin=0em,belowskip=-1em]
+%> dimensions V for Q over `Mass!\tikzmark{base}!, `Time
+%> unit kg :: Q({!\tikzmark{unit1}! `Mass })!\tikzmark{unit}!
+\end{lstlisting}
+%\pause
+   \mycalloutup<+>{base}{define some base set of dimensions}
+   \mycalloutup<+>{unit}{and a canonical unit of measure}
+   \mycalloutup<+>{unit1}{can be arbitrary group expression over V}
+\pause
+\begin{lstlisting}[xleftmargin=0em]
+%<{
+kg = 1; !\tikzmark{kg}!
+%<}
+\end{lstlisting}
+\pause
+   \mycallout<+>{kg}{this is a ``magic'' response that LabMate emits}
+\pause
+\item We can then use the \keyword{unit of measure} for quantities:
+\begin{lstlisting}[xleftmargin=0em]
+y = 5*kg !\tikzmark{q}!
+%> typeof y
+%< y :: Quantity (Enum [`Mass, `Time])
+%<               {`Mass}
+\end{lstlisting}
+%  \pause
+   \mycallout<+>{q}{turn a value of a dimensionless type into a quantity}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Dimensional Consistency for Matrices}
+  \begin{itemize}[<+->]
+  \item Most \ma programs \keyword{do not work on uniform matrices}: type of the entry $e_{i, j}$ might depend on the indices $i$ and $j$.
+    \medskip
+  \item A common scenario when working with matrices of quantities:
+%    $\begin{array}{ccccc}
+% e_{1,1}  &        & e_{1,j} &        & e_{1,n} \\
+%         &        &         &        &         \\
+% e_{i,1}  &        & e_{i,j}\tikzmark{mat} &        & e_{i,n} \\
+%         &        &         &        &         \\
+% e_{m,1}  &        & e_{m,j} &        & e_{m,n}  \\
+%\end{array}$
+%    \mycallout<+>{mat}{the type might depend on i and j}
+\begin{lstlisting}[xleftmargin=0em]
+%> dimensions V for Q over `L, `M, `T
+%> unit metre :: Q({ `L })
+%> unit kg :: Q({ `M })
+%> unit sec :: Q({ `T })
+\end{lstlisting}
+\medskip
+\item Work in progress: \lm support for such matrices
+\begin{lstlisting}[xleftmargin=0em]
+% > A :: [ i <- [{} {`T}]
+%        x j <- [{} {`L}]
+%        ] Q({`M * j / i})
+A = [ 2*kg       5*kg*metre
+      3*kg/sec   4*kg*metre/sec ]
+\end{lstlisting}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Implementation Details}
+  \begin{itemize}[<+->]
+  \item \ma programs are modelled as \keyword{trees of commands}, rather than sequence of commands.
+    \medskip
+    \begin{itemize}
+    \item Type information is propagated (consistently) throughout the tree; can put type annotations after variable declarations.
+      \medskip
+    \item Not every annotation is needed; document the interesting ones.
+    \end{itemize}
+    \medskip
+  \item \ma expressions are translated to \lm internal \keyword{core type theory}.
+    \medskip
+    \begin{itemize}
+    \item Matrix types are parametrised over 5 parameters with dependencies between them.
+      \medskip
+    \item Quantities are modelled as the free Abelian group over a base set of dimensions.
+      \medskip
+    \item The typechecker understands \keyword{nontrivial algebraic properties}.
+    \end{itemize}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Current Progress \& Future Plans}
+  \begin{itemize}[<+->]
+  \item \lm is under active development.
+    \smallskip
+    \begin{itemize}[<.->]
+    \item Available on GitHub, please get it in touch if interested.
+    \end{itemize}
+    \bigskip
+  \item Work in the pipeline:
+    \smallskip
+    \begin{itemize}
+    \item<.-> \keyword{Uniqueness of representation}: currently, a matrix with quantities can have more than one corresponding type; this might lead to odd behaviour during typechecking.
+      \medskip
+    \item \keyword{Quality of life improvements}: better messages and more readable responses from \lm.
+      \medskip
+      \end{itemize}
+  \item We want to extend our coverage to loops and conditionals in the future.
+  \end{itemize}
+  %\pause
+  %\large \centerline{Thank you for your attention!}
+\end{frame}
+
+
+
+\end{document}
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:

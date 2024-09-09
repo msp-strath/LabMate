@@ -1,0 +1,11 @@
+ret > ExitSuccess
+out > s = 10;
+out > H = zeros(s);
+out >
+out > for c = 1:s
+out >     for r = 1:s
+out >         H(r,c) = 1/(r+c-1);
+out >     end
+out > end
+out >
+out >
