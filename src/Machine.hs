@@ -2993,14 +2993,20 @@ unelabTerm ctx ty tm | Just ty <- tagEh ty = case ty of
                 1 -> t
                 _ -> t ++ [sym "^", Tok (show n) Dig dump]
     go genTy tm | Just (Splus, [x, y]) <- tagEh tm = do
-       x <- go genTy x
        case tupEh y of
          Just [Intg n, y] | n < 0 -> do
+            x <- go genTy x
             y <- go genTy (tup [lit (-n), y])
             pure $ x ++ [spc 1, sym "/", spc 1] ++ y
-         _ -> do
-            y <- go genTy y
-            pure $ x ++ [spc 1, sym "*", spc 1] ++ y
+         _ -> case tupEh x of
+                Just [Intg n, x] | n < 0 -> do
+                  x <- go genTy (tup [lit (-n), x])
+                  y <- go genTy y
+                  pure $ y ++ [spc 1, sym "/", spc 1] ++ x
+                _ -> do
+                  x <- go genTy x
+                  y <- go genTy y
+                  pure $ y ++ [spc 1, sym "*", spc 1] ++ x
     go genTy tm = pure [sym $ show tm]
 
 diagnosticMove :: ForkCompleteStatus -> Elab ()
