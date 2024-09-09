@@ -2936,6 +2936,7 @@ unelabType ctx ty | Just ct <- tagEh ty = case ct of
   (SEnum, [as]) -> do
     tas <- unelabTerm ctx (mk SList $ atom SAtom) as
     pure $ [sym "Enum", spc 1] ++ tas
+  _ | ty == doubleType -< no (scopeOf ty) -> pure [nom "double"]
   (SQuantity, [enumTy, exp]) -> do
         tenum <- unelabType ctx enumTy
         texp <- unelabTerm ctx (mk SAbel enumTy) exp
@@ -2957,7 +2958,7 @@ unelabTerm ctx ty tm | Just ty <- tagEh ty = case ty of
          -> Bool -- are we in the middle of printing rights
          -> Elab [Tok]
       go ctx ty [] True = pure [sym "]"]
-      go ctx ty [] False = pure []
+      go ctx ty [] False = pure [sym "[]"]
       go ctx ty [Left x] rightEh = do
         ttm <- unelabTerm ctx ty (E $^ x)
         pure $ (if rightEh then [sym "]"] else []) ++ ttm
