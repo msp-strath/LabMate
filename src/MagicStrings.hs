@@ -19,6 +19,7 @@ pattern Sfst  = "fst"
 pattern Ssnd  = "snd"
 pattern Sinverse = "inverse"
 pattern Stranspose = "transpose"
+pattern Suminus = "uminus"
 
 -- constructors
 pattern Splus = "plus"

@@ -136,6 +136,11 @@ toTypeExpr' (BinaryOp (Mul d LDiv) x y) = do
   x <- toTypeExpr x
   y <- toTypeExpr y
   pure (TyBinaryOp (Mul d Times) (TyUnaryOp UInvert x :<=: xsrc) y)
+toTypeExpr' (BinaryOp Minus x y) = do
+  let ysrc = source y
+  x <- toTypeExpr x
+  y <- toTypeExpr y
+  pure (TyBinaryOp Plus x (TyUnaryOp UMinus y :<=: ysrc))
 toTypeExpr' (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
 toTypeExpr' (Mat exps) = do
    exps <- traverse (traverse toTypeExpr) exps

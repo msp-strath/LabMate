@@ -63,6 +63,9 @@ matrixInverse t = withScopeOf t $ (D $^ t <&> atom Sinverse)
 matrixTranspose :: Term Syn ^ n -> Term Syn ^ n
 matrixTranspose t = withScopeOf t $ (D $^ t <&> atom Stranspose)
 
+matrixUminus :: Term Syn ^ n -> Term Syn ^ n
+matrixUminus t = withScopeOf t $ (D $^ t <&> atom Suminus)
+
 type Root = Bwd (String, Int)
 type NameSupply = (Root, Int)
 newtype Name = Name { longname :: [(String, Int)] }

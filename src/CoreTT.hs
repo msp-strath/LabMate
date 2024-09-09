@@ -13,7 +13,7 @@ import Term
 
 import Debug.Trace
 
-track = const id --trace
+track = const id -- track
 
 data Status = Crying | Waiting | Hoping | Abstract | ProgramVar
   deriving (Ord, Eq, Show)
@@ -534,6 +534,9 @@ evalSynth tm = withScope $ case tm of
         , Atom Stranspose <- dstr -> do
             let sg = subSnoc (subSnoc (idSubst natty :^ No (No (io natty))) (var 0)) (var 1)
             pure (E $^ D $^ ((R $^ (tgt <&> tgtTy)) <&> dstr), mk SMatrix colGenTy rowGenTy (lam c $ lam r $ cellTy //^ sg) cs rs)
+      Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs])
+        | Atom Suminus <- dstr ->
+            pure (E $^ D $^ ((R $^ (tgt <&> tgtTy)) <&> dstr), tgtTy)
       _ -> fail "evalSynth: eliminator for an unknown type"
   tm | Just tm <- MX $? tm, (lmx, rmx) <- split tm -> do
     (lmx, lmxTy) <- evalSynth lmx

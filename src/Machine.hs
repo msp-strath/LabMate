@@ -865,7 +865,7 @@ data FlexEh (gamma :: Nat) where
     -> Subst n ^ delta -- how to map the permitted variables into the
                        -- flex variable's context
     -> FlexEh gamma
-    
+
 data FlexEhWork (gamma' :: Nat)(delta' :: Nat) where
   FlexEhWork
     :: n <= gamma'      -- the thinning for the candidate solution's
@@ -2338,8 +2338,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       run
     TypeExprTask whereAmI synthMode (TyBinaryOp Plus x y) -> do
       -- TODO:
-      -- 1. make sure `mtype` admits plus
-      -- 2. find the correct way of doing plus in `mtype`
+      -- 1. find the correct way of doing plus in `mtype`
       (xTy, yTy, stats) <- case synthMode of
         EnsureCompatibility -> pure (mtype, mtype, [])
         FindSimplest -> do
@@ -2356,6 +2355,12 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       (ySol, yProb) <- elab "plusYTy" mctxt yTy (TypeExprTask whereAmI FindSimplest <$> y)
       pushProblems [xProb, yProb]
       newProb . Elab sol $ Await (conjunction stats) (mk Splus xSol ySol) -- FIXME: do proper addition, eg if mtype is a matrix type
+      move winning
+    TypeExprTask whereAmI synthMode (TyUnaryOp UMinus x) -> do
+      (_, _, _, _, _, stat) <- ensureMatrix mctxt mtype
+      (xSol, xProb) <- elab "minusXTy" mctxt mtype (TypeExprTask whereAmI synthMode <$> x)
+      pushProblems [xProb]
+      newProb . Elab sol $ Await stat (E $^ matrixUminus (R $^ xSol <&> mtype))
       move winning
     TypeExprTask whereAmI synthMode (TyBinaryOp (Mul False{- x*y -} Times) x y) -> do
       -- Two main issues:
@@ -2444,48 +2449,101 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           }
       newProb . Elab sol $ Await cs (ixKI mtype (lit s))
       run
-{-
-    TypeExprTask whereAmI _ (TyStringLiteral s) -> case tagEh mtype of
-      Just (SList, [genTy]) -> do
-        (_, cs) <- constrain "IsChar" $ Constraint
-          { constraintCtx = fmap Hom <$> mctxt
-          , constraintType = Hom (atom SType)
-          , lhs = genTy
-          , rhs = atom SChar
-          }
-        newProb . Elab sol $ Await cs (ixKI mtype (lit s))
-        run
-      _ -> move worried
--}
-    TypeExprTask MatLab EnsureCompatibility (TyJux dir x (TyNil _ :<=: _)) -> do
+    TypeExprTask MatLab synthMode (TyJux dir x (TyNil _ :<=: _)) -> do
       (rowGenTy, colGenTy, cellTy, rs, cs, tystat) <- ensureMatrix mctxt mtype
-      (xSol, xProb) <- elab "vjuxTop" mctxt (mk SMatrix rowGenTy colGenTy cellTy rs cs) (TypeExprTask MatLab EnsureCompatibility <$> x)
+      (xSol, xProb) <- elab "nextToNil" mctxt (mk SMatrix rowGenTy colGenTy cellTy rs cs) (TypeExprTask MatLab synthMode <$> x)
       pushProblems [xProb]
       newProb . Elab sol $ Await tystat $ xSol
       run
-    {-
-      let nill = nil in do
-        (rowTy, colTy, cellTy, rs, cs, tystat) <- ensureMatrixType mctxt mtype
-        case dir of
-          Vertical -> do
-            (_, rstat) <- constrain "noRs" $ Constraint
-              { constraintCtx = fmap Hom <$> mctxt
-              , constraintType = Hom (mk SList rowTy)
-              , lhs = nill
-              , rhs = rs
-              }
-            newProb . Elab sol $ Await rstat $ nill
-            run
-          Horizontal -> do
-            (_, cstat) <- constrain "noCs" $ Constraint
-              { constraintCtx = fmap Hom <$> mctxt
-              , constraintType = Hom (mk SList colTy)
-              , lhs = nill
-              , rhs = cs
-              }
-            newProb . Elab sol $ Await cstat $ nill
-            run
-     -}
+    TypeExprTask MatLab FindSimplest (TyJux dir x y) -> let n = vlen mctxt in nattily n $ do
+      (rowGenTy, colGenTy, cellTy', rs, cs, tystat) <- ensureMatrix mctxt mtype
+      xTy <- invent "xType" mctxt (atom SType)
+      yTy <- invent "yType" mctxt (atom SType)
+      (xRowGenTy, xColGenTy, xCellTy', xrs, xcs, xTystat) <- ensureMatrix mctxt xTy
+      (yRowGenTy, yColGenTy, yCellTy', yrs, ycs, yTystat) <- ensureMatrix mctxt yTy
+      let ((i, j), cellTy) = unpackCellType cellTy'
+      let (_, xCellTy) = unpackCellType xCellTy'
+      let (_, yCellTy) = unpackCellType yCellTy'
+      (xSol, xProb) <- elab "juxX" mctxt xTy (TypeExprTask MatLab FindSimplest <$> x)
+      (ySol, yProb) <- elab "juxY" mctxt yTy (TypeExprTask MatLab FindSimplest <$> y)
+      (_ , rj) <- constrain "rowJoin" $ JoinConstraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , leftGenType = xRowGenTy
+        , rightGenType = yRowGenTy
+        , joinGenType = rowGenTy
+        }
+      (_ , cj) <- constrain "colJoin" $ JoinConstraint
+        { constraintCtx = fmap Hom <$> mctxt
+        , leftGenType = xColGenTy
+        , rightGenType = yColGenTy
+        , joinGenType = colGenTy
+        }
+      (jux, stats) <- case dir of
+        Vertical -> do
+          (_, rstat) <- constrain "catRows" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Het (mk SList (tag SAbel [rowGenTy])) rj (mk SList (tag SAbel [rowGenTy]))
+            , lhs = rs
+            , rhs = mk Splus xrs yrs
+            }
+          (_, sameStat) <- constrain "sameCol" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Het (mk SList (tag SAbel [colGenTy])) cj (mk SList (tag SAbel [colGenTy]))
+            , lhs = cs
+            , rhs = xcs
+            }
+          joinElt <- invent "joinElement" mctxt colGenTy
+          (_, cstat) <- constrain "colCompat" $ HeadersCompatibility
+            { constraintCtx = fmap Hom <$> mctxt
+            , leftGenType = xColGenTy
+            , rightGenType = yColGenTy
+            , joinGenType = colGenTy
+            , joinStatus = cj
+            , leftList = xcs
+            , rightList = ycs
+            , joinElement = joinElt
+            }
+          (_, cellStat) <- constrain "cellJoin" $ JoinConstraint
+            { constraintCtx = fmap Hom <$> (mctxt \\\ (i, mk SAbel rowGenTy) \\\ (j, wk $ mk SAbel colGenTy))
+            , leftGenType = xCellTy
+            , rightGenType = yCellTy //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (var 1)) (R $^ (mk Splus (var 0) (wk (wk joinElt))) <&> wk (wk $ mk SAbel colGenTy))
+            , joinGenType = cellTy
+            }
+          pure (Svjux, [rstat, sameStat, cstat, cellStat])
+        Horizontal -> do
+          (_, cstat) <- constrain "catCols" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Het (mk SList (tag SAbel [colGenTy])) cj (mk SList (tag SAbel [colGenTy]))
+            , lhs = cs
+            , rhs = mk Splus xcs ycs
+            }
+          (_, sameStat) <- constrain "sameRows" $ Constraint
+            { constraintCtx = fmap Hom <$> mctxt
+            , constraintType = Het (mk SList (tag SAbel [rowGenTy])) rj (mk SList (tag SAbel [rowGenTy]))
+            , lhs = rs
+            , rhs = xrs
+            }
+          joinElt <- invent "joinElement" mctxt rowGenTy
+          (_, rstat) <- constrain "rowCompat" $ HeadersCompatibility
+            { constraintCtx = fmap Hom <$> mctxt
+            , leftGenType = xRowGenTy
+            , rightGenType = yRowGenTy
+            , joinGenType = rowGenTy
+            , joinStatus = rj
+            , leftList = xrs
+            , rightList = yrs
+            , joinElement = joinElt
+            }
+          (_, cellStat) <- constrain "cellJoin" $ JoinConstraint
+            { constraintCtx = fmap Hom <$> (mctxt \\\ (i, mk SAbel rowGenTy) \\\ (j, wk $ mk SAbel colGenTy))
+            , leftGenType = xCellTy
+            , rightGenType = yCellTy //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (R $^ (mk Splus (var 1) (wk (wk joinElt))) <&> wk (wk $ mk SAbel rowGenTy))) (var 0)
+            , joinGenType = cellTy
+            }
+          pure (Shjux, [cstat, sameStat, rstat, cellStat])
+      pushProblems [xProb, yProb]
+      newProb . Elab sol $ Await (conjunction $ [tystat, xTystat, yTystat, rj, cj] ++ stats) (mk jux xSol ySol)
+      run
     TypeExprTask MatLab EnsureCompatibility (TyJux dir x y) -> do
       (rowGenTy, colGenTy, cellTy, rs, cs, tystat) <- ensureMatrix mctxt mtype
       case dir of
