@@ -120,6 +120,7 @@ pdirhead :: Parser DirHeader
 pdirhead = Declare <$> psep1 (pspc <|> punc ",") (pws pnomNotLabMateKey) <* pospc <* psym "::" <* pospc <*> ptensortype
     <|> Rename <$ pkin Nom "rename" <* pospc <*> pnomNotLabMateKey <* pspc <*> pnomNotLabMateKey
     <|> InputFormat <$ pkin Nom "input" <* pospc <*> pnom
+    <|> ReadFrom <$ pkin Nom "readfrom" <* pospc <*> pstringlit <* pspc <*> psep1 pspc pnom
     <|> Typecheck <$ pkin Nom "typecheck" <* pospc <*> ptensortype <* pspc <*> pexpr topCI
     <|> SynthType <$ pkin Nom "typeof" <* pospc <*> pexpr topCI
     <|> Dimensions <$ pkin Nom "dimensions" <* pspc

@@ -32,6 +32,9 @@ data DirHeader
   = Declare [WithSource String] ConcreteType
   | Rename String String
   | InputFormat String {- name of function -}
+  | ReadFrom
+      String -- filename
+      [String] -- variables to generate code for
   | Typecheck ConcreteType Expr
   | SynthType Expr
   | Dimensions

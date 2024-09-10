@@ -128,6 +128,8 @@ instance PrettyPrint DiagnosticData where
     pure ["unit $" ++ show un ++ " " ++ stat ++ " $" ++ show tn]
   pprint (UnitDs units) =
     pure ["units" ++ foldMap (\u -> " $" ++ show (nonce u)) units]
+  pprint (ReadFromD filename vars) =
+    pure ["readfrom" ++ filename ++ " " ++ show vars]
 
 instance PrettyPrint Frame where
   pprint (Declaration n UserDecl{..}) = do
@@ -165,6 +167,7 @@ data DiagnosticData
       Expr {- e, t = elab e -}
   | UnitD Nonce BOOL Nonce
   | UnitDs [WithSource String]
+  | ReadFromD String [Either String (String, TYPE)]
   deriving Show
 
 data Frame where
@@ -1966,6 +1969,15 @@ runDirective rl (dir :<=: src, body) = do
     InputFormat name | Just (InputFormatBody body) <- body -> do
       newProb $ InputFormatAction name body rl
       run
+    ReadFrom filename variables -> do
+      vs <- for variables $ \ v -> findDeclaration (UserDecl{varTy = Nothing, currentName = v, seen = False, newNames = [], capturable = False, whereAmI = MatLab}) >>= \case
+        Just (name, ty) -> do
+          pushDefinition name (E $^ M (name, Zy) $^ S0 $^ U :^ Ze)
+          pure $ Right (v, ty)
+        Nothing -> pure $ Left $ "Unknown variable " ++ v
+      push $ Diagnostic rl (ReadFromD filename vs)
+      newProb $ Done nil
+      run
     Declare xs ty -> do
       (sol, prob) <- elab "declType" emptyContext (atom SType) (TensorTask <$> ty)
       pushProblems (Sourced . fmap (DeclareAction sol) <$> xs)
@@ -2871,6 +2883,10 @@ normaliseFrame = \case
       stat <- normalise VN (atom STwo) stat
       pure $ UnitD un stat tn
     normaliseDiagnostic d@(UnitDs _) = pure d
+    normaliseDiagnostic d@(ReadFromD filename vs) = do
+      vs <- traverse (either (pure . Left)
+                     (\ (s, ty) -> (Right . (s,)) <$> normalise emptyContext (atom SType) ty)) vs
+      pure $ ReadFromD filename vs
 
 cleanup :: Mood -> Elab ()
 cleanup mood = do
@@ -2952,7 +2968,53 @@ diagnosticRun = llup >>= \case
           units ++
           [ spc dent, sym "%<}"
           ]
+      ReadFromD filename vars -> go vars >>= \case
+        Left err -> pure $ [ Tok "\n" Ret dump, spc dent, sym "%<", spc 1] ++ err
+        Right code -> pure $ [ Tok "\n" Ret dump, spc dent, sym "%<{"]
+                       ++ concatMap (\ x -> Tok "\n" Ret dump:spc dent:x)
+                                    (preamble ++ code) ++ [ Tok "\n" Ret dump, spc dent, sym "%<}"]
+       where
+        preamble = [[sym ("h=fopen(\'" ++ filename ++ "\');")]
+                   ,[sym "c=textscan(h,\'%f\');"]
+                   ,[sym "fclose(h);"]
+                   ,[sym "src = c{1};"]
+                   ,[sym "readPtr = 1;"]
+                   ]
+        go :: [Either String (String, TYPE)] -> Elab (Either [Tok] [[Tok]])
+        go [] = pure $ Right []
+        go (Left err:vs) = pure $ Left [ sym err ]
+        go (Right (v, ty):vs) = readFromType emptyContext v ty >>= \case
+          Right code -> go vs >>= \case
+            Left err -> pure $ Left $ err
+            Right codes -> pure $ Right $ code ++ codes
+          Left err -> pure $ Left err
 
+        readFromType :: NATTY n => Context n -> String -> Typ ^ n -> Elab (Either [Tok] [[Tok]])
+        readFromType ctx var ty = do
+          ty <- normalise ctx (atom SType) ty
+          case tagEh ty of
+            _ | ty == doubleType -< no (scopeOf ty) -> pure $ Right $ readSingle
+            Just (SAbel, [ty]) | isUnitType ty -> pure $ Right readSingle
+            Just (SMatrix, [rowGenTy, colGenTy, cellTy, rs, cs])
+              | Just (i, cellTy) <- lamNameEh cellTy, Just (j, cellTy) <- lamNameEh cellTy
+              , rs <- listView rs, cs <- listView cs, all isRight rs, all isRight cs -> do
+                  let ctx' = ctx \\\ (i, mk SAbel rowGenTy) \\\ (j, wk $ mk SAbel colGenTy)
+                  cellTy <- normalise ctx' (atom SType) cellTy
+                  case (length rs, length cs) of
+                    (1, 1) -> readFromType ctx' var cellTy
+                    (1, c) -> fmap (\ s -> [[sym ("for i = 1:" ++ show c)]] ++ map (spc 2:) s ++ [[sym "end"]])
+                                <$> (readFromType ctx' (var ++ "(i)") cellTy)
+                    (r, 1) -> fmap (\ s -> [[sym ("for i = 1:" ++ show r)]] ++ map (spc 2:) s ++ [[sym "end"]])
+                                <$> (readFromType ctx' (var ++ "(i,1)") cellTy)
+                    (r, c) -> fmap (\ s -> [[sym ("for i = 1:" ++ show r)], [spc 2, sym ("for j = 1:" ++ show c)]]
+                                     ++ map (spc 4:) s ++ [[spc 4, sym "end"], [sym "end"]])
+                                <$> (readFromType ctx' (var ++ "(i,j)") cellTy)
+            Just (SQuantity, [enumTy, exp]) -> pure $ Right $ readSingle -- TODO: require unit
+            _ -> do
+              ty <- unelabType ctx ty
+              pure $ Left ([sym "I do not know how to generate code to read from type "] ++ ty)
+         where
+          readSingle = [[sym (var ++ " = src(readPtr);")], [sym "readPtr = readPtr + 1;"]]
 
 metaStatus :: Name -> Elab Status
 metaStatus x = do
