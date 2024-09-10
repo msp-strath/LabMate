@@ -43,7 +43,7 @@
   ;; handling comments
   :syntax-table (make-syntax-table)
   ;; code for syntax highlighting
-  (font-lock-add-keywords nil '(("^\s*%>[^%\n]+" . 'labmate-directive)))
+  (font-lock-add-keywords nil '(("^\s*%>[^%\n]+" 0 'labmate-directive t)))
   (font-lock-add-keywords nil '(("^\s*%<.+" . 'labmate-response-error)))
   (font-lock-add-keywords nil '(("^\s*%<[{}]$" . 'labmate-response-delimiter)))
   (font-lock-add-keywords nil '(("^\s*%<\s*renamed[^%\n]+" . 'labmate-response-success)))

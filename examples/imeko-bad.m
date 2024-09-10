@@ -1,5 +1,3 @@
-%  %> dimensions V for Q over metre for `Length, kg for `Mass, sec for `Time
-
 %> times    :: [ 1 x 12 ] double
 %> voltages :: [ 1 x 12 ] double
 
@@ -19,7 +17,5 @@ ddnc = [ i3  z3  i3  z3
 M = [ ddnc times' ]
 %> typeof M
 
-x = M \ voltages'
+x = M \ voltages
 %> typeof x
-
-
