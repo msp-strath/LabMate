@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               LabMate
-version:            0.2.0.5
+version:            0.2.0.6
 
 -- A short (one-line) description of the package.
 -- synopsis:

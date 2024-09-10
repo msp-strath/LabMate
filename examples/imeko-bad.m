@@ -1,5 +1,3 @@
-%  %> dimensions V for Q over metre for `Length, kg for `Mass, sec for `Time
-
 %> times    :: [ 1 x 12 ] double
 %> voltages :: [ 1 x 12 ] double
 
