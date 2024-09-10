@@ -975,38 +975,40 @@ solveConstraint name c@Constraint{..} = case (traverse (traverse isHom) constrai
     lhsFlexEh <- flexEh ctx ty lhs
     rhsFlexEh <- flexEh ctx ty rhs
     case (lhs, rhs) of
-      _ | lhs == rhs -> metaDefn name (I 1 :$ U :^ no Zy)
+      _ | lhs == rhs -> metaDefn name tRUE
       (_, t :^ ph)
         | Just (FlexEh x k th ta) <- lhsFlexEh
         , Just ps <- thicken ph th
         , x `Set.notMember` dependencies t -> do
               metaDefn x ((t :^ ps) //^ ta)
-              metaDefn name (I 1 :$ U :^ no Zy)
+              metaDefn name tRUE
       (t :^ ph, _)
         | Just (FlexEh x k th ta) <- rhsFlexEh
         , Just ps <- thicken ph th
         , x `Set.notMember` dependencies t -> do
               metaDefn x ((t :^ ps) //^ ta)
-              metaDefn name (I 1 :$ U :^ no Zy)
+              metaDefn name tRUE
       -- different atoms are never unifiable, raise the constraint as impossible
       _ | Just (s1, []) <- tagEh lhs
         , Just (s2, []) <- tagEh rhs
         , s1 /= s2 -> do
             debug ("Push Constraint n-5 " ++ show c) $ push $ ConstraintFrame name c
-            debug (concat ["Unifying different atoms: ", s1, " and ", s2, "."]) $ metaDefn name (I 0 :$ U :^ no Zy)
+            debug (concat ["Unifying different atoms: ", s1, " and ", s2, "."]) $ metaDefn name fALSE
       _ | Just (SList, [elty])  <- tagEh ty
         , isUnitType elty -> elabTC ctx (natTermCancel (lhs,rhs)) >>= \case
             Left err -> error err
-            Right (lhs', rhs') -> if lhs == lhs'
-              then push $ ConstraintFrame name c
-              else do
-                (_, cstat) <- constrain "cancellation" $ Constraint
-                  { constraintCtx = constraintCtx
-                  , constraintType = Hom ty
-                  , lhs = lhs'
-                  , rhs = rhs'
-                  }
-                metaDefn name cstat
+            Right (lhs', rhs') -> if Set.null (dependencies (tup [lhs', rhs']))
+              then metaDefn name fALSE
+              else if lhs == lhs'
+                then push $ ConstraintFrame name c
+                else do
+                  (_, cstat) <- constrain "cancellation" $ Constraint
+                    { constraintCtx = constraintCtx
+                    , constraintType = Hom ty
+                    , lhs = lhs'
+                    , rhs = rhs'
+                    }
+                  metaDefn name cstat
       _ | Just (SList, [elty])  <- tagEh ty -> case mpullback (listView lhs) (listView rhs) of
             (frontEquals, (l1, l2)) -> case mpullback (reverse l1) (reverse l2) of
               (backEquals, (r1, r2)) -> case (reverse r1, reverse r2) of
