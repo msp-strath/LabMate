@@ -45,7 +45,6 @@ debugCatch = const id -- trace
 debugMatrix = const id -- trace
 debug260824 = trace
 
-
 type Elab = State MachineState
 
 data MachineState = MS
@@ -53,6 +52,7 @@ data MachineState = MS
   , problem :: Problem
   , nameSupply :: (Root, Int)
   , nonceTable :: Map Nonce String
+  , refoldingMap :: Map TYPE String -- shitty version
   , metaStore :: Store
   , constraintStore :: Map Name Constraint
   , clock :: Int
@@ -65,6 +65,7 @@ initMachine f t = MS
   , problem = File f
   , nameSupply = (B0 :< ("labmate", 0), 0)
   , nonceTable = t
+  , refoldingMap = Map.empty
   , metaStore = Map.empty
   , constraintStore = Map.empty
   , clock = 0
@@ -1995,8 +1996,9 @@ runDirective rl (dir :<=: src, body) = do
       newProb eProb
       run
     Dimensions (g :<=: gsrc) (q :<=: qsrc) unitAtoms -> do
-      let generators = mk SEnum $ foldr (mk Splus . (mk Sone :: TERM -> TERM) . atom . what) nil (snd <$> unitAtoms) :: TERM
-      let gdef = mk SAbel generators :: TERM
+      let generators = mk SEnum $ foldr (mk Splus . (mk Sone :: TERM -> TERM) . atom . what) nil (snd <$> unitAtoms) :: TYPE
+      generators <- normalise emptyContext (atom SType) generators
+      let gdef = mk SAbel generators :: TYPE
       let gdecl = UserDecl
             { varTy = mk SType
             , currentName = g
@@ -2019,8 +2021,8 @@ runDirective rl (dir :<=: src, body) = do
                 }
           freshDeclaration qdecl >>= \case
             Nothing -> move worried
-            Just (q, qty) -> do
-              pushDefinition q (lam "d" $ mk SQuantity (wk generators) (evar 0))
+            Just (q', qty) -> do
+              pushDefinition q' (lam "d" $ mk SQuantity (wk generators) (evar 0))
               ps <- fmap concat . for (zip [0..] unitAtoms) $ \case
                 (_, (Nothing, _)) -> pure []
                 (i, (Just u, _)) -> do
@@ -2028,6 +2030,7 @@ runDirective rl (dir :<=: src, body) = do
                   (ltm, lhsProb) <- elab "unitFakeLHS" emptyContext (mk SDest uty) (LHSTask . LVar <$> u)
                   excursion $ postRight [Currently uty ltm (mk Sone (lit (1::Double)))]
                   pure [(lhsProb, u)]
+              modify $ \st@MS{..} -> st{refoldingMap = Map.insert generators q refoldingMap}
               unless (null ps) $ do
                 push . Diagnostic rl $ UnitDs (snd <$> ps)
                 pushProblems (fst <$> ps)
@@ -3081,15 +3084,19 @@ unelabType ctx ty | Just ct <- tagEh ty = case ct of
     pure $ [sym "Enum", spc 1] ++ tas
   _ | ty == doubleType -< no (scopeOf ty) -> pure [nom "double"]
   (SQuantity, [enumTy, exp]) -> do
+    texp <- unelabTerm ctx (mk SAbel enumTy) exp
+    rm <- gets refoldingMap
+    case enumTy of
+      enumTy :^ th | Zy <- weeEnd th, Just q <- enumTy :^ Ze `Map.lookup` rm ->
+           pure $ [sym q, sym "("] ++ texp ++ [sym ")"]
+      _ -> do
         tenum <- unelabType ctx enumTy
-        texp <- unelabTerm ctx (mk SAbel enumTy) exp
-        pure $ [sym "Quantity", spc 1, sym "("] ++ tenum ++ [sym ")" , spc 1] ++ texp
+        pure $ [sym "Quantity", sym "("] ++ tenum ++ [sym ",", spc 1] ++ texp ++ [sym ")"]
+
   _ -> pure [sym $ show ty]
 unelabType ctx ty = pure [sym $ show ty]
 
 unelabTerm :: forall n . NATTY n => Context n -> Typ ^ n -> Term Chk ^ n -> Elab [Tok]
-unelabTerm ctx ty (E :$ V :^ th) = case th ?^ ctx of
-  VN :# (v, _) -> pure [sym v]
 unelabTerm ctx ty tm | Just ty <- tagEh ty = case ty of
   (SList, [genTy]) -> do
     elabTC ctx (termToNFList genTy tm) >>= \case
@@ -3113,12 +3120,11 @@ unelabTerm ctx ty tm | Just ty <- tagEh ty = case ty of
         ttm <- unelabTerm ctx ty x
         xs <- go ctx ty xs True
         pure $ (if rightEh then [sym "," , spc 1] else [sym "["]) ++ ttm ++ xs
-  (SAbel, [genTy]) -> case tupEh tm of
-    _ | Intg 0 <- tm -> pure [sym "{}"]
-    Just ts -> do
+  (SAbel, [genTy]) -> case tm of
+    Intg 0 -> pure [sym "{}"]
+    _ -> do
       tm <- go genTy tm
       pure $ [sym "{"] ++ tm ++ [sym "}"]
-    _ -> pure [sym $ show tm]
   (SEnum, [as]) | Intg i <- tm -> do
       as <- elabTC ctx (termToNFList (atom SAtom) as)
       case as of
@@ -3152,6 +3158,9 @@ unelabTerm ctx ty tm | Just ty <- tagEh ty = case ty of
                   y <- go genTy y
                   pure $ y ++ [spc 1, sym "*", spc 1] ++ x
     go genTy tm = pure [sym $ show tm]
+unelabTerm ctx ty (E :$ V :^ th) = case th ?^ ctx of
+  VN :# (v, _) -> pure [sym v]
+unelabTerm _ _ tm = pure [sym $ show tm]
 
 diagnosticMove :: ForkCompleteStatus -> Elab ()
 diagnosticMove stat = pull >>= \case

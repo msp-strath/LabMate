@@ -116,6 +116,9 @@ data (^) :: (Nat -> Type) -> Nat -> Type where
 scopeOf :: p ^ n -> Natty n
 scopeOf (_ :^ th) = bigEnd th
 
+supportOf :: p ^ n -> Ex Natty
+supportOf (_ :^ th) = Ex $ weeEnd th
+
 withScopeOf :: p ^ n -> (NATTY n => b) -> b
 withScopeOf x k = nattily (scopeOf x) k
 
