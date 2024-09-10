@@ -265,7 +265,7 @@ data ElabTask where
     -> Term Chk ^ n  -- the scoped solution we will commit if the
                      -- Boolean becomes true
     -> ElabTask
-  ConstrainTask :: NATTY n => WhereAmI -> (String, Constraint) -> Term Chk ^ n -> ElabTask
+  ConstrainTask :: NATTY n => WhereAmI -> (String, Constraint) -> [BOOL] -> Term Chk ^ n -> ElabTask
   ElimTask :: NATTY n => Natty n -> (Term Chk ^ n, Typ ^ n) -> [TypeExpr] -> ElabTask
   AbelTask :: TypeExpr' -> ElabTask -- the problem type must be Abel genTy for some genTy
   ConstantCellTask :: SynthesisMode -> TypeExpr' -> ElabTask
@@ -1501,7 +1501,7 @@ solveConstraint name c@HeadersCompatibility{..} = nattily (vlen constraintCtx) $
       let consCase (leftElement , leftList) (rightElement, rightList) stat = do
             (_, hstat) <- constrain "headCompat" $ HeaderCompatibility{..}
             (_, tstat) <- constrain "tailCompat" $ HeadersCompatibility{..}
-            metaDefn name (conjunction [tstat, hstat])
+            metaDefn name (conjunction [tstat, hstat, stat])
       case listView leftList of
         [] -> ensureNull rightCtx (mk SAbel rightGenType) rightList >>= metaDefn name
         Right x:xs -> do
@@ -2320,13 +2320,13 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           move worried
         FindSimplest -> do
           invCellTy <- invent "invCellTy" (mctxt \\\ ("j", mk SAbel colGenTy) \\\ ("i", mk SAbel (wk rowGenTy))) (atom SType)
-          (_, lstat) <- constrain "sameLength" $ SameLength
+          {- (_, lstat) <- constrain "sameLength" $ SameLength
             { constraintCtx = fmap Hom <$> mctxt
             , leftEltType = mk SAbel rowGenTy
             , leftList = rs
             , rightEltType = mk SAbel colGenTy
             , rightList = cs
-            }
+            } -}
           (_, istat) <- constrain "inverseCell" $ InverseQuantities
             { constraintCtx = fmap Hom <$> mctxt
             , rowGenType = rowGenTy
@@ -2337,7 +2337,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
           let invTy = mk SMatrix colGenTy rowGenTy (lam "j" $ lam "i" $ invCellTy) cs rs
           (xSol, xProb) <- elab "invertee" mctxt invTy (TypeExprTask whereAmI FindSimplest <$> x)
           pushProblems [xProb]
-          newProb . Elab sol $ Await (conjunction [stat, lstat, istat]) (E $^ matrixInverse (R $^ xSol <&> invTy))
+          newProb . Elab sol $ Await (conjunction [stat, {- lstat, -} istat]) (E $^ matrixInverse (R $^ xSol <&> invTy))
           run
     TypeExprTask whereAmI synthMode (TyUnaryOp UTranspose x) -> let n = vlen mctxt in nattily n $ do
       (rowGenTy, colGenTy, cellTy, rs, cs, stat) <- ensureMatrix mctxt mtype
@@ -2448,9 +2448,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , joinElement = middle
             , awaitingStatus = conjunction [hc, jc]
             })
-      (zSol, zProb) <- elab' "mulZRet" mctxt zTy (ConstrainTask whereAmI mulConstraint (E $^ MX $^ (R $^ xSol <&> xTy) <&> (R $^ ySol <&> yTy)))
+      let stats = [jc, hc, zstat]
+      (zSol, zProb) <- elab' "mulZRet" mctxt zTy (ConstrainTask whereAmI mulConstraint stats (E $^ MX $^ (R $^ xSol <&> xTy) <&> (R $^ ySol <&> yTy)))
       pushProblems [xProb, yProb, zProb]
-      newProb . Elab sol $ Await (conjunction [jc, hc, zstat]) zSol
+      newProb . Elab sol $ Await (conjunction stats) zSol
       run
     TypeExprTask whereAmI _ (TyStringLiteral s) -> do
       (_, cs) <- constrain "IsListChar" $ Constraint
@@ -2793,9 +2794,9 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       cstatus -> do
         newProb . Elab sol $ Await cstatus tm
         move winning
-    ConstrainTask whereAmI (s, constraint) tm -> do
+    ConstrainTask whereAmI (s, constraint) stats tm -> do
       (_, cstatus) <- constrain s constraint
-      newProb . Elab sol $ Await cstatus tm
+      newProb . Elab sol $ Await (conjunction $ cstatus:stats) tm
       run
     _ -> move worried
 
