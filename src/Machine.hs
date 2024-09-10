@@ -3051,6 +3051,28 @@ unelabType ctx ty | Just ct <- tagEh ty = case ct of
               , [spc 1, sym "]", spc 1]
               , cellTy
               ]
+          (_, _, cellTy' :^ Su (No th), Intg r, _) -> do
+            cs <- unelabTerm ctx (mk SList (tag SAbel [colGenTy])) cs
+            cellTy <- unelabType (ctx \\\ (j, mk SAbel colGenTy)) (cellTy' :^ Su th)
+            pure $ concat
+              [ intersperse (spc 1) [sym "[", sym (show r), sym "x", sym j, sym "<-"]
+              , [spc 1]
+              , cs
+              , [spc 1, sym "]", spc 1]
+              , cellTy
+              ]
+          (_, _, cellTy' :^ No (Su th), _, Intg c) -> do
+            rs <- unelabTerm ctx (mk SList (tag SAbel [rowGenTy])) rs
+            cellTy <- unelabType (ctx \\\ (i, mk SAbel rowGenTy)) (cellTy' :^ Su th)
+            pure $ concat
+              [ intersperse (spc 1) [sym "[", sym i, sym "<-"]
+              , [spc 1]
+              , rs
+              , [spc 1]
+              , intersperse (spc 1) [sym "x", sym (show c), sym "]"]
+              , [spc 1]
+              , cellTy
+              ]
           _ -> pure [sym $ show ty]
   (SAbel, [ty]) | isUnitType ty -> pure [nom "int"]
   (SList, [ty]) | Just (SChar, []) <- tagEh ty -> pure [nom "string"]
