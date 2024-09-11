@@ -435,7 +435,9 @@ groupRaw g ts = groupString g (ts >>= raw)
 nonceExpand :: Map Nonce String -> Tok -> String
 nonceExpand table t | Non n <- kin t = case Map.lookup n table of
   Just ts -> ts
-  Nothing -> error $ "should be impossible: " ++ show n
+  Nothing -> case n of
+    -1 -> "..."
+    _ -> error $ "should be impossible: " ++ show n
 nonceExpand table t | Grp g (Hide ts) <- kin t = groupString g (ts >>= nonceExpand table)
 nonceExpand _ t = raw t
 

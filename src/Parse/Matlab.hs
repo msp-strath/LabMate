@@ -168,7 +168,9 @@ ptypeexpr ci = go >>= more ci where
    <|> pws (TyAtom <$> patom)
    <|> pws (pgrp (== Bracket Curly) (TyBraces . join <$> optional (plink (id <$ pospc <*> optional (ptypeexpr topCI <* pospc)))))
   lhsstuff ci = (pws (TyVar <$> pnom) >>= lmore)
-            <|> pws (tyMat <$> pgrp (== Bracket Square) (many (prow ptypeexpr)))
+            <|> (do
+                        (e :<=: src) <- pws (pgrp (== Bracket Square) (many (prow ptypeexpr)))
+                        pure $ tyMat src e :<=: src)
   lmore l = pcond
               (pws' (nonce l) (TyApp l <$ pcxspc ci <*> pargs Round (ptypeexpr topCI)))
               lmore
