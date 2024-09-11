@@ -49,6 +49,7 @@ data Grouping = Literal
               | Block
               | Bracket Bracket
               | Line LineTerminator
+              | Indentation String
               | Error
   deriving (Show, Eq)
 
@@ -418,7 +419,7 @@ seeToks ts = go 0 ts where
         _ -> return ()
 
 groupString :: Grouping -> String -> String
-groupString g s = prefix g ++ s ++ suffix g
+groupString g s = (prefix g ++ s ++ suffix g) >>= dent g
   where
     prefix g = case g of
       Bracket b -> fst (brackets b)
@@ -428,6 +429,8 @@ groupString g s = prefix g ++ s ++ suffix g
       Bracket b -> snd (brackets b)
       Generated -> "%<}"
       _ -> ""
+    dent (Indentation dent) '\n' = '\n' : dent
+    dent g t = [t]
 
 groupRaw :: Grouping -> [Tok] -> String
 groupRaw g ts = groupString g (ts >>= raw)

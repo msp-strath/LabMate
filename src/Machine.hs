@@ -2054,12 +2054,12 @@ runDirective rl (dir :<=: src, body) = do
       run
     Typecheck ty e -> do
       (tySol, tyProb) <- elab "typeToCheck" emptyContext (atom SType) (TensorTask <$> ty)
-      (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask LabMate EnsureCompatibility e :<=: source e)
+      (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask MatLab EnsureCompatibility e :<=: source e)
       newProb tyProb
       run
     SynthType e -> do
       ty <- invent "typeToSynth" emptyContext (atom SType)
-      (eSol, eProb) <- elab "exprToSynth" emptyContext ty (ExprTask LabMate FindSimplest e :<=: source e)
+      (eSol, eProb) <- elab "exprToSynth" emptyContext ty (ExprTask MatLab FindSimplest e :<=: source e)
       push $ Diagnostic rl (SynthD ty eSol e)
       newProb eProb
       run
@@ -3031,10 +3031,12 @@ diagnosticRun = llup >>= \case
                          _ -> []
                     pure $ [sym " Relevant:", spc 1] ++ intercalate [sym ",", spc 1] ps'
                   [] -> pure []
+    quack dent toks =
+      [Tok "" (Grp (Indentation (replicate dent ' ' ++ "%< ")) (Hide toks)) dump]
     msg :: Int -> DiagnosticData -> Elab [Tok]
     msg dent = \case
-      SynthD ty tm (e :<=: (en, _)) -> do
-        let resp = [Tok "\n" Ret dump, spc dent, sym "%<", spc 1]
+      SynthD ty tm (e :<=: (en, _)) -> quack dent <$> do
+        let resp = [Tok "\n" Ret dump]
         estore <- gets elabStore
         statTy <- traverse (\ x -> (,Map.lookup x estore) <$> metaStatus x) . Set.toList $ dependencies ty
         statTm <- traverse (\ x -> (,Map.lookup x estore) <$> metaStatus x) . Set.toList $ dependencies tm
