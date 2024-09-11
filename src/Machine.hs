@@ -1770,7 +1770,9 @@ ensureDeclaration s = findDeclaration s >>= \case
 findNearestSource :: Elab Nonce
 findNearestSource = excursion go where
   go = pull >>= \case
-    Nothing -> error "findNearestSource: impossible no enclosing Source frame"
+    Nothing -> pure (-1)
+      -- TODO: what, really?
+      -- error "findNearestSource: impossible no enclosing Source frame"
     Just fr@(Source s@(n, Hide ts)) -> n <$ push fr
     Just f -> shup f >> go
 
