@@ -1,4 +1,4 @@
-%> dimensions D for Q over metre for `Length
+%> dimensions D for Q over metre for `Length, kg for `Mass, sec for `Time
 
 inch = 0.0254*metre;
 foot = 12*inch;
