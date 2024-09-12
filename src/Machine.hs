@@ -53,7 +53,8 @@ data MachineState = MS
   , nonceTable :: Map Nonce String
   , refoldingMap :: Map TYPE String -- shitty version
   , elabStore :: Map Name [Tok]
-  , sourceGripeTable :: Map Nonce [(BOOL, [Either Unelabtask [Tok]])]
+  , sourceGripeTable :: Map Nonce [SourceIssue]
+  , sourceFudTable :: Map Nonce [(BOOL, SourceMessage)]
   , metaStore :: Store
   , constraintStore :: Map Name Constraint
   , clock :: Int
@@ -69,11 +70,20 @@ initMachine f t = MS
   , refoldingMap = Map.empty
   , elabStore = Map.empty
   , sourceGripeTable = Map.empty
+  , sourceFudTable = Map.empty
   , metaStore = Map.empty
   , constraintStore = Map.empty
   , clock = 0
   , epoch = 0
   }
+
+data SourceIssue = SourceIssue
+  { issueStatus :: BOOL
+  , messageIfFalse :: SourceMessage
+  , messageIfDoubt :: SourceMessage
+  } deriving Show
+
+type SourceMessage = [Either Unelabtask [Tok]]
 
 data Unelabtask = forall n . Unelabtask
   { unElabContext :: Context n
@@ -278,7 +288,7 @@ data ElabTask where
   TensorTask :: TensorType' -> ElabTask
   TypeExprTask :: WhereAmI -> SynthesisMode -> TypeExpr' -> ElabTask
   LHSTask :: LHS' -> ElabTask
-  ExprTask :: WhereAmI -> SynthesisMode -> Expr' -> ElabTask
+  ExprTask :: WhereAmI -> SynthesisMode -> Expr -> ElabTask
   Await :: NATTY n
     => BOOL          -- the closed Boolean value we hope will become true
     -> Term Chk ^ n  -- the scoped solution we will commit if the
@@ -977,27 +987,30 @@ ensureCons ctx ty tm = case listView tm of
       }
     pure (x, xs, stat)
 
-constrain :: String -> Constraint -> Elab (Name, BOOL)
-constrain s c = do
+constrainWithIssue :: String -> (SourceMessage, SourceMessage) -> Constraint -> Elab (Name, BOOL)
+constrainWithIssue s (fud, gripe) c =  do
   c <- updateConstraint c
   name <- metaDecl Hoping s emptyContext (atom STwo)
   solveConstraint name c
   stat <- constraintStatus name
-  findNearestSource >>= \case
-    Nothing -> pure ()
-    Just nonce -> do
-      modify $ \st@MS{..} -> st { sourceGripeTable = Map.insertWith (++) nonce [(stat,constraintGripe c)] sourceGripeTable }
+  nonce <- findNearestSource
+  let issue = SourceIssue { issueStatus = stat, messageIfDoubt = fud, messageIfFalse = gripe }
+  modify $ \st@MS{..} -> st { sourceGripeTable = Map.insertWith (<>) nonce [issue] sourceGripeTable }
   pure (name, stat)
+
+constrain :: String -> Constraint -> Elab (Name, BOOL)
+constrain s c = constrainWithIssue s (constraintFudGripe c) c
   where
-    constraintGripe Constraint{..} =
+    constraintFudGripe Constraint{..} =
       let lhs' = Unelabtask (fmap lhsType <$> constraintCtx) (lhsType constraintType) lhs
           rhs' = Unelabtask (fmap rhsType <$> constraintCtx) (rhsType constraintType) rhs
-      in [Left lhs', Right [spc 1, sym "~=", spc 1], Left rhs']
-    constraintGripe HeadersCompatibility{..} = nattily (vlen constraintCtx) $
+      in ([Left lhs', Right [spc 1, sym "=", spc 1], Left rhs', Right [spc 1, sym "?"]], [Left lhs', Right [spc 1, sym "~=", spc 1], Left rhs'])
+    constraintFudGripe HeadersCompatibility{..} = nattily (vlen constraintCtx) $
       let leftList' = Unelabtask (fmap lhsType <$> constraintCtx) (mk SList (tag SAbel [leftGenType])) leftList
           rightList' = Unelabtask (fmap rhsType <$> constraintCtx) (mk SList (tag SAbel [rightGenType])) rightList
-      in [Left leftList',  Right [spc 1, sym "does not align with", spc 1], Left rightList']
-    constraintGripe _ = []
+          sentence verb = [Left leftList',  Right [spc 1, sym (verb ++ " not align with"), spc 1], Left rightList']
+      in (sentence "may", sentence "does")
+    constraintFudGripe _ = ([], [])
 
 -- constrain to be used only inside solveConstraint
 substrain :: String -> Constraint -> Elab (Name, BOOL)
@@ -1754,11 +1767,13 @@ ensureDeclaration s = findDeclaration s >>= \case
   Nothing -> ensureType s >>= makeDeclaration
   Just x  -> pure x
 
-findNearestSource :: Elab (Maybe Nonce)
+findNearestSource :: Elab Nonce
 findNearestSource = excursion go where
   go = pull >>= \case
-    Nothing -> pure Nothing
-    Just fr@(Source s@(n, Hide ts)) -> Just n <$ push fr
+    Nothing -> pure (-1)
+      -- TODO: what, really?
+      -- error "findNearestSource: impossible no enclosing Source frame"
+    Just fr@(Source s@(n, Hide ts)) -> n <$ push fr
     Just f -> shup f >> go
 
 onNearestSource :: ([Tok] -> [Tok]) -> Elab ()
@@ -1807,7 +1822,11 @@ invent' stat x ctx ty = nattily (vlen ctx) $ normalise ctx (atom SType) ty >>= \
         a <- invent x ctx s
         d <- invent x ctx (t //^ sub0 (R $^ a <&> s))
         pure (T $^ a <&> d)
-  ty -> wrapMeta <$> metaDecl stat x ctx ty
+  ty -> do
+    name <- metaDecl stat x ctx ty
+    srcNon <- findNearestSource
+    modify $ \st@MS{..} -> st { elabStore = Map.insert name [sym "something about", spc 1, non srcNon] elabStore }
+    pure (wrapMeta name)
 
 invent :: String -> Context n -> Typ ^ n -> Elab (Term Chk ^ n)
 invent = invent' Hoping
@@ -1910,7 +1929,7 @@ run = prob >>= \case
     -- TODO: optimise for the case when we know the LHS type
     ty <- invent "assignTy" emptyContext (atom SType)
     (ltm, lhsProb) <- elab "AssignLHS" emptyContext (mk SDest ty) (LHSTask <$> lhs)
-    (rtm, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask MatLab synthMode <$> rhs)
+    (rtm, rhsProb) <- elab "AssignRHS" emptyContext ty (ExprTask MatLab synthMode rhs :<=: source rhs)
     excursion $ postRight [Currently ty ltm rtm]
     pushProblems [rhsProb]
     newProb lhsProb
@@ -2037,12 +2056,12 @@ runDirective rl (dir :<=: src, body) = do
       run
     Typecheck ty e -> do
       (tySol, tyProb) <- elab "typeToCheck" emptyContext (atom SType) (TensorTask <$> ty)
-      (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask LabMate EnsureCompatibility <$> e)
+      (eSol, eProb) <- elab "exprToCheck" emptyContext tySol (ExprTask MatLab EnsureCompatibility e :<=: source e)
       newProb tyProb
       run
     SynthType e -> do
       ty <- invent "typeToSynth" emptyContext (atom SType)
-      (eSol, eProb) <- elab "exprToSynth" emptyContext ty (ExprTask LabMate FindSimplest <$> e)
+      (eSol, eProb) <- elab "exprToSynth" emptyContext ty (ExprTask MatLab FindSimplest e :<=: source e)
       push $ Diagnostic rl (SynthD ty eSol e)
       newProb eProb
       run
@@ -2440,6 +2459,10 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       -- guessing which multiplication case we are in (try them all):
       -- scalar * mx, mx * scalar, mx * mx
       -- (do we need two phase commit to metastore, local metastores?)
+      let isDiv = case (what x, what y) of
+            (TyUnaryOp UInvert _, _) -> LDiv
+            (_, TyUnaryOp UInvert _) -> RDiv
+            _ -> Times
       rowGenTy <- invent "rowType" mctxt (atom SType)
       leftMidGenTy <- invent "middleTypeL" mctxt (atom SType)
       rightMidGenTy <- invent "middleTypeR" mctxt (atom SType)
@@ -2484,7 +2507,18 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
         , joinGenType = joinMidGenTy
         }
       middle <- invent "middle" mctxt (mk SAbel joinMidGenTy)
-      (_, hc) <- constrain "headerCompat" $ HeadersCompatibility
+      let (leftThing, rightThing) = case isDiv of
+            LDiv -> ("rows", "rows")
+            RDiv -> ("columns", "columns")
+            Times -> ("columns", "rows")
+      let middleGripe verb =
+            [ Left (Unelabtask mctxt (mk SList (tag SAbel [leftMidGenTy])) leftcxry)
+            , Right (intersperse (spc 1) [sym ",", sym "the", sym leftThing, sym "of", non (nonce x)])
+            , Right ((intersperse (spc 1) [sym ",", sym (verb ++ " not align with")]) ++ [spc 1])
+            , Left (Unelabtask mctxt (mk SList (tag SAbel [rightMidGenTy])) rightcxry)
+            , Right (intersperse (spc 1) [sym ",", sym "the", sym rightThing, sym "of", non (nonce y)])
+            ]
+      (_, hc) <- constrainWithIssue "headerCompat" (middleGripe "may", middleGripe "does") $ HeadersCompatibility
         { constraintCtx = fmap Hom <$> mctxt
         , leftGenType = leftMidGenTy
         , rightGenType = rightMidGenTy
@@ -2605,7 +2639,8 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
             , rightList = yrs
             , joinElement = joinElt
             }
-          (_, cellStat) <- constrain "cellJoin" $ JoinConstraint
+          let celljoinMsg adj = [Right [sym "the cell types of ", non (nonce x), sym " and ", non (nonce y), sym (" are " ++ adj ++ " to join")]]
+          (_, cellStat) <- constrainWithIssue "cellJoin" (celljoinMsg "difficult", celljoinMsg "impossible") $ JoinConstraint
             { constraintCtx = fmap Hom <$> (mctxt \\\ (i, mk SAbel rowGenTy) \\\ (j, wk $ mk SAbel colGenTy))
             , leftGenType = xCellTy
             , rightGenType = yCellTy //^ subSnoc (subSnoc (idSubst n :^ No (No (io n))) (R $^ (mk Splus (var 1) (wk (wk joinElt))) <&> wk (wk $ mk SAbel rowGenTy))) (var 0)
@@ -2833,7 +2868,7 @@ runElabTask sol meta@Meta{..} etask = nattily (vlen mctxt) $ do
       _ -> do  -- switch to being a scoping problem
         newProb $ LHS lhs
         run
-    ExprTask whereAmI synthMode e -> case toTypeExpr' e of
+    ExprTask whereAmI synthMode (e :<=: src) -> case toTypeExpr' src e of
       Just e -> do
         newProb . Elab sol $ TypeExprTask whereAmI synthMode e
         run
@@ -2977,44 +3012,58 @@ diagnosticRun = llup >>= \case
     _ -> push fr >> diagnosticRun
   Nothing -> diagnosticMove mempty
   where
+    computeMessages :: [Maybe [Tok]] -> Elab [Tok]
+    computeMessages cs = do
+      sgt <- gets sourceGripeTable
+      case [ x | Just x <- cs ] of
+                  ps@(_:_) -> do
+                    ps' <- for ps $ \ p -> do
+                       gripes <- for [ msg | Tok _ (Non n) _ <- p, Just msgs <- [Map.lookup n sgt], msg <- msgs ] $ \issue -> do
+                         b <- normalise emptyContext (atom STwo) (issueStatus issue)
+                         case () of
+                           _ | b == fALSE -> do
+                                 x <- concat <$> traverse (either elabUnelabtask pure) (messageIfFalse issue)
+                                 pure $ if null x then [] else [x]
+                           _ | b == tRUE -> pure []
+                           _ -> do
+                             x <- concat <$> traverse (either elabUnelabtask pure) (messageIfDoubt issue)
+                             pure $ if null x then [] else [x]
+                       pure $ (p ++) $ case intercalate [sym ",", spc 1] (concat gripes) of
+                         gs@(_:_) -> [spc 1, sym "("] ++ gs ++ [sym ")"]
+                         _ -> []
+                    pure $ [sym " Relevant:", spc 1] ++ intercalate [sym ",", spc 1] ps'
+                  [] -> pure []
+    quack dent toks =
+      [Tok "" (Grp (Indentation (replicate dent ' ' ++ "%< ")) (Hide toks)) dump]
     msg :: Int -> DiagnosticData -> Elab [Tok]
     msg dent = \case
-      SynthD ty tm (e :<=: (en, _)) -> do
-        let resp = [Tok "\n" Ret dump, spc dent, sym "%<", spc 1]
+      SynthD ty tm (e :<=: (en, _)) -> quack dent <$> do
+        let resp = [Tok "\n" Ret dump]
         estore <- gets elabStore
-        sgt <- gets sourceGripeTable
         statTy <- traverse (\ x -> (,Map.lookup x estore) <$> metaStatus x) . Set.toList $ dependencies ty
         statTm <- traverse (\ x -> (,Map.lookup x estore) <$> metaStatus x) . Set.toList $ dependencies tm
         sty <- unelabType emptyContext ty
         stm <- unelabTerm emptyContext ty tm
         case (filter ((<= Hoping) . fst) statTy, filter ((<= Hoping) . fst) statTm) of
           ([], []) -> pure $ resp ++ [non en, spc 1, sym "::", spc 1] ++ sty
-          ([], _) | cs@(_:_) <- [x | (Crying, x) <- statTm] ->
+          ([], _) | cs@(_:_) <- [x | (Crying, x) <- statTm] -> do
+            messages <- computeMessages cs
             pure $ resp ++ [non en, spc 1, sym "should have type", spc 1]
-            ++ sty ++ [sym ",", spc 1, sym "but it does not"]
-          ([], _) ->
+              ++ sty ++ [sym ",", spc 1, sym "but it does not."] ++ messages
+          ([], _) -> do
+            messages <- computeMessages (snd <$> statTm)
             pure $ resp ++ [non en, spc 1, sym "should have type", spc 1]
-            ++ sty ++ [sym ",", spc 1, sym "and it might." {- , spc 1, sym (show (dependencies tm)), spc 1, sym (show statTm)-}]
+              ++ sty ++ [sym ",", spc 1, sym "and it might."] ++ messages
           (_, _) | cs@(_:_) <- [x | (Crying, x) <- statTy] -> do
-            pure $ resp ++ [sym "There is no sensible type for", spc 1, non en]
+            messages <- computeMessages cs
+            pure $ resp ++ [sym "There is no sensible type for", spc 1, non en, sym "."] ++ messages
           (_, _) | cs@(_:_) <- [x | (Crying, x) <- statTm] -> do
-            problems <- case [ x | Just x <- cs ] of
-                  ps@(_:_) -> do
-                    ps' <- for ps $ \ p -> do
-                       gripes <- for [ msg | Tok _ (Non n) _ <- p, Just msgs <- [Map.lookup n sgt], msg@(_,(_:_)) <- msgs ] $ \(b,g) -> do
-                         b <- normalise emptyContext (atom STwo) b
-                         if b == fALSE then do
-                           x <- concat <$> traverse (either elabUnelabtask pure) g
-                           pure [x]
-                         else pure []
-                       pure $ (p ++) $ case intercalate [sym ",", spc 1] (concat gripes) of
-                         gs@(_:_) -> [spc 1, sym "("] ++ gs ++ [sym ")"]
-                         _ -> []
-                    pure $ [sym ", to do with:", spc 1] ++ intercalate [sym ",", spc 1] ps'
-                  [] -> pure []
-            pure $ resp ++ [sym "There is something wrong with", spc 1, non en] ++ problems
-          (hopingTy, hopingTm) ->
-            pure $ resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is such a puzzle"] -- , spc 1, sym (show (dependencies ty, hopingTy)), spc 1, sym (show (dependencies tm, hopingTm))]
+            messages <- computeMessages cs
+            pure $ resp ++ [sym "There is something wrong with", spc 1, non en, sym "."] ++ messages
+          (hopingTy, hopingTm) -> do
+            messages <- computeMessages (snd <$> statTy)
+            pure $ resp ++ [sym "The expression", spc 1, non en, spc 1, sym "is such a puzzle."] ++ messages
+            -- , spc 1, sym (show (dependencies ty, hopingTy)), spc 1, sym (show (dependencies tm, hopingTm))]
       -- _ -> pure [Tok "\n" Ret dump, spc dent, sym "%<", spc 1, Tok "Goodbye" Nom dump]
       UnitD un stat tn -> case stat of
         Intg 1 -> pure

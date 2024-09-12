@@ -49,6 +49,7 @@ data Grouping = Literal
               | Block
               | Bracket Bracket
               | Line LineTerminator
+              | Indentation String
               | Error
   deriving (Show, Eq)
 
@@ -418,7 +419,7 @@ seeToks ts = go 0 ts where
         _ -> return ()
 
 groupString :: Grouping -> String -> String
-groupString g s = prefix g ++ s ++ suffix g
+groupString g s = (prefix g ++ s ++ suffix g) >>= dent g
   where
     prefix g = case g of
       Bracket b -> fst (brackets b)
@@ -428,6 +429,8 @@ groupString g s = prefix g ++ s ++ suffix g
       Bracket b -> snd (brackets b)
       Generated -> "%<}"
       _ -> ""
+    dent (Indentation dent) '\n' = '\n' : dent
+    dent g t = [t]
 
 groupRaw :: Grouping -> [Tok] -> String
 groupRaw g ts = groupString g (ts >>= raw)
@@ -435,7 +438,9 @@ groupRaw g ts = groupString g (ts >>= raw)
 nonceExpand :: Map Nonce String -> Tok -> String
 nonceExpand table t | Non n <- kin t = case Map.lookup n table of
   Just ts -> ts
-  Nothing -> error $ "should be impossible: " ++ show n
+  Nothing -> case n of
+    -1 -> "..."
+    _ -> error $ "should be impossible: " ++ show n
 nonceExpand table t | Grp g (Hide ts) <- kin t = groupString g (ts >>= nonceExpand table)
 nonceExpand _ t = raw t
 

@@ -77,16 +77,17 @@ data TypeExpr'
   | TyBraces (Maybe TypeExpr)
   deriving Show
 
-tyMat :: [[TypeExpr]] -> TypeExpr'
-tyMat exps = what $ go Vertical (go Horizontal id) exps
+tyMat :: Source -> [[TypeExpr]] -> TypeExpr'
+tyMat src exps = what $ go Vertical (go Horizontal id) exps
   where
-    -- jux _ e (TyNil _ :<=: _) = e -- making more trouble than it's worth?
-    jux dir e e' = noSource $ TyJux dir e e'
+    -- jux _ e  (TyNil _ :<=: _)= e -- making more trouble than it's worth?
+    jux src dir e e'@(TyNil _ :<=: _) = TyJux dir e e' :<=: source e
+    jux src dir e e' = TyJux dir e e' :<=: src
 
     nil dir = noSource $ TyNil dir
 
     go :: VOrH -> (a -> TypeExpr) -> [a] -> TypeExpr
-    go dir pre = foldr (jux dir . pre) (nil dir)
+    go dir pre = foldr (jux src dir . pre) (nil dir)
 
 tyUnaryOp :: UnOperator -> TypeExpr -> TypeExpr'
 tyUnaryOp UMinus (TyNum i :<=: src) = TyNum (negate i)
@@ -123,36 +124,36 @@ data Expr'
   | Lambda [String] Expr
   deriving (Show)
 
-toTypeExpr' :: Expr' -> Maybe TypeExpr'
-toTypeExpr' (Var x) = pure $ TyVar x
-toTypeExpr' (IntLiteral n) = pure $ TyNum n
-toTypeExpr' (DoubleLiteral d) = pure $ TyDouble d
-toTypeExpr' (StringLiteral s) = pure $ TyStringLiteral s
-toTypeExpr' (UnaryOp op x) = tyUnaryOp op <$> toTypeExpr x
-toTypeExpr' (BinaryOp (Mul d RDiv) x y) = do
+toTypeExpr' :: Source -> Expr' -> Maybe TypeExpr'
+toTypeExpr' _ (Var x) = pure $ TyVar x
+toTypeExpr' _ (IntLiteral n) = pure $ TyNum n
+toTypeExpr' _ (DoubleLiteral d) = pure $ TyDouble d
+toTypeExpr' _ (StringLiteral s) = pure $ TyStringLiteral s
+toTypeExpr' _ (UnaryOp op x) = tyUnaryOp op <$> toTypeExpr x
+toTypeExpr' _ (BinaryOp (Mul d RDiv) x y) = do
   let ysrc = source y
   x <- toTypeExpr x
   y <- toTypeExpr y
   pure (TyBinaryOp (Mul d Times) x (TyUnaryOp UInvert y :<=: ysrc))
-toTypeExpr' (BinaryOp (Mul d LDiv) x y) = do
+toTypeExpr' _ (BinaryOp (Mul d LDiv) x y) = do
   let xsrc = source x
   x <- toTypeExpr x
   y <- toTypeExpr y
   pure (TyBinaryOp (Mul d Times) (TyUnaryOp UInvert x :<=: xsrc) y)
-toTypeExpr' (BinaryOp Minus x y) = do
+toTypeExpr' _ (BinaryOp Minus x y) = do
   let ysrc = source y
   x <- toTypeExpr x
   y <- toTypeExpr y
   pure (TyBinaryOp Plus x (TyUnaryOp UMinus y :<=: ysrc))
-toTypeExpr' (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
-toTypeExpr' (Mat exps) = do
+toTypeExpr' _ (BinaryOp op x y) = TyBinaryOp op <$> toTypeExpr x <*> toTypeExpr y
+toTypeExpr' src (Mat exps) = do
    exps <- traverse (traverse toTypeExpr) exps
-   pure $ tyMat exps
+   pure $ tyMat src exps
 -- FIXME : add more
-toTypeExpr' _ = Nothing
+toTypeExpr' _ _ = Nothing
 
 toTypeExpr :: Expr -> Maybe TypeExpr
-toTypeExpr = traverse toTypeExpr'
+toTypeExpr e = traverse (toTypeExpr' (source e)) e
 
 data LHS'
   = LVar String

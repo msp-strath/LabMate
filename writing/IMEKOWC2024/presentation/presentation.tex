@@ -138,7 +138,7 @@
 \title{\huge \lm: \\ \centerline{Supporting Types for \ma} }
 \author[McBride, Nakov, Nordvall Forsberg et al]{\small Conor McBride$^{1}$, \underline{Georgi Nakov}$^{1}$, Fredrik Nordvall Forsberg$^{1}$,\\ Andr\'e Videla$^{1}$, Alistair Forbes$^{2}$, Keith Lines$^{2}$}
 \institute[]{$^{1}$University of Strathclyde, UK\\$^{2}$National Physical Laboratory, UK}
-
+\date{IMEKO 2024 XXIV World Congress\\August 27, 2024}
 \begin{document}
 
 \begin{frame}[plain]
@@ -210,18 +210,17 @@
     n = 5;
     display(n);
    \end{lstlisting}
-  \pause
   \mycallout<+>{ren}{this is an input directive to rename a variable}
-\item Run \lm to get:
-  \begin{lstlisting}[xleftmargin=2em]
+  \item Run \lm to get:
+   \begin{lstlisting}[xleftmargin=2em]
 %< LabMate 0.2.0.1 !\tikzmark{ver}!
 %< renamed n x !\tikzmark{renr}!
 x = 5;
 display(x);
    \end{lstlisting}
-  \pause
-  \mycallout<+>{renr}{LabMate response to the input directive}
-  \mycallout<+>{ver}{Mark the file as processed by LabMate}
+  %\pause
+   \mycallout<+>{renr}{LabMate response to the input directive}
+   \mycallout<+>{ver}{Mark the file as processed by LabMate}
 \end{itemize}
 \end{frame}
 
@@ -230,33 +229,30 @@ display(x);
   \item \keyword{Matrices} feature heavily in \ma code.
     \medskip
   \item \lm supports \keyword{type annotations} for matrices:
-\begin{lstlisting}[xleftmargin=0em, belowskip=-0.5em]
+    \begin{lstlisting}[xleftmargin=0em, belowskip=-0.5em]
 %> A :: [ 1 x 2 ] int  !\tikzmark{ann1}!
 A = [ 3 4 ]
 %> B :: [ 2 x 4 ] int  !\tikzmark{ann2}!
 B = [ 1 1 1 1
       5 6 7 8 ]
 C = A * B
-\end{lstlisting}
-  \pause
-  \mycallout<+>{ann1}{type annotations at declaration of A}
-  \mycallout<+>{ann2}{type annotations at declaration of B}
+    \end{lstlisting}
+    \mycallout<+>{ann1}{type annotations at declaration of A}
+    \mycallout<+>{ann2}{type annotations at declaration of B}
   \item We can ask for type information:
-\begin{lstlisting}[xleftmargin=0em, belowskip=-0.5em]
+    \begin{lstlisting}[xleftmargin=0em, belowskip=-0.5em]
 %> typeof C !\tikzmark{query}!
 %< C :: [Matrix 1 4 int]!\tikzmark{resp}!
-\end{lstlisting}
- \pause
-  \mycallout<+>{query}{query for the type of C}
-  \mycalloutup<+>{resp}{LabMate can infer the dimensions}
+    \end{lstlisting}
+    \mycallout<+>{query}{query for the type of C}
+    \mycalloutup<+>{resp}{LabMate can infer the dimensions}
   \item \ldots and can easily spot incompatible sizing:
-\begin{lstlisting}[xleftmargin=0em]
+    \begin{lstlisting}[xleftmargin=0em]
 D = B * A
 %> typeof D
 %< The expression D is!\tikzmark{bad}! quite a puzzle
-\end{lstlisting}
-    \pause
-      \mycalloutup<+>{bad}{LabMate can point out an error with D}
+    \end{lstlisting}
+    \mycalloutup<+>{bad}{LabMate can point out an error with D}
 \end{itemize}
 \end{frame}
 
@@ -268,7 +264,7 @@ D = B * A
     \item \lm does not rely on constants, \keyword{variables} work as well.
     \end{itemize}
   \item
-\begin{lstlisting}[xleftmargin=0em]
+    \begin{lstlisting}[xleftmargin=0em]
 function B = f(A)
   %> B :: [ 1 x 3 ] int
   B = [ 1 A ]
@@ -280,10 +276,9 @@ end
 A = 'hello'
 %> typeof A
 %< A :: string!\tikzmark{scope}!
-\end{lstlisting}
-   \pause
-   \mycalloutup<+>{fromb}{LabMate infers type of A from the annotation on B}
-   \mycalloutup<+>{scope}{tracks Matlab scope}
+     \end{lstlisting}
+     \mycalloutup<+>{fromb}{LabMate infers type of A from the annotation on B}
+     \mycalloutup<+>{scope}{distinguishes and tracks Matlab scope}
   \end{itemize}
 \end{frame}
 
@@ -293,28 +288,26 @@ A = 'hello'
     \begin{lstlisting}[xleftmargin=0em,belowskip=-1em]
 %> dimensions V for Q over `Mass!\tikzmark{base}!, `Time
 %> unit kg :: Q({!\tikzmark{unit1}! `Mass })!\tikzmark{unit}!
-\end{lstlisting}
-%\pause
-   \mycalloutup<+>{base}{define some base set of dimensions}
-   \mycalloutup<+>{unit}{and a canonical unit of measure}
-   \mycalloutup<+>{unit1}{can be arbitrary group expression over V}
-\pause
-\begin{lstlisting}[xleftmargin=0em]
+    \end{lstlisting}
+    \mycalloutup<+>{base}{define some base set of dimensions}
+    \mycalloutup<+>{unit}{and a canonical unit of measure}
+    \mycalloutup<+>{unit1}{can be arbitrary group expression over V}
+    \pause
+    \begin{lstlisting}[xleftmargin=0em]
 %<{
 kg = 1; !\tikzmark{kg}!
 %<}
-\end{lstlisting}
-\pause
-   \mycallout<+>{kg}{this is a ``magic'' response that LabMate emits}
-\pause
-\item We can then use the \keyword{unit of measure} for quantities:
-\begin{lstlisting}[xleftmargin=0em]
+    \end{lstlisting}
+    \pause
+    \mycallout<+>{kg}{this is a ``magic'' response that LabMate emits}
+    \pause
+  \item We can then use the \keyword{unit of measure} for quantities:
+    \begin{lstlisting}[xleftmargin=0em]
 y = 5*kg !\tikzmark{q}!
 %> typeof y
 %< y :: Quantity (Enum [`Mass, `Time])
 %<               {`Mass}
-\end{lstlisting}
-%  \pause
+   \end{lstlisting}
    \mycallout<+>{q}{turn a value of a dimensionless type into a quantity}
   \end{itemize}
 \end{frame}
@@ -324,29 +317,27 @@ y = 5*kg !\tikzmark{q}!
   \item Most \ma programs \keyword{do not work on uniform matrices}: type of the entry $e_{i, j}$ might depend on the indices $i$ and $j$.
     \medskip
   \item A common scenario when working with matrices of quantities:
-%    $\begin{array}{ccccc}
-% e_{1,1}  &        & e_{1,j} &        & e_{1,n} \\
-%         &        &         &        &         \\
-% e_{i,1}  &        & e_{i,j}\tikzmark{mat} &        & e_{i,n} \\
-%         &        &         &        &         \\
-% e_{m,1}  &        & e_{m,j} &        & e_{m,n}  \\
-%\end{array}$
-%    \mycallout<+>{mat}{the type might depend on i and j}
-\begin{lstlisting}[xleftmargin=0em]
+    \begin{lstlisting}[xleftmargin=0em]
 %> dimensions V for Q over `L, `M, `T
 %> unit metre :: Q({ `L })
 %> unit kg :: Q({ `M })
 %> unit sec :: Q({ `T })
-\end{lstlisting}
-\medskip
-\item Work in progress: \lm support for such matrices
-\begin{lstlisting}[xleftmargin=0em]
-% > A :: [ i <- [{} {`T}]
-%        x j <- [{} {`L}]
-%        ] Q({`M * j / i})
-A = [ 2*kg       5*kg*metre
-      3*kg/sec   4*kg*metre/sec ]
-\end{lstlisting}
+    \end{lstlisting}
+    \medskip
+  \item Work in progress: \lm support for such matrices
+    \begin{lstlisting}[xleftmargin=0em]
+% > A :: [ i <-!\tikzmark{indi}! [{} {`T}]
+%        x j <-!\tikzmark{indj}! [{} {`L}]
+%        ] Q({`M * j / i})!\tikzmark{cell}!
+A = [ 2*!\tikzmark{e00}!kg       5*!\tikzmark{e01}!kg*metre
+      3*kg/sec   4*!\tikzmark{e11}!kg*metre/sec]
+    \end{lstlisting}
+    \mycalloutup<+>{cell}{The cell type Q depends on i and j}
+    \mycalloutup<+>{indi}{Index i tells us something about the rows}
+    \mycalloutup<+>{indj}{Index j disambiguates the columns}
+    \mycalloutup<+>{e00}{:: Q(\{ `M * \{\} / \{\} \})}
+    \mycalloutup<+>{e01}{:: Q(\{ `M * `L / \{\} \})}
+    \mycalloutup<+>{e11}{:: Q(\{ `M * `L / `T \})}
   \end{itemize}
 \end{frame}
 
@@ -395,6 +386,14 @@ A = [ 2*kg       5*kg*metre
 \end{frame}
 
 
+\begin{frame}
+  \begin{center}
+    \LARGE Thanks for the attention!\\
+    \pause
+    \vspace{1em}
+    \Huge Questions?
+  \end{center}
+\end{frame}
 
 \end{document}
 %%% Local Variables:

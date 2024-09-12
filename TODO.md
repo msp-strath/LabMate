@@ -15,3 +15,8 @@
 29.08.2024
 
 [X] Normalisation should happen in updateConstraint (and every constraint insisting on isHom should be updated)
+
+11.09.2024
+
+[X] Ensure that line breaks in source code induce additional response comment markers
+[ ] Persuade readfrom directives to wait for useful information to appear
