@@ -106,9 +106,20 @@
 % R        []
 %    rs
 
+\begin{gather*}
+  \text{Magic version \emph{(what is the value of this TS?)}}
+  \\ \\
+  \infer{\bsl x. t : \typeIntro{\Pi}{S \bsl x. T}}{(\Type S) & x : S \vdash t : T}
+  \\ \\
+  \infer{s, t: \typeIntro{\Sigma}{S \bsl x. T}}{s : S & x :S \vdash \Type T & t : \subst{T}{s / x}}
+\end{gather*}
 
-
-
+Main points:
+\begin{itemize}
+\item operability of TS (admits non-magical presentation)
+\item get the eq. theory of lists as a monoid (and canonical form of lists)
+\item get a canonical form for matrices constructed by pasting
+\end{itemize}
 \end{document}
 
 %%% Local Variables:
