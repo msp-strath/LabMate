@@ -1,0 +1,117 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage{xspace}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{proof}
+\usepackage{ifthen}
+\title{Matrix Types}
+\author{Conor Mc Bride, Georgi Nakov, Fredrik Nordvall Forsberg}{}
+
+\newcommand{\bsl}{\texttt{\symbol{92}}}
+\newcommand{\Type}{\textsc{type}\;}
+\newcommand{\Zero}{\mathbf{0}}
+\newcommand{\One}{\mathbf{1}}
+\newcommand{\List}{\mathsf{List}}
+\newcommand{\Matrix}{\mathsf{Matrix}}
+\newcommand{\Nil}{\mathbf{[]}}
+
+\newcommand{\one}{\mathsf{one}}
+\newcommand{\jux}{\mathsf{jux}}
+\newcommand{\fst}{\mathsf{fst}}
+\newcommand{\snd}{\mathsf{snd}}
+
+\newcommand{\forms}[3]{
+  \ifthenelse{\equal{#2}{}}
+  {\textcolor{#3}{#1}}
+  {[\textcolor{#3}{#1}\;{#2}]}
+}
+
+\newcommand{\typeIntro}[2]{\forms{#1}{#2}{blue}}
+\newcommand{\intro}[2]{\forms{#1}{#2}{red}}
+\newcommand{\elim}[2]{\forms{#1}{#2}{green}}
+\newcommand{\Pair}[2]{[{#1}|{#2}]}
+\newcommand{\subst}[2]{{#1}\lfloor {#2} \rfloor}
+
+
+\begin{document}
+\maketitle
+
+\begin{gather*}
+  \fbox{\Type T}
+  \\ \\
+  \infer{\Type \typeIntro{\Pi}{S \bsl x . T}}{\Type S & x \in S \vdash \Type T}
+  \qquad\qquad
+  \infer{\Type \typeIntro{\Sigma}{S \bsl x . T}}{\Type S & x \in S \vdash \Type T}
+  \\ \\
+  \infer{\Type \typeIntro{\Zero}{}}{}
+  \qquad\qquad
+  \infer{\Type \typeIntro{\One}{}}{}
+  \\ \\
+  \infer{\Type \typeIntro{\List}{T}}{\Type T}
+  \\ \\
+  \infer{\Type \typeIntro{\Matrix}{R\, C\, \bsl r. \bsl c. T\, rs\, cs}}{
+    \Type R & \Type C & r \in R, c \in C \vdash \Type T
+    & \typeIntro{\List}{R} \ni rs & \typeIntro{\List}{C} \ni cs
+  }
+\end{gather*}
+
+\begin{gather*}
+  \fbox{\{\Type T\} T $\in$ t}
+  \\ \\
+  \infer{\typeIntro{\Pi}{S \bsl x . T} \ni \bsl x. t}{x \in S \vdash T \ni t}
+  \qquad\qquad
+  \infer{\typeIntro{\Sigma}{S \bsl x . T} \ni \Pair{s}{t}}{S \ni s & \subst{T}{s:S} \ni t}
+  \\ \\
+  \infer{\One \ni \Nil}{} \qquad\qquad
+  \\ \\
+  \infer{\typeIntro{List}{T} \ni \Nil}{} \qquad\qquad
+  \infer{\typeIntro{List}{T} \ni \intro{\one}{t}}{T \ni t}
+  \qquad\qquad \infer{\typeIntro{List}{T} \ni \intro{\jux}{ts_{0}\;
+      ts_{1}}}{\typeIntro{List}{T} \ni ts_{0} & \typeIntro{List}{T} \ni
+    ts_{1}}
+  \\ \\
+  \infer{T \ni (e)}{e \in S & S \equiv T}
+\end{gather*}
+
+\begin{gather*}
+  \fbox{ e $\in$ S \{\Type T\}}
+  \\ \\
+  \infer{t : T \in T}{\Type T & T \ni t}
+  \\ \\
+  \infer{f s \in \subst{T}{s : S}}{f \in \typeIntro{\Pi}{S \bsl x . T} & S \ni s}
+  \\ \\
+  \infer{e \elim{\fst}{} \in S}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
+  \qquad\qquad
+  \infer{e \elim{\snd}{} \in \subst{T}{e \elim{\fst}{} }}{e \in \typeIntro{\Sigma}{S \bls x. T}}
+  \\ \\
+  \infer{e T \in T}{e \in \typeIntro{\Zero}{} & \Type T}
+\end{gather*}
+
+%        cs     C
+%     ----------------
+% rs | \r\c T |    []
+%    |  \ni t | []
+%    | ---[]---
+% R  |[]
+% ------------------------------------------
+% [ Matrix R C \r\c. T rs cs ]
+
+
+% -----------------------
+%       cs    C
+%    --------------
+% rs | \r \c . T |   cs
+%    |   \ni []  |[]
+%    |___________|
+% R        []
+%    rs
+
+
+
+
+\end{document}
+
+%%% Local Variables:
+%%% mode: LaTeX
+%%% TeX-master: t
+%%% End:
