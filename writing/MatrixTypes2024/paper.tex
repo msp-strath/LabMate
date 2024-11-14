@@ -82,7 +82,7 @@
   \\ \\
   \infer{e \elim{\fst}{} \in S}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
   \qquad\qquad
-  \infer{e \elim{\snd}{} \in \subst{T}{e \elim{\fst}{} }}{e \in \typeIntro{\Sigma}{S \bls x. T}}
+  \infer{e \elim{\snd}{} \in \subst{T}{e \elim{\fst}{} }}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
   \\ \\
   \infer{e T \in T}{e \in \typeIntro{\Zero}{} & \Type T}
 \end{gather*}
@@ -120,6 +120,9 @@ Main points:
 \item get the eq. theory of lists as a monoid (and canonical form of lists)
 \item get a canonical form for matrices constructed by pasting
 \end{itemize}
+Objective: admissibality of $\infer{\Type T}{t : T}$\\
+Non-objective: alogirthm for type checking
+
 \end{document}
 
 %%% Local Variables:
