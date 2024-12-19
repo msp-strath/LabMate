@@ -35,6 +35,18 @@ skip ph -< suc th = skip (ph -< th)
 suc ph -< suc th = suc (ph -< th)
 ph -< zero = ph
 
+record CdB (T : Nat -> Set) (n : Nat) : Set where
+  constructor _^_
+  field
+   {support} : Nat
+   thing : T support
+   thinning : support <= n
+
+open CdB public
+
+_^C_ : {n m : Nat}{T : Nat -> Set} -> CdB T n -> n <= m -> CdB T m
+(t ^ ph) ^C th = t ^ (ph -< th)
+
 data _+_ (A B : Set) : Set where
  inl : A -> A + B
  inr : B -> A + B
@@ -42,3 +54,24 @@ data _+_ (A B : Set) : Set where
 data Bwd (A : Set) : Set where
  [] : Bwd A
  _-,_ : Bwd A -> A -> Bwd A
+
+data Stack (A : Set) : Nat -> Set where
+ [] : Stack A 0
+ _-,_ : {n : Nat} -> Stack A n -> A -> Stack A (suc n)
+
+module _ {A : Set} where
+
+ only : Stack A 1 -> A
+ only (_ -, x) = x
+
+ _<?_ : {n m : Nat} -> n <= m -> Stack A m -> Stack A n
+ skip th <? (xz -, x) = th <? xz
+ suc th <? (xz -, x) = (th <? xz) -, x
+ zero <? _ = []
+
+ _<-_ : {n : Nat} -> 1 <= n -> Stack A n -> A
+ th <- xz = only (th <? xz)
+
+ stack : {n : Nat} {B : Set} -> (A -> B) -> Stack A n -> Stack B n
+ stack f [] = []
+ stack f (xz -, x) = stack f xz -, f x
