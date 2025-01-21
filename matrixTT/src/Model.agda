@@ -40,12 +40,12 @@ pattern nil = atom ""
 mutual
 
  data Type (sc : Nat) : Set where
-  pi sg : (a : Type sc) -> (b : {sc' : Nat} -> (th : sc <= sc') -> El (a ^ th) -> Type sc') -> Type sc
+  pi sg : (a : Type sc) -> (b : {sc' : Nat} -> {- (th : sc <= sc') -> -} El a sc' -> Type sc') -> Type sc
   list : Type sc -> Type sc
   one : Type sc
   ne : Neutral sc -> Type sc
 
-
+{-
  El : {sc' : Nat} -> CdB Type sc' -> Set
  El {sc'} (t ^ th) = El' th t
 
@@ -55,34 +55,41 @@ mutual
  El' {sc} {sc'} th (list a) = List (Neutral sc' + El' th a)
  El' th one = One
  El' {sc} {sc'} th (ne n) = Neutral sc'
+-}
 
+ El : {src : Nat} -> Type src -> (tgt : Nat) -> Set
+ El (pi a b) tgt = {tgt' : Nat}(th : tgt <= tgt')(x : El a tgt') -> El (b x) tgt'
+ El (sg a b) tgt = Sg (El a tgt) (λ x -> El (b x) tgt)
+ El (list a) tgt = List (Neutral tgt + El a tgt)
+ El one _ = One
+ El (ne n) tgt = Neutral tgt
 
 mutual
 
  quoteType : {sc : Nat} -> Type sc -> Normal sc
- quoteType (pi a b) = pair (atom "Pi") (pair (quoteType a) (pair (bind (quoteType (b (skip io) (unquoteEl a (skip io) (neutral (suc no) []))))) nil))
- quoteType (sg a b) = pair (atom "Sg") (pair (quoteType a) (pair (bind (quoteType (b (skip io) (unquoteEl a (skip io) (neutral (suc no) []))))) nil))
+ quoteType (pi a b) = pair (atom "Pi") (pair (quoteType a) (pair (bind (quoteType (b (unquoteEl a (neutral (suc no) []))))) nil))
+ quoteType (sg a b) = pair (atom "Sg") (pair (quoteType a) (pair (bind (quoteType (b (unquoteEl a (neutral (suc no) []))))) nil))
  quoteType (list a) = pair (atom "List") (pair (quoteType a) nil)
  quoteType one = pair (atom "One") nil
  quoteType (ne n) = ne n
 
- unquoteEl : {sc sc' : Nat} -> (a : Type sc) -> (th : sc <= sc') -> Neutral sc' -> El (a ^ th)
- unquoteEl (pi a b) th (neutral nut spine) = λ ph x -> unquoteEl (b (th -< ph) x) io (neutral (nut -< ph) ((spine ^tz ph) -, quoteEl a (th -< ph) x))
- unquoteEl {sc} {sc'} (sg a b) th (neutral nut spine) = let a' = unquoteEl a th (neutral nut (spine -, atom "fst")) in
-  (a' , unquoteEl (b th a') io (neutral nut (spine -, atom "snd")))
- unquoteEl (list a) th n = inl n ,- []
- unquoteEl one th n = tt
- unquoteEl (ne N) th n = n
+ unquoteEl : {sc sc' : Nat} -> (a : Type sc) -> Neutral sc' -> El a sc'
+ unquoteEl (pi a b) (neutral nut spine) = λ ph x -> unquoteEl (b x) (neutral (nut -< ph) ((spine ^tz ph) -, quoteEl a x))
+ unquoteEl {sc} {sc'} (sg a b) (neutral nut spine) = let a' = unquoteEl a (neutral nut (spine -, atom "fst")) in
+  (a' , unquoteEl (b a') (neutral nut (spine -, atom "snd")))
+ unquoteEl (list a) n = inl n ,- []
+ unquoteEl one n = tt
+ unquoteEl (ne N) n = n
 
- quoteEl : {sc sc' : Nat} -> (a : Type sc) -> (th : sc <= sc') -> El (a ^ th) -> Normal sc'
- quoteEl (pi a b) th f = let x = (unquoteEl a (th -< skip io) (neutral (suc no) [])) in
-  bind (quoteEl (b (th -< skip io) x) io (f (skip io) x))
- quoteEl (sg a b) th (s , t) = pair (quoteEl a th s) (quoteEl (b th s) io t)
- quoteEl (list a) th xs = quoteList a th xs
- quoteEl one th _ = nil
- quoteEl (ne N) th n = ne n
+ quoteEl : {sc sc' : Nat} -> (a : Type sc) -> El a sc' -> Normal sc'
+ quoteEl (pi a b) f = let x = (unquoteEl a (neutral (suc no) [])) in
+  bind (quoteEl (b x) (f (skip io) x))
+ quoteEl (sg a b) (s , t) = pair (quoteEl a s) (quoteEl (b s) t)
+ quoteEl (list a) xs = quoteList a xs
+ quoteEl one _ = nil
+ quoteEl (ne N) n = ne n
 
- quoteList : {sc sc' : Nat} -> (a : Type sc) -> (th : sc <= sc') -> List (Neutral sc' + El (a ^ th)) -> Normal sc'
- quoteList a th [] = nil
- quoteList a th (inl n ,- xs) = pair (atom "plus") (pair (ne n) (quoteList a th xs))
- quoteList a th (inr t ,- xs) = pair (atom "plus") (pair (pair (atom "one") (quoteEl a th t)) (quoteList a th xs))
+ quoteList : {sc sc' : Nat} -> (a : Type sc) -> List (Neutral sc' + El a sc') -> Normal sc'
+ quoteList a [] = nil
+ quoteList a (inl n ,- xs) = pair (atom "plus") (pair (ne n) (quoteList a xs))
+ quoteList a (inr t ,- xs) = pair (atom "plus") (pair (pair (atom "one") (quoteEl a t)) (quoteList a xs))
