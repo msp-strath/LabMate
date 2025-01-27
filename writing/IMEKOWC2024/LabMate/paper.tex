@@ -118,9 +118,9 @@ engineering toolchains and practices.
  At time of writing, the necessary core type system is in place: we are busily extending the variety of MATLAB expressions it can make sense of, and the constraints it can solve.
 %
 % LabMate is under constant development; the necessary core type system is in place: we are extending the variety of MATLAB expressions it can make sense of, and the constraints it can solve.
-We are close to covering the examples in this paper, but not quite there yet.
+%We are close to covering the examples in this paper, but not quite there yet.
 %
-We aim to eliminate the speculative future tense from our examples before camera-ready copy is required.
+%We aim to eliminate the speculative future tense from our examples before camera-ready copy is required.
 %
 This paper effectively documents how far we have come, and the roadmap to our next milestone.
 
@@ -620,9 +620,9 @@ Our virtual machine supports repeated refocusing to wherever in the program ther
 %
 Moreover, as MATLAB notation is somewhat overloaded (e.g., \texttt{*} can mean either scalar or matrix multiplication), so LabMate elaboration has a (limited) need for backtracking search, so that, too, is facilitated.
 
-Elaboration for matrix multiplication and addition currently generate the correct constraints, but to check our examples, we need to improve our constraint solver and also implement the $\bsl$ operator.
+%Elaboration for matrix multiplication and addition currently generate the correct constraints, but to check our examples, we need to improve our constraint solver and also implement the $\bsl$ operator.
 %
-As division is specified in terms of multiplication, its typing discipline requires a similar coincidence of header lists, but for the rows of both inputs: the technology we need is more of the same.
+%As division is specified in terms of multiplication, its typing discipline requires a similar coincidence of header lists, but for the rows of both inputs: the technology we need is more of the same.
 
 After the virtual machine has solved as many problems as it can, we analyse its final state to reconstruct the output source code, perhaps with inserted warnings and error messages, or additional responses to queries and generated code.
 
@@ -724,7 +724,7 @@ This project has pushed us in new directions and generated raised expectations o
 %
 There is so much to learn from applications of dependent types in the wild!
 
-\section{Acknowledgements}
+\section*{Acknowledgements}
 
 This work was undertaken jointly by the Mathematically Structured Programming Group of the University of Strathclyde and the National Physical Laboratory’s Data Science department as part of Data Science’s Tools for Trustworthiness National Measurement System (NMS) project 2023 – 2024.
 
