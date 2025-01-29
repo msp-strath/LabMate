@@ -40,7 +40,7 @@ pattern nil = atom ""
 mutual
 
  data Type (sc : Nat) : Set where
-  pi sg : (a : Type sc) -> (b : {sc' : Nat} -> {- (th : sc <= sc') -> -} El a sc' -> Type sc') -> Type sc
+  pi sg : (a : Type sc) -> (b : {sc' : Nat} -> {-  sc <= sc' -> -} El a sc' -> Type sc') -> Type sc
   list : Type sc -> Type sc
   one : Type sc
   ne : Neutral sc -> Type sc
@@ -59,10 +59,28 @@ mutual
 
  El : {src : Nat} -> Type src -> (tgt : Nat) -> Set
  El (pi a b) tgt = {tgt' : Nat}(th : tgt <= tgt')(x : El a tgt') -> El (b x) tgt'
- El (sg a b) tgt = Sg (El a tgt) (λ x -> El (b x) tgt)
+ El (sg a b) tgt = ElSg a b tgt
  El (list a) tgt = List (Neutral tgt + El a tgt)
  El one _ = One
  El (ne n) tgt = Neutral tgt
+
+ ElSg :
+   {sc : Nat}
+   (a : Type sc)
+   (b : {sc' : Nat} -> El a sc' -> Type sc')
+   (tgt : Nat) -> Set
+ ElSg a b tgt = Sg Nat λ yesterday -> Sg (El a yesterday) λ witness -> Sg (yesterday <= tgt) λ history -> El (b witness) tgt
+
+mutual
+
+  _^el_ : {src tgt tgt' : Nat} -> {ty : Type src}
+        -> El ty tgt -> tgt <= tgt' -> El ty tgt'
+  _^el_ {ty = pi ty b} f th = λ ph x -> f (th -< ph) x
+  _^el_ {ty = sg ty b} (_ , x , ph , y) th = _ , x , (ph -< th) , (y ^el th)
+  _^el_ {ty = list ty} x th = map (bimap (_^n th) (_^el th)) x
+  _^el_ {ty = one} x th = tt
+  _^el_ {ty = ne _} x th = x ^n th
+
 
 mutual
 
@@ -76,7 +94,7 @@ mutual
  unquoteEl : {sc sc' : Nat} -> (a : Type sc) -> Neutral sc' -> El a sc'
  unquoteEl (pi a b) (neutral nut spine) = λ ph x -> unquoteEl (b x) (neutral (nut -< ph) ((spine ^tz ph) -, quoteEl a x))
  unquoteEl {sc} {sc'} (sg a b) (neutral nut spine) = let a' = unquoteEl a (neutral nut (spine -, atom "fst")) in
-  (a' , unquoteEl (b a') (neutral nut (spine -, atom "snd")))
+   _ , a' , io , unquoteEl (b a') (neutral nut (spine -, atom "snd"))
  unquoteEl (list a) n = inl n ,- []
  unquoteEl one n = tt
  unquoteEl (ne N) n = n
@@ -84,7 +102,7 @@ mutual
  quoteEl : {sc sc' : Nat} -> (a : Type sc) -> El a sc' -> Normal sc'
  quoteEl (pi a b) f = let x = (unquoteEl a (neutral (suc no) [])) in
   bind (quoteEl (b x) (f (skip io) x))
- quoteEl (sg a b) (s , t) = pair (quoteEl a s) (quoteEl (b s) t)
+ quoteEl (sg a b) (_ , s , ph , t) = pair (quoteEl a s ^t ph) (quoteEl (b s) t)
  quoteEl (list a) xs = quoteList a xs
  quoteEl one _ = nil
  quoteEl (ne N) n = ne n

@@ -9,12 +9,19 @@ record Sg (A : Set)(B : A -> Set) : Set where
   fst : A
   snd : B fst
 
+infixr 4 _,_
+
+
 record One : Set where
  constructor tt
 
 data List (A : Set) : Set where
  [] : List A
  _,-_ : A -> List A -> List A
+
+map : {A B : Set} -> (A -> B) -> List A -> List B
+map f [] =  []
+map f (x ,- xs) = f x ,- map f xs
 
 data _<=_ : Nat -> Nat -> Set where
  skip : ∀ {n m} -> n <= m ->     n <= suc m
@@ -50,6 +57,10 @@ _^C_ : {n m : Nat}{T : Nat -> Set} -> CdB T n -> n <= m -> CdB T m
 data _+_ (A B : Set) : Set where
  inl : A -> A + B
  inr : B -> A + B
+
+bimap : {A B A' B' : Set} -> (A -> A') -> (B -> B') -> A + B -> A' + B'
+bimap f g (inl x) = inl (f x)
+bimap f g (inr x) = inr (g x)
 
 data Bwd (A : Set) : Set where
  [] : Bwd A
