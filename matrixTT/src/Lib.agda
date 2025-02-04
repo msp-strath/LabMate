@@ -1,7 +1,15 @@
+{-# OPTIONS --rewriting #-}
 module Lib where
 
 open import Agda.Builtin.Nat public renaming (_+_ to _+N_)
 open import Agda.Builtin.String public
+open import Agda.Builtin.Equality public
+open import Agda.Builtin.Equality.Rewrite public
+
+
+cong : {A B : Set}
+     -> (f : A -> B) -> {a a' : A} -> a ≡ a' -> f a ≡ f a'
+cong f refl = refl
 
 record Sg (A : Set)(B : A -> Set) : Set where
  constructor _,_
@@ -41,6 +49,23 @@ ph -< skip th = skip (ph -< th)
 skip ph -< suc th = skip (ph -< th)
 suc ph -< suc th = suc (ph -< th)
 ph -< zero = ph
+
+assoc-< : {l n m k : Nat}
+        -> (ph : l <= n)(th : n <= m)(ps : m <= k)
+        -> ph -< (th -< ps) ≡ (ph -< th) -< ps
+assoc-< ph th (skip ps) = cong skip (assoc-< ph th ps)
+assoc-< ph (skip th) (suc ps) = cong skip (assoc-< ph th ps)
+assoc-< (skip ph) (suc th) (suc ps) = cong skip (assoc-< ph th ps)
+assoc-< (suc ph) (suc th) (suc ps) = cong suc (assoc-< ph th ps)
+assoc-< ph th zero = refl
+
+unitr-< : {l n : Nat} -> (ph : l <= n) -> (ph -< io) ≡ ph
+unitr-< (skip ph) = cong skip (unitr-< ph)
+unitr-< (suc ph) = cong suc (unitr-< ph)
+unitr-< zero = refl
+
+{-# REWRITE assoc-< #-}
+{-# REWRITE unitr-< #-}
 
 record CdB (T : Nat -> Set) (n : Nat) : Set where
   constructor _^_

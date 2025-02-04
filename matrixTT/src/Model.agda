@@ -1,3 +1,4 @@
+{-# OPTIONS --rewriting #-}
 module Model where
 
 open import Lib
@@ -40,74 +41,81 @@ pattern nil = atom ""
 mutual
 
  data Type (sc : Nat) : Set where
-  pi sg : (a : Type sc) -> (b : {sc' : Nat} -> {-  sc <= sc' -> -} El a sc' -> Type sc') -> Type sc
+  pi sg : (a : Type sc) -> (b : {sc' : Nat} -> (th : sc <= sc') -> El (a ^ th) -> Type sc') -> Type sc
   list : Type sc -> Type sc
   one : Type sc
   ne : Neutral sc -> Type sc
 
-{-
+
  El : {sc' : Nat} -> CdB Type sc' -> Set
- El {sc'} (t ^ th) = El' th t
+ El {sc'} (t ^ th) = El' t th
 
- El' : {sc sc' : Nat} -> sc <= sc' -> Type sc -> Set
- El' {sc} {sc'} th (pi a b) = {sc'' : Nat}(ph : sc' <= sc'')(x : El' (th -< ph) a) -> El' io (b (th -< ph) x )
- El' th (sg a b) = Sg (El' th a) (λ x -> El' io (b th x))
- El' {sc} {sc'} th (list a) = List (Neutral sc' + El' th a)
- El' th one = One
- El' {sc} {sc'} th (ne n) = Neutral sc'
--}
+ El' : {sc sc' : Nat} -> Type sc -> sc <= sc' -> Set
+ El' {sc} {sc'} (pi a b) th = {sc'' : Nat}(ph : sc' <= sc'')(x : El' a (th -< ph)) -> El' (b (th -< ph) x) io
+ El' (sg a b) th = ElSg a b th --Sg (El' a th) (λ x -> El' (b th x) io)
+ El' {sc} {sc'} (list a) th = List (Neutral sc' + El' a th)
+ El' one th = One
+ El' {sc} {sc'} (ne n) th = Neutral sc'
 
+{-
  El : {src : Nat} -> Type src -> (tgt : Nat) -> Set
  El (pi a b) tgt = {tgt' : Nat}(th : tgt <= tgt')(x : El a tgt') -> El (b x) tgt'
  El (sg a b) tgt = ElSg a b tgt
  El (list a) tgt = List (Neutral tgt + El a tgt)
  El one _ = One
  El (ne n) tgt = Neutral tgt
+-}
 
  ElSg :
-   {sc : Nat}
+   {sc tgt : Nat}
    (a : Type sc)
-   (b : {sc' : Nat} -> El a sc' -> Type sc')
-   (tgt : Nat) -> Set
- ElSg a b tgt = Sg Nat λ yesterday -> Sg (El a yesterday) λ witness -> Sg (yesterday <= tgt) λ history -> El (b witness) tgt
+   (b : {sc' : Nat} -> (th : sc <= sc') -> El' a th -> Type sc')
+   -> sc <= tgt -> Set
+ ElSg {sc} {tgt} a b th =
+   Sg Nat λ between -> Sg (sc <= between) λ ph -> Sg (El' a ph) λ witness ->
+     Sg (between <= tgt) λ ps -> Sg (El' (b ph witness) ps) λ _ -> th ≡ ph -< ps
 
 mutual
 
-  _^el_ : {src tgt tgt' : Nat} -> {ty : Type src}
-        -> El ty tgt -> tgt <= tgt' -> El ty tgt'
-  _^el_ {ty = pi ty b} f th = λ ph x -> f (th -< ph) x
-  _^el_ {ty = sg ty b} (_ , x , ph , y) th = _ , x , (ph -< th) , (y ^el th)
-  _^el_ {ty = list ty} x th = map (bimap (_^n th) (_^el th)) x
-  _^el_ {ty = one} x th = tt
-  _^el_ {ty = ne _} x th = x ^n th
-
+  thinEl' : {then now later : Nat}
+        -> (ty : Type then)
+        -> (th : then <= now)
+        -> El' ty th
+        -> (ph : now <= later)
+        -> El' ty (th -< ph)
+  thinEl' (pi a b) th f ph = λ ps x → f (ph -< ps) x
+  thinEl' (sg a b) th (between , ph , witness , ps , y , refl) ch =
+    between , ph , witness , (ps -< ch) , thinEl' (b ph witness) ps y ch , refl
+  thinEl' (list ty) th x ph = map (bimap (_^n ph) (λ y → thinEl' ty th y ph)) x
+  thinEl' one th x ph = tt
+  thinEl' (ne _) th x ph = x ^n ph
 
 mutual
 
  quoteType : {sc : Nat} -> Type sc -> Normal sc
- quoteType (pi a b) = pair (atom "Pi") (pair (quoteType a) (pair (bind (quoteType (b (unquoteEl a (neutral (suc no) []))))) nil))
- quoteType (sg a b) = pair (atom "Sg") (pair (quoteType a) (pair (bind (quoteType (b (unquoteEl a (neutral (suc no) []))))) nil))
+ quoteType (pi a b) = pair (atom "Pi") (pair (quoteType a) (pair (bind (quoteType (b (skip io) (unquoteEl a (skip io) (neutral (suc no) []))))) nil))
+ quoteType (sg a b) = pair (atom "Sg") (pair (quoteType a) (pair (bind (quoteType (b (skip io) (unquoteEl a (skip io) (neutral (suc no) []))))) nil))
  quoteType (list a) = pair (atom "List") (pair (quoteType a) nil)
  quoteType one = pair (atom "One") nil
  quoteType (ne n) = ne n
 
- unquoteEl : {sc sc' : Nat} -> (a : Type sc) -> Neutral sc' -> El a sc'
- unquoteEl (pi a b) (neutral nut spine) = λ ph x -> unquoteEl (b x) (neutral (nut -< ph) ((spine ^tz ph) -, quoteEl a x))
- unquoteEl {sc} {sc'} (sg a b) (neutral nut spine) = let a' = unquoteEl a (neutral nut (spine -, atom "fst")) in
-   _ , a' , io , unquoteEl (b a') (neutral nut (spine -, atom "snd"))
- unquoteEl (list a) n = inl n ,- []
- unquoteEl one n = tt
- unquoteEl (ne N) n = n
+ unquoteEl : {sc sc' : Nat} -> (a : Type sc) -> (th : sc <= sc') -> Neutral sc' -> El' a th
+ unquoteEl (pi a b) th (neutral nut spine) = λ ph x -> unquoteEl (b (th -< ph) x) io (neutral (nut -< ph) ((spine ^tz ph) -, quoteEl a (th -< ph) x))
+ unquoteEl {sc} {sc'} (sg a b) th (neutral nut spine) = let a' = unquoteEl a th (neutral nut (spine -, atom "fst")) in
+   _ , th , a' , io , unquoteEl (b th a') io (neutral nut (spine -, atom "snd")) , refl
+ unquoteEl (list a) _ n = inl n ,- []
+ unquoteEl one _ n = tt
+ unquoteEl (ne N) _ n = n
 
- quoteEl : {sc sc' : Nat} -> (a : Type sc) -> El a sc' -> Normal sc'
- quoteEl (pi a b) f = let x = (unquoteEl a (neutral (suc no) [])) in
-  bind (quoteEl (b x) (f (skip io) x))
- quoteEl (sg a b) (_ , s , ph , t) = pair (quoteEl a s ^t ph) (quoteEl (b s) t)
- quoteEl (list a) xs = quoteList a xs
- quoteEl one _ = nil
- quoteEl (ne N) n = ne n
+ quoteEl : {sc sc' : Nat} -> (a : Type sc) -> (th : sc <= sc') ->  El' a th -> Normal sc'
+ quoteEl (pi a b) th f = let x = (unquoteEl a (skip th) (neutral (suc no) [])) in
+  bind (quoteEl (b (skip th) x) (suc io) (f (skip io) x ))
+ quoteEl (sg a b) th (between , ph , witness , ps , y , q)  = pair (quoteEl a ph witness ^t ps) (quoteEl (b ph witness) ps y)
+ quoteEl (list a) th xs = quoteList a th xs
+ quoteEl one _ _ = nil
+ quoteEl (ne N) _ n = ne n
 
- quoteList : {sc sc' : Nat} -> (a : Type sc) -> List (Neutral sc' + El a sc') -> Normal sc'
- quoteList a [] = nil
- quoteList a (inl n ,- xs) = pair (atom "plus") (pair (ne n) (quoteList a xs))
- quoteList a (inr t ,- xs) = pair (atom "plus") (pair (pair (atom "one") (quoteEl a t)) (quoteList a xs))
+ quoteList : {sc sc' : Nat} -> (a : Type sc) -> (th : sc <= sc') -> List (Neutral sc' + El' a th) -> Normal sc'
+ quoteList a th [] = nil
+ quoteList a th (inl n ,- xs) = pair (atom "plus") (pair (ne n) (quoteList a th xs))
+ quoteList a th (inr t ,- xs) = pair (atom "plus") (pair (pair (atom "one") (quoteEl a th t)) (quoteList a th xs))
