@@ -75,6 +75,9 @@ mutual
    Sg Nat λ between -> Sg (sc <= between) λ ph -> Sg (El' a ph) λ witness ->
      Sg (between <= tgt) λ ps -> Sg (El' (b ph witness) ps) λ _ -> th ≡ ph -< ps
 
+sg0 : (a : Type 0) -> (b : {sc' : Nat} -> El (a ^ (no {sc'})) -> Type sc') -> Type 0
+sg0 a b = sg a λ th x → b (subst (El' a) (no-unique th) x)
+
 mutual
 
   thinEl' : {then now later : Nat}
@@ -119,3 +122,30 @@ mutual
  quoteList a th [] = nil
  quoteList a th (inl n ,- xs) = pair (atom "plus") (pair (ne n) (quoteList a th xs))
  quoteList a th (inr t ,- xs) = pair (atom "plus") (pair (pair (atom "one") (quoteEl a th t)) (quoteList a th xs))
+
+
+mutual
+
+  data Context : (k : Nat) → Set where
+    ε : Context 0
+    _,_ : {k : Nat} → (Γ : Context k) → (∀ {m} → El' ∣ Γ ∣ (no {m}) → Type m) → Context (suc k)
+
+  ∣_∣ : ∀ {k} → Context k → Type 0
+  ∣ ε ∣ = one
+  ∣ Γ , B ∣ = sg0 ∣ Γ ∣ (λ γ → B γ)
+
+Env : ∀ {k'} → (k : Nat) → Context k' → Set
+Env k Γ = El' ∣ Γ ∣ (no {k})
+
+{-
+  data Context (n : Nat) : (k : Nat) → Set where
+    ε : Context n 0
+    _,_ : {k : Nat} → (Γ : Context n k) → (∀ {m} → (th : n <= m) → El' ∣ Γ ∣ th → Type m) → Context n (suc k)
+
+  ∣_∣ : ∀ {n k} → Context n k → Type n
+  ∣ ε ∣ = one
+  ∣ Γ , B ∣ = sg ∣ Γ ∣ (λ th γ → B th γ)
+
+Env : ∀ {k'} → (k : Nat) → Context 0 k' → Set
+Env k Γ = El' ∣ Γ ∣ (no {k})
+-}

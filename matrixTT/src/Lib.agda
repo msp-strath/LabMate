@@ -6,10 +6,16 @@ open import Agda.Builtin.String public
 open import Agda.Builtin.Equality public
 open import Agda.Builtin.Equality.Rewrite public
 
+sym : {A : Set} → {x y : A} → x ≡ y → y ≡ x
+sym refl = refl
 
 cong : {A B : Set}
      -> (f : A -> B) -> {a a' : A} -> a ≡ a' -> f a ≡ f a'
 cong f refl = refl
+
+subst : {A : Set}(P : A → Set) {x y : A}
+      -> x ≡ y -> P x -> P y
+subst P refl px = px
 
 record Sg (A : Set)(B : A -> Set) : Set where
  constructor _,_
@@ -66,6 +72,14 @@ unitr-< zero = refl
 
 {-# REWRITE assoc-< #-}
 {-# REWRITE unitr-< #-}
+
+no-unique : { k : Nat} → (th : 0 <= k) → th ≡ no
+no-unique (skip th) = cong skip (no-unique th)
+no-unique zero = refl
+
+no-unique-no : { k : Nat} → no-unique (no {k}) ≡ refl
+no-unique-no {zero} = refl
+no-unique-no {suc k} rewrite no-unique-no {k} = refl
 
 record CdB (T : Nat -> Set) (n : Nat) : Set where
   constructor _^_

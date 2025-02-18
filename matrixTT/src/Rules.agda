@@ -1,3 +1,4 @@
+{-# OPTIONS --rewriting #-}
 module Rules where
 
 open import Lib
@@ -12,39 +13,21 @@ data Term (sc : Nat) : Set where
 
 pattern nil = atom ""
 
-Context : Nat -> Set
-Context sc = Stack (CdB Type sc) sc
-
-ext : {sc : Nat} -> Context sc -> CdB Type sc -> Context (suc sc)
-ext xz t = stack (λ (t ^ th) -> t ^ skip th) (xz -, t)
-
-Env : {sc sc' : Nat} -> Stack (CdB Type sc') sc -> (tgt : Nat) -> Set
-Env [] _ = One
-Env (xz -, (x ^ _)) tgt = Sg (Env xz tgt) (λ _ -> El x tgt)
-
-_^env_ : {sc sc' tgt tgt' : Nat} -> {ga : Stack (CdB Type sc') sc}
-       -> Env ga tgt -> tgt <= tgt' -> Env ga tgt'
-_^env_ {ga = []} rho th = tt
-_^env_ {ga = ga -, x} (rho , s) th = (rho ^env th) , (s ^el th)
-
-id-env : {sc' tgt : Nat} -> (ga : Stack (CdB Type sc') tgt) -> Env ga tgt
-id-env [] = tt
-id-env (ga -, (s ^ th) ) = (id-env ga ^env skip io) , (unquoteEl s (neutral (suc no) []))
-
 mutual
- -- magic version
+-- magic version
 
  data _|-TYPE_ {sc : Nat} (Ga : Context sc) : Term sc -> Set where
    one : Ga |-TYPE (pair (atom "One") nil)
    list : {a : Term sc} -> Ga |-TYPE a -> Ga |-TYPE pair (atom "List") (pair a nil)
    pi : {a : Term sc} {b : Term (suc sc)}
       -> (aOk : Ga |-TYPE a)
-      -> ext Ga ( [ aOk ]TYPE (id-env Ga) ^ io) |-TYPE b
+      -> (Ga , λ γ →  [ aOk ]TYPE γ ) |-TYPE b
       -> Ga |-TYPE (pair (atom "Pi") (pair a (pair (bind b) nil)))
 
 
  [_]TYPE : {sc sc' : Nat} {Ga : Context sc} {ty : Term sc}
-         ->  Ga |-TYPE ty -> Env Ga sc' -> Type sc'
+         ->  Ga |-TYPE ty -> Env sc' Ga -> Type sc'
  [ one ]TYPE _ = one
  [ list a ]TYPE rho = list ([ a ]TYPE rho)
- [ pi a b ]TYPE rho = pi ([ a ]TYPE rho) (λ x -> [ b ]TYPE ({!!} , {!!}))
+ [_]TYPE {sc' = sc'} {Ga} (pi a b) rho  =
+  pi ([ a ]TYPE rho) λ th x -> [ b ]TYPE (_ , no , rho , th , subst (λ z → El' ([ a ]TYPE z) th) (cong (λ z → subst (El' ∣ Ga ∣) z rho) (sym no-unique-no)) x , sym (no-unique (no -< th)))
