@@ -33,6 +33,12 @@ data List (A : Set) : Set where
  [] : List A
  _,-_ : A -> List A -> List A
 
+_++_ : {A : Set} -> List A -> List A -> List A
+[] ++ ys = ys
+(x ,- xs) ++ ys = x ,- xs ++ ys
+
+infixr 5 _++_ _,-_
+
 map : {A B : Set} -> (A -> B) -> List A -> List B
 map f [] =  []
 map f (x ,- xs) = f x ,- map f xs
@@ -73,13 +79,15 @@ unitr-< zero = refl
 {-# REWRITE assoc-< #-}
 {-# REWRITE unitr-< #-}
 
-no-unique : { k : Nat} → (th : 0 <= k) → th ≡ no
+no-unique : {k : Nat} → (th : 0 <= k) → th ≡ no
 no-unique (skip th) = cong skip (no-unique th)
 no-unique zero = refl
 
 no-unique-no : { k : Nat} → no-unique (no {k}) ≡ refl
 no-unique-no {zero} = refl
 no-unique-no {suc k} rewrite no-unique-no {k} = refl
+
+{-# REWRITE no-unique-no #-}
 
 record CdB (T : Nat -> Set) (n : Nat) : Set where
   constructor _^_

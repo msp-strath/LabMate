@@ -50,21 +50,12 @@ mutual
  El : {sc' : Nat} -> CdB Type sc' -> Set
  El {sc'} (t ^ th) = El' t th
 
- El' : {sc sc' : Nat} -> Type sc -> sc <= sc' -> Set
+ El' : {sc sc' : Nat} -> Type sc -> sc <= sc' -> Set -- do we really need the thinning if we have _^ty_
  El' {sc} {sc'} (pi a b) th = {sc'' : Nat}(ph : sc' <= sc'')(x : El' a (th -< ph)) -> El' (b (th -< ph) x) io
  El' (sg a b) th = ElSg a b th --Sg (El' a th) (λ x -> El' (b th x) io)
  El' {sc} {sc'} (list a) th = List (Neutral sc' + El' a th)
  El' one th = One
  El' {sc} {sc'} (ne n) th = Neutral sc'
-
-{-
- El : {src : Nat} -> Type src -> (tgt : Nat) -> Set
- El (pi a b) tgt = {tgt' : Nat}(th : tgt <= tgt')(x : El a tgt') -> El (b x) tgt'
- El (sg a b) tgt = ElSg a b tgt
- El (list a) tgt = List (Neutral tgt + El a tgt)
- El one _ = One
- El (ne n) tgt = Neutral tgt
--}
 
  ElSg :
    {sc tgt : Nat}
@@ -77,6 +68,34 @@ mutual
 
 sg0 : (a : Type 0) -> (b : {sc' : Nat} -> El (a ^ (no {sc'})) -> Type sc') -> Type 0
 sg0 a b = sg a λ th x → b (subst (El' a) (no-unique th) x)
+
+mutual
+  _^ty_ :{sc sc' : Nat} -> Type sc -> sc <= sc' -> Type sc'
+  pi A B ^ty th = pi (A ^ty th) λ ph a → B (th -< ph) (shiftTh A th ph a)
+  sg A B ^ty th = sg (A ^ty th) λ ph a → B (th -< ph) (shiftTh A th ph a)
+  list A ^ty th = list (A ^ty th)
+  one ^ty th = one
+  ne x ^ty th = ne (x ^n th)
+
+  shiftTh
+    : {sc sc' sc'' : Nat} -> (A : Type sc)
+    -> (th : sc <= sc') -> (ph : sc' <= sc'')
+    -> El' (A ^ty th) ph -> El' A (th -< ph)
+  shiftTh (pi A B) th ph f ps a = {!f ps !}
+  shiftTh (sg A B) th ph x = {!!}
+  shiftTh (list A) th ph x = {!!}
+  shiftTh one th ph x = {!!}
+  shiftTh (ne x₁) th ph x = {!!}
+
+  unshiftTh
+    : {sc sc' sc'' : Nat} -> (A : Type sc)
+    -> (th : sc <= sc') -> (ph : sc' <= sc'')
+    -> El' A (th -< ph) -> El' (A ^ty th) ph
+  unshiftTh (pi A B) th ph f ps a = {!!}
+  unshiftTh (sg A b) th ph x = {!!}
+  unshiftTh (list A) th ph x = {!!}
+  unshiftTh one th ph x = {!!}
+  unshiftTh (ne x₁) th ph x = {!!}
 
 mutual
 
@@ -132,10 +151,15 @@ mutual
 
   ∣_∣ : ∀ {k} → Context k → Type 0
   ∣ ε ∣ = one
-  ∣ Γ , B ∣ = sg0 ∣ Γ ∣ (λ γ → B γ)
+  ∣ Γ , B ∣ = sg0 ∣ Γ ∣ B
 
 Env : ∀ {k'} → (k : Nat) → Context k' → Set
 Env k Γ = El' ∣ Γ ∣ (no {k})
+
+closeType : {sc m : Nat} -> Type sc -> (Ga : Context sc) -> El' ∣ Ga ∣ (no {m}) -> Type m
+closeType A ε x = {!!}
+closeType A (Ga , x₁) x = {!!}
+-- lookup : {sc : Nat} -> 1 <= sc -> Context sc -> (∀ {m} → El' ∣ Γ ∣ (no {m}) → Type m)
 
 {-
   data Context (n : Nat) : (k : Nat) → Set where
