@@ -13,6 +13,13 @@ cong : {A B : Set}
      -> (f : A -> B) -> {a a' : A} -> a ≡ a' -> f a ≡ f a'
 cong f refl = refl
 
+cong2 : {A B C : Set}
+     -> (f : A -> B → C)
+     -> {a a' : A} -> a ≡ a'
+     -> {b b' : B} → b ≡ b'
+     -> f a b ≡ f a' b'
+cong2 f refl refl = refl
+
 
 subst : {A : Set}(P : A → Set) {x y : A}
       -> x ≡ y -> P x -> P y

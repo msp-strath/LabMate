@@ -36,6 +36,44 @@ mutual
  [] ^tz th = []
  (tz -, t) ^tz th = (tz ^tz th) -, (t ^t th)
 
+mutual
+
+  ^t-id : {sc : Nat} -> (t : Normal sc) -> t ^t io ≡ t
+  ^t-id (ne x) = cong ne (^n-id x)
+  ^t-id (atom a) = refl
+  ^t-id (pair s t) = cong2 pair (^t-id s) (^t-id t)
+  ^t-id (bind t) = cong bind (^t-id t)
+
+  ^n-id : {sc : Nat} -> (n : Neutral sc) -> n ^n io ≡ n
+  ^n-id (neutral nut spine) = cong (neutral nut) (^tz-id spine)
+
+  ^tz-id : {sc : Nat} -> (tz : Bwd (Normal sc)) -> tz ^tz io ≡ tz
+  ^tz-id [] = refl
+  ^tz-id (tz -, t) = cong2 _-,_ (^tz-id tz) (^t-id t)
+
+mutual
+
+  ^t-comp : {sc sc' sc'' : Nat}
+          -> (th : sc <= sc')(ph : sc' <= sc'')
+          -> (t : Normal sc) -> (t ^t th) ^t ph ≡ t ^t (th -< ph)
+  ^t-comp th ph (ne x) = cong ne (^n-comp th ph x)
+  ^t-comp th ph (atom a) = refl
+  ^t-comp th ph (pair s t) = cong2 pair (^t-comp th ph s) (^t-comp th ph t)
+  ^t-comp th ph (bind t) = cong bind (^t-comp (suc th) (suc ph) t)
+
+  ^n-comp : {sc sc' sc'' : Nat}
+          -> (th : sc <= sc')(ph : sc' <= sc'')
+          -> (n : Neutral sc) -> (n ^n th) ^n ph ≡ n ^n (th -< ph)
+  ^n-comp th ph (neutral nut spine)
+    = cong (neutral ((nut -< th) -< ph)) (^tz-comp th ph spine)
+
+  ^tz-comp : {sc sc' sc'' : Nat}
+          -> (th : sc <= sc')(ph : sc' <= sc'')
+          -> (tz : Bwd (Normal sc)) -> (tz ^tz th) ^tz ph ≡ tz ^tz (th -< ph)
+  ^tz-comp th ph [] = refl
+  ^tz-comp th ph (tz -, t) = cong2 _-,_ (^tz-comp th ph tz) (^t-comp th ph t)
+
+
 pattern nil = atom ""
 
 data Type (sc : Nat) : Set
@@ -77,7 +115,7 @@ ne x ^ty th = ne (x ^n th)
 
 ^ty-comp (list A) th ph = cong list (^ty-comp A th ph)
 ^ty-comp one th ph = refl
-^ty-comp (ne x) th ph = cong ne {!!}
+^ty-comp (ne x) th ph = cong ne (^n-comp th ph x)
 
 
  {- ElSg
