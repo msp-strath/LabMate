@@ -13,9 +13,88 @@ cong : {A B : Set}
      -> (f : A -> B) -> {a a' : A} -> a ≡ a' -> f a ≡ f a'
 cong f refl = refl
 
+
 subst : {A : Set}(P : A → Set) {x y : A}
       -> x ≡ y -> P x -> P y
 subst P refl px = px
+
+subst2 : {A : Set}{B : A -> Set}{C : (a : A) -> B a -> Set}
+      -> {a a' : A} -> (aq : a ≡ a')
+      -> {b : B a} -> {b' : B a'} -> (bq : subst B aq b ≡ b')
+      -> C a b -> C a' b'
+subst2 refl refl x = x
+
+congd : {A : Set}{B : A -> Set}{C : (a : A) -> B a -> Set}
+      -> (f : (a : A) -> (b : B a) -> C a b)
+      -> {a a' : A} -> (aq : a ≡ a')
+      -> {b : B a} -> {b' : B a'} -> (bq : subst B aq b ≡ b')
+      -> subst2 aq bq (f a b) ≡ f a' b'
+congd f refl refl = refl
+
+congd' : {A : Set}{B : A -> Set}{C : Set}
+      -> (f : (a : A) -> (b : B a) -> C)
+      -> {a a' : A} -> (aq : a ≡ a')
+      -> {b : B a} -> {b' : B a'} -> (bq : subst B aq b ≡ b')
+      -> f a b ≡ f a' b'
+congd' f refl refl = refl
+
+
+data JMEq {A : Set} (a : A) : {B : Set} -> B -> Set where
+  refl : JMEq a a
+
+
+≡-jmeq : {A : Set}{a b : A} -> a ≡ b -> JMEq a b
+≡-jmeq refl = refl
+
+jmeq-≡ : {A : Set}{a b : A} -> JMEq a b -> a ≡ b
+jmeq-≡ refl = refl
+
+jmeq-cong2 : {A : Set}{B : A -> Set}{C : (a : A) -> B a -> Set}
+           -> (f : (a : A) -> (b : B a) -> C a b)
+           -> {a a' : A} -> JMEq a a'
+           -> {b : B a}{b' : B a'} -> JMEq b b'
+           -> JMEq (f a b) (f a' b')
+jmeq-cong2 f refl refl  = refl
+
+jmeq-subst : {A : Set}{B : A -> Set}
+           -> {a a' : A} -> (p : a ≡ a')
+           -> {b : B a}
+           -> JMEq (subst B p b) b
+jmeq-subst refl = refl
+
+jmeq-sym : {A B : Set}{a : A}{b : B} -> JMEq a b -> JMEq b a
+jmeq-sym refl = refl
+
+jmeq-trans : {A B C : Set}{a : A}{b : B}{c : C} -> JMEq a b -> JMEq b c -> JMEq a c
+jmeq-trans refl refl = refl
+
+postulate
+  funext : {A : Set}{B : A -> Set}
+           {f g : (a : A) -> B a}
+           -> ((a : A) -> f a ≡ g a)
+           -> f ≡ g
+  ifunext : {A : Set}{B : A -> Set}
+            {f g : {a : A} -> B a}
+            -> ((a : A) -> f {a} ≡ g {a})
+            -> (λ {a} -> f {a}) ≡ g
+
+  jmfunext : {A : Set}{B B' : A -> Set}
+            {f : (a : A) -> B a}
+            {g : (a : A) -> B' a}
+            -> ((a : A) -> JMEq (f a) (g a))
+            -> JMEq f g
+  jmfunext' : {A A' : Set}{B : Set}
+            {f : (a : A) -> B}
+            {g : (a' : A') -> B}
+            -> ((a : A) -> (a' : A') -> JMEq a a' -> JMEq (f a) (g a'))
+            -> JMEq f g
+  jmifunext : {A : Set}{B B' : A -> Set}
+            {f : {a : A} -> B a}
+            {g : {a : A} -> B' a}
+            -> ((a : A) -> JMEq (f {a}) (g {a}))
+            -> JMEq (λ {a} -> f {a}) (λ {a} -> g {a})
+
+
 
 record Sg (A : Set)(B : A -> Set) : Set where
  constructor _,_
@@ -83,7 +162,7 @@ no-unique : {k : Nat} → (th : 0 <= k) → th ≡ no
 no-unique (skip th) = cong skip (no-unique th)
 no-unique zero = refl
 
-no-unique-no : { k : Nat} → no-unique (no {k}) ≡ refl
+no-unique-no : {k : Nat} → no-unique (no {k}) ≡ refl
 no-unique-no {zero} = refl
 no-unique-no {suc k} rewrite no-unique-no {k} = refl
 

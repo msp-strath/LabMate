@@ -38,15 +38,59 @@ mutual
 
 pattern nil = atom ""
 
-mutual
+data Type (sc : Nat) : Set
+El : {sc : Nat} -> Type sc -> Set
+_^ty_ : {sc sc' : Nat} -> Type sc -> sc <= sc' -> Type sc'
+^ty-comp : {sc sc' sc'' : Nat}
+         -> (A : Type sc)
+         -> (th : sc  <= sc')
+         -> (ph : sc' <= sc'')
+         -> (A ^ty th) ^ty ph ≡ A ^ty (th -< ph)
 
- data Type (sc : Nat) : Set where
-  pi sg : (a : Type sc) -> (b : {sc' : Nat} -> (th : sc <= sc') -> El (a ^ th) -> Type sc') -> Type sc
+{-# NO_POSITIVITY_CHECK #-}
+data Type sc where
+  pi sg : (A : Type sc) -> (B : {sc' : Nat} -> (th : sc <= sc') -> El (A ^ty th) -> Type sc') -> Type sc
   list : Type sc -> Type sc
   one : Type sc
   ne : Neutral sc -> Type sc
 
+{-# TERMINATING #-}
+El {sc} (pi A B) = {sc' : Nat} -> (th : sc <= sc') -> (a : El (A ^ty th)) -> El (B th a)
+El {sc} (sg A B) = Sg (El (A ^ty io)) λ a -> El (B io a)
+El {sc} (list A)  = List (Neutral sc + El A)
+El one = One
+El {sc} (ne x) = Neutral sc
 
+pi A B ^ty th = pi (A ^ty th) (λ ph a -> B (th -< ph) (subst El (^ty-comp A th ph) a))
+sg A B ^ty th = sg (A ^ty th) (λ ph a -> B (th -< ph) (subst El (^ty-comp A th ph) a))
+list A ^ty th = list (A ^ty th)
+one ^ty th = one
+ne x ^ty th = ne (x ^n th)
+
+^ty-comp (pi A B) th ph = jmeq-≡ (jmeq-cong2 pi (≡-jmeq (^ty-comp A th ph))
+         (jmifunext λ sc -> jmfunext λ ps ->
+         jmfunext' (λ a a' p -> jmeq-cong2 B refl (jmeq-trans (jmeq-subst (^ty-comp A th (ph -< ps)) ) (jmeq-trans (jmeq-subst (^ty-comp (A ^ty th) ph ps)) (jmeq-trans p (jmeq-sym (jmeq-subst (^ty-comp A (th -< ph) ps)))))))))
+
+^ty-comp (sg A B) th ph = jmeq-≡ (jmeq-cong2 sg (≡-jmeq (^ty-comp A th ph))
+         (jmifunext λ sc -> jmfunext λ ps ->
+         jmfunext' (λ a a' p -> jmeq-cong2 B refl (jmeq-trans (jmeq-subst (^ty-comp A th (ph -< ps)) ) (jmeq-trans (jmeq-subst (^ty-comp (A ^ty th) ph ps)) (jmeq-trans p (jmeq-sym (jmeq-subst (^ty-comp A (th -< ph) ps)))))))))
+
+^ty-comp (list A) th ph = cong list (^ty-comp A th ph)
+^ty-comp one th ph = refl
+^ty-comp (ne x) th ph = cong ne {!!}
+
+
+ {- ElSg
+   : {sc tgt : Nat}
+   -> (A : Type sc)
+   -> (B : {sc' : Nat} (th : sc <= sc') → El (A ^ty th) → Type sc')
+   -> (th : sc <= tgt)3
+   -> Set
+ ElSg {sc} A B = {!Sg Nat λ between -> Sg (sc <= between) λ !} -}
+
+
+
+ {-
  El : {sc' : Nat} -> CdB Type sc' -> Set
  El {sc'} (t ^ th) = El' t th
 
@@ -56,6 +100,8 @@ mutual
  El' {sc} {sc'} (list a) th = List (Neutral sc' + El' a th)
  El' one th = One
  El' {sc} {sc'} (ne n) th = Neutral sc'
+
+
 
  ElSg :
    {sc tgt : Nat}
@@ -70,33 +116,10 @@ sg0 : (a : Type 0) -> (b : {sc' : Nat} -> El (a ^ (no {sc'})) -> Type sc') -> Ty
 sg0 a b = sg a λ th x → b (subst (El' a) (no-unique th) x)
 
 mutual
-  _^ty_ :{sc sc' : Nat} -> Type sc -> sc <= sc' -> Type sc'
-  pi A B ^ty th = pi (A ^ty th) λ ph a → B (th -< ph) (shiftTh A th ph a)
-  sg A B ^ty th = sg (A ^ty th) λ ph a → B (th -< ph) (shiftTh A th ph a)
-  list A ^ty th = list (A ^ty th)
-  one ^ty th = one
-  ne x ^ty th = ne (x ^n th)
+-}
 
-  shiftTh
-    : {sc sc' sc'' : Nat} -> (A : Type sc)
-    -> (th : sc <= sc') -> (ph : sc' <= sc'')
-    -> El' (A ^ty th) ph -> El' A (th -< ph)
-  shiftTh (pi A B) th ph f ps a = {!f ps !}
-  shiftTh (sg A B) th ph x = {!!}
-  shiftTh (list A) th ph x = {!!}
-  shiftTh one th ph x = {!!}
-  shiftTh (ne x₁) th ph x = {!!}
 
-  unshiftTh
-    : {sc sc' sc'' : Nat} -> (A : Type sc)
-    -> (th : sc <= sc') -> (ph : sc' <= sc'')
-    -> El' A (th -< ph) -> El' (A ^ty th) ph
-  unshiftTh (pi A B) th ph f ps a = {!!}
-  unshiftTh (sg A b) th ph x = {!!}
-  unshiftTh (list A) th ph x = {!!}
-  unshiftTh one th ph x = {!!}
-  unshiftTh (ne x₁) th ph x = {!!}
-
+{-
 mutual
 
   thinEl' : {then now later : Nat}
@@ -172,4 +195,5 @@ closeType A (Ga , x₁) x = {!!}
 
 Env : ∀ {k'} → (k : Nat) → Context 0 k' → Set
 Env k Γ = El' ∣ Γ ∣ (no {k})
+-}
 -}
