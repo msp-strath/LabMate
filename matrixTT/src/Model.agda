@@ -117,6 +117,20 @@ ne x ^ty th = ne (x ^n th)
 ^ty-comp one th ph = refl
 ^ty-comp (ne x) th ph = cong ne (^n-comp th ph x)
 
+{-# REWRITE ^ty-comp #-}
+
+^ty-comp-refl : ∀ {sc sc' sc'' : Nat}{A th ph}
+              → ^ty-comp {sc} {sc'} {sc''} A th ph ≡ refl
+^ty-comp-refl = UIP
+{-# REWRITE ^ty-comp-refl #-}
+
+-- This way, we get the expected computation rule for `(pi A B) ^ty th`:
+_ : {sc sc' : Nat}
+  -> (A : Type sc)
+  -> (B : {sc'' : Nat} -> (th : sc <= sc'') -> El (A ^ty th) -> Type sc'')
+  -> (th : sc <= sc')
+  -> (pi A B) ^ty th ≡ pi (A ^ty th) (λ ph a -> B (th -< ph) a)
+_ = λ A B th → refl
 
  {- ElSg
    : {sc tgt : Nat}

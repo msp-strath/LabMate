@@ -45,6 +45,8 @@ congd' : {A : Set}{B : A -> Set}{C : Set}
       -> f a b ≡ f a' b'
 congd' f refl refl = refl
 
+UIP : {A : Set}{a a' : A}{p q : a ≡ a'} → p ≡ q
+UIP {p = refl} {refl} = refl
 
 data JMEq {A : Set} (a : A) : {B : Set} -> B -> Set where
   refl : JMEq a a
