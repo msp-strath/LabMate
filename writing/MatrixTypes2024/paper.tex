@@ -1,7 +1,7 @@
 \documentclass[12pt, a4paper]{article}
 \usepackage{xspace}
 \usepackage{amsmath}
-\usepackage{xcolor}
+\usepackage[dvipsnames]{xcolor}
 \usepackage{proof}
 \usepackage{ifthen}
 \title{Matrix Types}
@@ -10,27 +10,54 @@
 \newcommand{\bsl}{\texttt{\symbol{92}}}
 \newcommand{\Type}{\textsc{type}\;}
 \newcommand{\Zero}{\mathbf{0}}
-\newcommand{\One}{\mathbf{1}}
-\newcommand{\List}{\mathsf{List}}
-\newcommand{\Matrix}{\mathsf{Matrix}}
+\newcommand{\One}{\single{\D{1}}}
 \newcommand{\Nil}{\mathbf{[]}}
 
-\newcommand{\one}{\mathsf{one}}
-\newcommand{\jux}{\mathsf{jux}}
 \newcommand{\fst}{\mathsf{fst}}
 \newcommand{\snd}{\mathsf{snd}}
 
+\newcommand{\gp}{\,}
+
 \newcommand{\forms}[3]{
-  \ifthenelse{\equal{#2}{}}
-  {\textcolor{#3}{#1}}
-  {[\textcolor{#3}{#1}\;{#2}]}
+  \ifthenelse{\equal{{#2}}{}}
+  {\textcolor{#3}{\gp {#1}}}
+  {[\textcolor{#3}{#1}\gp {#2}]}
 }
 
 \newcommand{\typeIntro}[2]{\forms{#1}{#2}{blue}}
 \newcommand{\intro}[2]{\forms{#1}{#2}{red}}
-\newcommand{\elim}[2]{\forms{#1}{#2}{green}}
+\newcommand{\elim}[2]{\forms{#1}{#2}{ForestGreen}}
 \newcommand{\Pair}[2]{[{#1}|{#2}]}
 \newcommand{\subst}[2]{{#1}\lfloor {#2} \rfloor}
+\newcommand{\substfor}[3]{\subst{#1}{ {#2} / {#3} }}
+
+\newcommand{\C}[1]{\textcolor{red}{\mathsf{#1}}}
+\newcommand{\D}[1]{\textcolor{blue}{\mathsf{#1}}}
+\newcommand{\one}[1]{[ \C{one} \gp  {#1} ]}
+\newcommand{\List}[1]{[ \D{List} \gp {#1} ]}
+\newcommand{\Matrix}[7]{[ \D{Matrix} \gp {#1} \gp {#2} \gp ( \la{#3}\la{#4} {#5}) \gp {#6} \gp {#7}]}
+\newcommand{\MRCT}[2]{\Matrix{R}{C}{r}{c}{T}{#1}{#2}}
+\newcommand{\vnil}{\single{\C{vnil}}}
+\newcommand{\hnil}{\single{\C{hnil}}}
+
+\newcommand{\jux}[2]{[ \C{jux} \gp {#1} \gp {#2}]}
+\newcommand{\hjux}[2]{[ \C{hjux} \gp {#1} \gp {#2}]}
+\newcommand{\vjux}[2]{[ \C{vjux} \gp {#1} \gp {#2}]}
+
+
+\newcommand{\ctxValid}[1]{{#1} \vdash}
+\newcommand{\empCtx}{\varepsilon }
+\newcommand{\ctxType}[2]{{#1} \vdash \Type {#2}}
+\newcommand{\hasType}[3]{{#1} \vdash {#2} \hab {#3}}
+
+\newcommand{\cs}{,\,}
+%inhabits
+\newcommand{\hb}{\!:\!}
+\newcommand{\hab}{\gp : \gp}
+\newcommand{\la}[1]{\bsl{#1}.\,}
+\newcommand{\V}[1]{\mathit{#1}}
+
+\newcommand{\single}[1]{#1}
 
 
 \begin{document}
@@ -45,15 +72,16 @@
   \\ \\
   \infer{\Type \typeIntro{\Zero}{}}{}
   \qquad\qquad
-  \infer{\Type \typeIntro{\One}{}}{}
+  \infer{\Type \One}{}
   \\ \\
-  \infer{\Type \typeIntro{\List}{T}}{\Type T}
+  \infer{\Type \List{T}}{\Type T}
   \\ \\
-  \infer{\Type \typeIntro{\Matrix}{R\, C\, \bsl r. \bsl c. T\, rs\, cs}}{
+  \infer{\Type \MRCT{\V{rs}}{\V{cs}}}{
     \Type R & \Type C & r \in R, c \in C \vdash \Type T
-    & \typeIntro{\List}{R} \ni rs & \typeIntro{\List}{C} \ni cs
+    & \List{R} \ni rs & \List{C} \ni cs
   }
 \end{gather*}
+
 
 \begin{gather*}
   \fbox{\{\Type T\} T $\in$ t}
@@ -65,26 +93,24 @@
   \infer{\One \ni \Nil}{}
   \\ \\
   \infer{\typeIntro{List}{T} \ni \Nil}{} \qquad\qquad
-  \infer{\typeIntro{List}{T} \ni \intro{\one}{t}}{T \ni t}
-  \qquad\qquad \infer{\typeIntro{List}{T} \ni \intro{\jux}{ts_{0}\;
-      ts_{1}}}{\typeIntro{List}{T} \ni ts_{0} & \typeIntro{List}{T} \ni
-    ts_{1}}
+  \infer{\typeIntro{List}{T} \ni \one{t}}{T \ni t}
+  \qquad\qquad \infer{\List{T} \ni \jux{\V{ts_{0}}}{\V{ts_{1}}}}{\typeIntro{List}{T} \ni ts_{0} & \typeIntro{List}{T} \ni  ts_{1}}
   \\ \\
   \infer{T \ni (e)}{e \in S & S \equiv T}
 \end{gather*}
 
 \begin{gather*}
-  \fbox{ e $\in$ S \{\Type T\}}
+  \fbox{$ e \in S \{\Type S\}$}
   \\ \\
   \infer{t : T \in T}{\Type T & T \ni t}
   \\ \\
-  \infer{f s \in \subst{T}{s : S}}{f \in \typeIntro{\Pi}{S \bsl x . T} & S \ni s}
+  \infer{f\; s \in \subst{T}{s : S}}{f \in \typeIntro{\Pi}{S \bsl x . T} & S \ni s}
   \\ \\
   \infer{e \elim{\fst}{} \in S}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
   \qquad\qquad
   \infer{e \elim{\snd}{} \in \subst{T}{e \elim{\fst}{} }}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
   \\ \\
-  \infer{e T \in T}{e \in \typeIntro{\Zero}{} & \Type T}
+  \infer{e\; T \in T}{e \in \typeIntro{\Zero}{} & \Type T}
 \end{gather*}
 
 %        cs     C
@@ -109,9 +135,74 @@
 \begin{gather*}
   \text{Magic version \emph{(what is the value of this TS?)}}
   \\ \\
+  \Gamma \vdash
+  \\
+  \Gamma \vdash \Type T \quad \{ \Gamma \vdash \}
+  \\
+  \Gamma \vdash \Type T_0 \equiv T_1 \quad \{ \Gamma \vdash \Type T_{i} \}
+  \\
+  \Gamma \vdash t : T  \quad \{ \Gamma \vdash \Type T \}
+  \\
+  \Gamma \vdash t_{0} \equiv t_{1} : T \quad \{ \Gamma \vdash t_{i} : T \}
+  \\ \\
   \infer{\bsl x. t : \typeIntro{\Pi}{S \bsl x. T}}{(\Type S) & x : S \vdash t : T}
   \\ \\
   \infer{s, t: \typeIntro{\Sigma}{S \bsl x. T}}{s : S & x :S \vdash \Type T & t : \subst{T}{s / x}}
+\end{gather*}
+
+\begin{gather*}
+  \fbox{$\ctxValid{\Gamma}$}
+  \\ \\
+  \infer{\ctxValid{\empCtx}}{}
+  \quad\quad
+  \infer{\ctxValid{\Gamma\cs x \hb S}}{\ctxType{\Gamma}{S}}
+\end{gather*}
+
+% presented as equational theory (no conversions)
+\begin{gather*}
+  \fbox{$\ctxType{\Gamma}{T} \quad \{{\ctxValid{\Gamma}}\}$}
+  \\ \\
+  \infer{\ctxType{\Gamma}{T}}{\ctxValid{\Gamma}}
+  \\ \\
+  \infer{\ctxType{\Gamma}{\typeIntro{\Pi}{S \gp\la{x} T}}}{\ctxType{\Gamma \cs x \hb S}{T}}
+  \qquad\qquad
+  \infer{\ctxType{\Gamma}{\typeIntro{\Sigma}{S \gp\la{x} T}}}{\ctxType{\Gamma \cs x \hb S}{T}}
+  \\ \\
+  \infer{\ctxType{\Gamma}{\typeIntro{\Zero}{}}}{\ctxValid{\Gamma}}
+  \qquad\qquad
+  \infer{\ctxType{\Gamma}{\One}}{\ctxValid{\Gamma}}
+  \\ \\
+  \infer{\ctxType{\Gamma}{\List{T}}}{\ctxType{\Gamma}{T}}
+  \\ \\
+  \infer{\ctxType{\Gamma}{\MRCT{\V{rs}}{\V{cs}}}}{
+    \ctxType{\Gamma \cs r \hb  R \cs c \hb C}{T}
+    & \hasType{\Gamma}{\V{rs}}{\List{R}} &\hasType{\Gamma}{\V{cs}}{\List{C}}
+  }
+\end{gather*}
+
+\begin{gather*}
+  \fbox{$\hasType{\Gamma}{t}{T} \quad \{ \ctxType{\Gamma}{T}  \}$}
+  \\ \\
+  \infer{\hasType{\Gamma}{\la{x} t}{\typeIntro{\Pi}{S \la{x}  T}}}{\hasType{\Gamma \cs x \hb S}{t}{T}}
+  \qquad\qquad
+  \infer{\hasType{\Gamma}{\Pair{s}{t}}{\typeIntro{\Sigma}{S \la{x} T}}}{\hasType{\Gamma}{s}{S} & \ctxType{\Gamma \cs x \hb S}{T} & \hasType{\Gamma}{t}{\substfor{T}{s}{x}}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\Nil}{\One}}{\ctxValid{\Gamma}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\Nil}{\List{T}}}{\ctxType{\Gamma}{T}}
+  \qquad\qquad
+  \infer{\hasType{\Gamma}{\one{t}}{\List{T}}}{\hasType{\Gamma}{t}{T}}
+  \qquad\qquad \infer{\hasType{\Gamma}{\jux{\V{ts_{0}}}{\V{ts_{1}}}}{\List{T}}}{\hasType{\Gamma}{\V{ts_{0}}}{\List{T}} & \hasType{\Gamma}{\V{ts_{1}}}{\List{T}}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\vnil}{\MRCT{\Nil}{\V{cs}}}}{\hasType{\Gamma}{\V{cs}}{\List{C}} & \ctxType{\Gamma \cs r \hb  R \cs c \hb C}{T}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\hnil}{\MRCT{\V{rs}}{\Nil}}}{\hasType{\Gamma}{\V{rs}}{\List{R}} & \ctxType{\Gamma \cs r \hb  R \cs c \hb C}{T}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\one{t}}{\MRCT{\one{r'}}{\one{c'}}}}{\hasType{\Gamma}{r'}{R} & \hasType{\Gamma}{c'}{C} & \ctxType{\Gamma \cs r \hb  R \cs c \hb C}{T} & \hasType{\Gamma}{t}{\substfor{\substfor{T}{r'}{r}}{c'}{c}}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\vjux{\V{m_{0}}}{\V{m_{1}}}}{\MRCT{\jux{\V{rs_{0}}}{\V{rs_{1}}}}{\V{cs}}}}{\hasType{\Gamma}{\V{m_{0}}}{\MRCT{\V{rs_{0}}}{\V{cs}}} & \hasType{\Gamma}{\V{m_{1}}}{\MRCT{\V{rs_{1}}}{\V{cs}}}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\hjux{\V{m_{0}}}{\V{m_{1}}}}{\MRCT{\V{rs}}{\jux{\V{cs_{0}}}{\V{cs_{1}}}}}}{\hasType{\Gamma}{\V{m_{0}}}{\MRCT{\V{rs}}{\V{cs_{0}}}} & \hasType{\Gamma}{\V{m_{1}}}{\MRCT{\V{rs}}{\V{cs_{1}}}}}
 \end{gather*}
 
 Main points:
