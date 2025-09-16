@@ -15,6 +15,9 @@
 
 \newcommand{\fst}{\mathsf{fst}}
 \newcommand{\snd}{\mathsf{snd}}
+\newcommand{\at}{\mathsf{at}}
+
+\newcommand{\atElim}[3]{{#1} \gp \elim{\at}{{#2} \gp {#3}}}
 
 \newcommand{\gp}{\,}
 
@@ -36,6 +39,7 @@
 \newcommand{\one}[1]{[ \C{one} \gp  {#1} ]}
 \newcommand{\List}[1]{[ \D{List} \gp {#1} ]}
 \newcommand{\Matrix}[7]{[ \D{Matrix} \gp {#1} \gp {#2} \gp ( \la{#3}\la{#4} {#5}) \gp {#6} \gp {#7}]}
+\newcommand{\Elem}[2]{[ \D{Elem} \gp {#1} \gp {#2} ]}
 \newcommand{\MRCT}[2]{\Matrix{R}{C}{r}{c}{T}{#1}{#2}}
 \newcommand{\vnil}{\single{\C{vnil}}}
 \newcommand{\hnil}{\single{\C{hnil}}}
@@ -43,12 +47,21 @@
 \newcommand{\jux}[2]{[ \C{jux} \gp {#1} \gp {#2}]}
 \newcommand{\hjux}[2]{[ \C{hjux} \gp {#1} \gp {#2}]}
 \newcommand{\vjux}[2]{[ \C{vjux} \gp {#1} \gp {#2}]}
+\newcommand{\oneElem}[1]{[\C{one} \gp  {#1} ]}
+\newcommand{\leftElem}[2]{[ \C{left} \gp {#1} \gp {#2}]}
+\newcommand{\rightElem}[2]{[ \C{right} \gp {#1} \gp {#2}]}
 
 
 \newcommand{\ctxValid}[1]{{#1} \vdash}
 \newcommand{\empCtx}{\varepsilon }
 \newcommand{\ctxType}[2]{{#1} \vdash \Type {#2}}
 \newcommand{\hasType}[3]{{#1} \vdash {#2} \hab {#3}}
+\newcommand{\eqJ}[3]{{#1} \equiv {#2} \hab {#3}}
+
+\newcommand{\checkType}[2]{{#1} \ni {#2}}
+\newcommand{\synthType}[2]{{#1} \in {#2}}
+
+\newcommand{\derad}[1]{|{#1}|}
 
 \newcommand{\cs}{,\,}
 %inhabits
@@ -205,8 +218,66 @@
   \infer{\hasType{\Gamma}{\hjux{\V{m_{0}}}{\V{m_{1}}}}{\MRCT{\V{rs}}{\jux{\V{cs_{0}}}{\V{cs_{1}}}}}}{\hasType{\Gamma}{\V{m_{0}}}{\MRCT{\V{rs}}{\V{cs_{0}}}} & \hasType{\Gamma}{\V{m_{1}}}{\MRCT{\V{rs}}{\V{cs_{1}}}}}
 \end{gather*}
 
+%TODO: fix the object/meta variables typography
+\begin{gather*}
+  \infer{\ctxType{\Gamma}{\Elem{t}{ts}}}{\hasType{\Gamma}{t}{T} & \hasType{\Gamma}{ts}{\List{T}}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\oneElem{t}}{\Elem{t}{\one{t}}}}{\hasType{\Gamma}{t}{T}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\leftElem{x}{ts_{1}}}{\Elem{t}{\jux{ts_{0}}{ts_{1}}}}}{\hasType{\Gamma}{x}{\Elem{t}{ts_{0}}} & \hasType{\Gamma}{ts_{1}}{\List{T}}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\rightElem{ts_{0}}{x}}{\Elem{t}{\jux{ts_{0}}{ts_{1}}}}}{\hasType{\Gamma}{ts_{0}}{\List{T}} & \hasType{\Gamma}{x}{\Elem{t}{ts_{1}}}}
+  \\ \\
+  \infer{\hasType{\Gamma}{\atElim{m}{y}{x}}{\substfor{\substfor{T}{r'}{r}}{c'}{c}}}{\hasType{\Gamma}{\V{m}}{\MRCT{\V{rs}}{\V{cs}}} & \hasType{\Gamma}{y}{\Elem{r'}{\V{rs}}} & \hasType{\Gamma}{x}{\Elem{c'}{\V{cs}}}}
+\end{gather*}
+
+Consider using \textsc{left}, \textsc{right}, \textsc{top}, \textsc{bottom} and \textsc{it} for eliminating matrices (rather than positions).
+
+% no preconditions that made the equations well typed.
+\begin{gather*}
+  \eqJ{\leftElem{x}{\Nil}}{x}{\Elem{t}{\V{ts}}}\\
+  \eqJ{\rightElem{\Nil}{x}}{x}{\Elem{t}{\V{ts}}}\\
+  \eqJ{\leftElem{x}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}{\leftElem{\leftElem{x}{\V{ts_{1}}}}{\V{ts_{2}}}}{\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
+  \eqJ
+    {\rightElem{\jux{\V{ts_{0}}}{\V{ts_{1}}}}{x}}
+    {\rightElem{\V{ts_{0}}}{\rightElem{\V{ts_{1}}}{x}}}
+    {\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
+  \eqJ
+    {\leftElem{\rightElem{\V{ts_{0}}}{x}}{\V{ts_{2}}}}
+    {\rightElem{\V{ts_{0}}}{\leftElem{x}{\V{ts_{2}}}}}
+    {\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
+  \eqJ
+    {\atElim{\one{t}}{\oneElem{r'}}{\oneElem{c'}}}
+    {t}
+    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+  \eqJ
+    {\atElim{\vjux{m_{0}}{m_{1}}}{\leftElem{y}{\V{rs_{1}}}}{x}}
+    {\atElim{m_{0}}{y}{x}}
+    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+  \eqJ
+    {\atElim{\vjux{m_{0}}{m_{1}}}{\rightElem{\V{rs_{0}}}{y}}{x}}
+    {\atElim{m_{1}}{y}{x}}
+    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+  \eqJ
+    {\atElim{\hjux{m_{0}}{m_{1}}}{y}{\leftElem{x}{\V{cs_{1}}}}}
+    {\atElim{m_{0}}{y}{x}}
+    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+  \eqJ
+    {\atElim{\hjux{m_{0}}{m_{1}}}{y}{\rightElem{\V{cs_{0}}}{x}}}
+    {\atElim{m_{1}}{y}{x}}
+    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+\end{gather*}
+
 Main points:
 \begin{itemize}
+\item \textbf{Theorem}:\\
+  If $\hasType{\Gamma}{t}{T}$, then there exist $\Gamma'$, $t'$, $T'$,
+  such that $\derad{\Gamma'}= \Gamma$, $\derad{t'} = t$,
+  $\derad{T'} = T$ and $\Gamma' \vdash \checkType{T'}{t'}$. \\
+
+  If $\Gamma \vdash \checkType{T}{t}$, then
+  $\hasType{\derad{\Gamma}}{\derad{t}}{\derad{T}}$.
+
 \item operability of TS (admits non-magical presentation)
 \item get the eq. theory of lists as a monoid (and canonical form of lists)
 \item get a canonical form for matrices constructed by pasting
@@ -214,9 +285,25 @@ Main points:
 Objective: admissibality of $\infer{\Type T}{t : T}$\\
 Non-objective: alogirthm for type checking
 
+Magic version is interderivable with bidir. version.
+
+Need to document the invariants (e.g., two corners of juxtaposition "slot" together).
+What theorem is actually provable compositionally about the magical rules?
+
+If bidir judgement holds (what are the invariants?!), the matirx typechecks "magically" according to the boudary detected by it (bottom and right as detected)).
+If a matrix is magically typecheckable, it is bidir. typecheckable against any corner prefix.
+
+In bidir. setting, we maintain a list of pre- and post- conditions.
+Postconditions are invariants that should be checked rule by rule.
+(Preconditions -> postconditions).
+Each individiual rule: from precondtions of conclusion -> to preconditions of premises and then back to postconditions.
+
+If a matrix typechecks magically with a some headers, it typechecks in any corner where these headers are prefix of and outputs the suffix.
+
 \end{document}
 
 %%% Local Variables:
 %%% mode: LaTeX
+%%% TeX-master: t
 %%% TeX-master: t
 %%% End:
