@@ -16,6 +16,8 @@
 \newcommand{\fst}{\mathsf{fst}}
 \newcommand{\snd}{\mathsf{snd}}
 \newcommand{\at}{\mathsf{at}}
+\newcommand{\sub}{\mathsf{sub}}
+\newcommand{\itAtom}{\mathsf{it}}
 
 \newcommand{\atElim}[3]{{#1} \gp \elim{\at}{{#2} \gp {#3}}}
 
@@ -51,6 +53,13 @@
 \newcommand{\leftElem}[2]{[ \C{left} \gp {#1} \gp {#2}]}
 \newcommand{\rightElem}[2]{[ \C{right} \gp {#1} \gp {#2}]}
 
+\newcommand{\Thin}[3]{[ \D{Thin} \gp {#1} \gp {#2} \gp {#3} ]}
+\newcommand{\thAll}[1]{[ \C{all} \gp {#1}]}
+\newcommand{\thNone}[1]{[ \C{none} \gp {#1}]}
+\newcommand{\thComp}[2]{[ \C{comp} \gp {#1} \gp {#2}]}
+\newcommand{\thJux}[2]{[ \C{jux} \gp {#1} \gp {#2}]}
+\newcommand{\subElim}[3]{{#1} \gp \elim{\sub}{{#2} \gp {#3}}}
+\newcommand{\itElim}[1]{{#1} \gp \elim{\itAtom}{}}
 
 \newcommand{\ctxValid}[1]{{#1} \vdash}
 \newcommand{\empCtx}{\varepsilon }
@@ -218,55 +227,106 @@
   \infer{\hasType{\Gamma}{\hjux{\V{m_{0}}}{\V{m_{1}}}}{\MRCT{\V{rs}}{\jux{\V{cs_{0}}}{\V{cs_{1}}}}}}{\hasType{\Gamma}{\V{m_{0}}}{\MRCT{\V{rs}}{\V{cs_{0}}}} & \hasType{\Gamma}{\V{m_{1}}}{\MRCT{\V{rs}}{\V{cs_{1}}}}}
 \end{gather*}
 
-%TODO: fix the object/meta variables typography
+
 \begin{gather*}
-  \infer{\ctxType{\Gamma}{\Elem{t}{ts}}}{\hasType{\Gamma}{t}{T} & \hasType{\Gamma}{ts}{\List{T}}}
+  \infer{\ctxType{\Gamma}{\Thin{T}{\V{xs}}{\V{ys}}}}{\hasType{\Gamma}{\V{xs}}{\List{T}} & \hasType{\Gamma}{\V{ys}}{\List{T}}}
   \\ \\
-  \infer{\hasType{\Gamma}{\oneElem{t}}{\Elem{t}{\one{t}}}}{\hasType{\Gamma}{t}{T}}
+  \infer{\hasType{\Gamma}{\thAll{\V{xs}}}{\Thin{T}{\V{xs}}{\V{xs}}}}{}
+  \quad \quad
+  \infer{\hasType{\Gamma}{\thNone{\V{xs}}}{\Thin{T}{\Nil}{\V{xs}}}}{}
   \\ \\
-  \infer{\hasType{\Gamma}{\leftElem{x}{ts_{1}}}{\Elem{t}{\jux{ts_{0}}{ts_{1}}}}}{\hasType{\Gamma}{x}{\Elem{t}{ts_{0}}} & \hasType{\Gamma}{ts_{1}}{\List{T}}}
+  \infer{\hasType{\Gamma}{\thComp{\theta}{\phi}}{\Thin{T}{\V{xs}}{\V{zs}}}}{\hasType{\Gamma}{\theta}{\Thin{T}{\V{xs}}{\V{ys}}} & \hasType{\Gamma}{\phi}{\Thin{T}{\V{ys}}{\V{zs}}}}
   \\ \\
-  \infer{\hasType{\Gamma}{\rightElem{ts_{0}}{x}}{\Elem{t}{\jux{ts_{0}}{ts_{1}}}}}{\hasType{\Gamma}{ts_{0}}{\List{T}} & \hasType{\Gamma}{x}{\Elem{t}{ts_{1}}}}
+  \infer{
+    \hasType
+      {\Gamma}
+      {\thJux{\theta}{\phi}}
+      {\Thin{T}{\jux{\V{xs}_0}{\V{xs}_1}}{\jux{\V{ys}_0}{\V{ys}_1}}}}
+    {\hasType{\Gamma}{\theta}{\Thin{T}{\V{xs}_0}{\V{ys}_0}} & \hasType{\Gamma}{\phi}{\Thin{T}{\V{xs}_1}{\V{ys}_1}}}
   \\ \\
-  \infer{\hasType{\Gamma}{\atElim{m}{y}{x}}{\substfor{\substfor{T}{r'}{r}}{c'}{c}}}{\hasType{\Gamma}{\V{m}}{\MRCT{\V{rs}}{\V{cs}}} & \hasType{\Gamma}{y}{\Elem{r'}{\V{rs}}} & \hasType{\Gamma}{x}{\Elem{c'}{\V{cs}}}}
+  \infer{\hasType{\Gamma}{\subElim{m}{\theta}{\phi}}{\MRCT{\V{rs}'}{\V{cs}'}}}
+  { \hasType{\Gamma}{m}{\MRCT{\V{rs}}{\V{cs}}} &
+    \hasType{\Gamma}{\theta}{\Thin{T}{\V{rs}}{\V{rs}'}} &
+    \hasType{\Gamma}{\phi}{\Thin{T}{\V{cs}}{\V{cs}'}}
+  }
+  \\ \\
+  \infer{\hasType{\Gamma}{\itElim{m}}{\substfor{\substfor{T}{r'}{r}}{c'}{c}}}{\hasType{\Gamma}{m}{\MRCT{\one{r'}}{\one{c'}}}}
 \end{gather*}
 
-Consider using \textsc{left}, \textsc{right}, \textsc{top}, \textsc{bottom} and \textsc{it} for eliminating matrices (rather than positions).
+%%TODO: fix the object/meta variables typography
+%\begin{gather*}
+%  \infer{\ctxType{\Gamma}{\Elem{t}{ts}}}{\hasType{\Gamma}{t}{T} & \hasType{\Gamma}{ts}{\List{T}}}
+%  \\ \\
+%  \infer{\hasType{\Gamma}{\oneElem{t}}{\Elem{t}{\one{t}}}}{\hasType{\Gamma}{t}{T}}
+%  \\ \\
+%  \infer{\hasType{\Gamma}{\leftElem{x}{ts_{1}}}{\Elem{t}{\jux{ts_{0}}{ts_{1}}}}}{\hasType{\Gamma}{x}{\Elem{t}{ts_{0}}} & \hasType{\Gamma}{ts_{1}}{\List{T}}}
+%  \\ \\
+%  \infer{\hasType{\Gamma}{\rightElem{ts_{0}}{x}}{\Elem{t}{\jux{ts_{0}}{ts_{1}}}}}{\hasType{\Gamma}{ts_{0}}{\List{T}} & \hasType{\Gamma}{x}{\Elem{t}{ts_{1}}}}
+%  \\ \\
+%  \infer{\hasType{\Gamma}{\atElim{m}{y}{x}}{\substfor{\substfor{T}{r'}{r}}{c'}{c}}}{\hasType{\Gamma}{\V{m}}{\MRCT{\V{rs}}{\V{cs}}} & \hasType{\Gamma}{y}{\Elem{r'}{\V{rs}}} & \hasType{\Gamma}{x}{\Elem{c'}{\V{cs}}}}
+%\end{gather*}
 
-% no preconditions that made the equations well typed.
+%Consider using \textsc{left}, \textsc{right}, \textsc{top}, \textsc{bottom} and \textsc{it} for eliminating matrices (rather than positions).
+
 \begin{gather*}
-  \eqJ{\leftElem{x}{\Nil}}{x}{\Elem{t}{\V{ts}}}\\
-  \eqJ{\rightElem{\Nil}{x}}{x}{\Elem{t}{\V{ts}}}\\
-  \eqJ{\leftElem{x}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}{\leftElem{\leftElem{x}{\V{ts_{1}}}}{\V{ts_{2}}}}{\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
+  % category laws
+  \eqJ{\thComp{\theta}{\thComp{\phi}{\delta}}}{\thComp{\thComp{\theta}{\phi}}{\delta}}{\Thin{T}{\V{xs}}{\V{ys}}}\\
+  \eqJ{\thComp{\theta}{\thAll{\V{ys}}}}{\theta}{\Thin{T}{\V{xs}}{\V{ys}}}\\
+  \eqJ{\thComp{\thAll{\V{xs}}}{\theta}}{\theta}{\Thin{T}{\V{xs}}{\V{ys}}}\\
+  % tensor laws
+  \eqJ{\thJux{\theta}{\thJux{\phi}{\delta}}}{\thJux{\thJux{\theta}{\phi}}{\delta}}{\Thin{T}{\jux{\V{xs}_0}{\jux{\V{ys}_0}{\V{zs}_0}}}{\jux{\V{xs}_1}{\jux{\V{ys}_1}{\V{zs}_1}}}}\\
+  \eqJ{\thJux{\thAll{\V{xs}}}{\thAll{\V{ys}}}}{\thAll{\jux{\V{xs}}{\V{ys}}}}{\Thin{T}{\jux{\V{xs}}{\V{ys}}}{\jux{\V{xs}}{\V{ys}}}}\\
+  \eqJ{\thJux{\thAll{\Nil}}{\theta}}{\theta}{\Thin{T}{\V{xs}}{\V{ys}}}\\
+  \eqJ{\thJux{\theta}{\thAll{\Nil}}}{\theta}{\Thin{T}{\V{xs}}{\V{ys}}}\\
+  \eqJ{\thComp{\thJux{\theta_0}{\phi_0}}{\thJux{\theta_1}{\phi_1}}}{\thJux{\thComp{\theta_0}{\theta_1}}{\thComp{\phi_0}{\phi_1}}}{\Thin{T}{\jux{\V{xs}_0}{\V{ys}_0}}{\jux{\V{xs}_2}{\V{ys}_2}}}\\
+  % laws for none
+  \eqJ{\thJux{\thNone{\V{xs}}}{\thNone{\V{ys}}}}{\thNone{\jux{\V{xs}}{\V{ys}}}}{\Thin{T}{\Nil}{\jux{\V{xs}}{\V{ys}}}}\\
+%  \eqJ{\thComp{\thNone{\V{xs}}}{\theta}}{\thNone{\V{ys}}}{\Thin{T}{\Nil}{\V{ys}}}\\
+  \\
+  \infer{\eqJ{\theta}{\thNone{\V{xs}}}{\Thin{T}{\Nil}{\V{xs}}}}{\hasType{\Gamma}{\theta}{\Thin{T}{\Nil}{\V{xs}}}}
+  \\ \\
   \eqJ
-    {\rightElem{\jux{\V{ts_{0}}}{\V{ts_{1}}}}{x}}
-    {\rightElem{\V{ts_{0}}}{\rightElem{\V{ts_{1}}}{x}}}
-    {\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
-  \eqJ
-    {\leftElem{\rightElem{\V{ts_{0}}}{x}}{\V{ts_{2}}}}
-    {\rightElem{\V{ts_{0}}}{\leftElem{x}{\V{ts_{2}}}}}
-    {\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
-  \eqJ
-    {\atElim{\one{t}}{\oneElem{r'}}{\oneElem{c'}}}
+    {\itElim{\one{t}}}
     {t}
     {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
-  \eqJ
-    {\atElim{\vjux{m_{0}}{m_{1}}}{\leftElem{y}{\V{rs_{1}}}}{x}}
-    {\atElim{m_{0}}{y}{x}}
-    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
-  \eqJ
-    {\atElim{\vjux{m_{0}}{m_{1}}}{\rightElem{\V{rs_{0}}}{y}}{x}}
-    {\atElim{m_{1}}{y}{x}}
-    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
-  \eqJ
-    {\atElim{\hjux{m_{0}}{m_{1}}}{y}{\leftElem{x}{\V{cs_{1}}}}}
-    {\atElim{m_{0}}{y}{x}}
-    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
-  \eqJ
-    {\atElim{\hjux{m_{0}}{m_{1}}}{y}{\rightElem{\V{cs_{0}}}{x}}}
-    {\atElim{m_{1}}{y}{x}}
-    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
-\end{gather*}
+  \end{gather*}
+
+TODO: computation rules for $\subElim{m}{\theta}{\phi}$.
+
+% no preconditions that made the equations well typed.
+%\begin{gather*}
+%  \eqJ{\leftElem{x}{\Nil}}{x}{\Elem{t}{\V{ts}}}\\
+%  \eqJ{\rightElem{\Nil}{x}}{x}{\Elem{t}{\V{ts}}}\\
+%  \eqJ{\leftElem{x}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}{\leftElem{\leftElem{x}{\V{ts_{1}}}}{\V{ts_{2}}}}{\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
+%  \eqJ
+%    {\rightElem{\jux{\V{ts_{0}}}{\V{ts_{1}}}}{x}}
+%    {\rightElem{\V{ts_{0}}}{\rightElem{\V{ts_{1}}}{x}}}
+%    {\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
+%  \eqJ
+%    {\leftElem{\rightElem{\V{ts_{0}}}{x}}{\V{ts_{2}}}}
+%    {\rightElem{\V{ts_{0}}}{\leftElem{x}{\V{ts_{2}}}}}
+%    {\Elem{t}{\jux{\V{ts_{0}}}{\jux{\V{ts_{1}}}{\V{ts_{2}}}}}}\\
+%  \eqJ
+%    {\atElim{\one{t}}{\oneElem{r'}}{\oneElem{c'}}}
+%    {t}
+%    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+%  \eqJ
+%    {\atElim{\vjux{m_{0}}{m_{1}}}{\leftElem{y}{\V{rs_{1}}}}{x}}
+%    {\atElim{m_{0}}{y}{x}}
+%    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+%  \eqJ
+%    {\atElim{\vjux{m_{0}}{m_{1}}}{\rightElem{\V{rs_{0}}}{y}}{x}}
+%    {\atElim{m_{1}}{y}{x}}
+%    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+%  \eqJ
+%    {\atElim{\hjux{m_{0}}{m_{1}}}{y}{\leftElem{x}{\V{cs_{1}}}}}
+%    {\atElim{m_{0}}{y}{x}}
+%    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+%  \eqJ
+%    {\atElim{\hjux{m_{0}}{m_{1}}}{y}{\rightElem{\V{cs_{0}}}{x}}}
+%    {\atElim{m_{1}}{y}{x}}
+%    {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
+%\end{gather*}
 
 Main points:
 \begin{itemize}
