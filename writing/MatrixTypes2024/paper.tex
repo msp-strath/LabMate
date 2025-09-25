@@ -4,6 +4,7 @@
 \usepackage[dvipsnames]{xcolor}
 \usepackage{proof}
 \usepackage{ifthen}
+\usepackage{mathtools}
 \title{Matrix Types}
 \author{Conor Mc Bride, Georgi Nakov, Fredrik Nordvall Forsberg}{}
 
@@ -32,6 +33,7 @@
 \newcommand{\typeIntro}[2]{\forms{#1}{#2}{blue}}
 \newcommand{\intro}[2]{\forms{#1}{#2}{red}}
 \newcommand{\elim}[2]{\forms{#1}{#2}{ForestGreen}}
+\newcommand{\elimOne}[1]{\gp \textcolor{ForestGreen}{#1}}
 \newcommand{\Pair}[2]{[{#1}|{#2}]}
 \newcommand{\subst}[2]{{#1}\lfloor {#2} \rfloor}
 \newcommand{\substfor}[3]{\subst{#1}{ {#2} / {#3} }}
@@ -59,13 +61,17 @@
 \newcommand{\thComp}[2]{[ \C{comp} \gp {#1} \gp {#2}]}
 \newcommand{\thJux}[2]{[ \C{jux} \gp {#1} \gp {#2}]}
 \newcommand{\subElim}[3]{{#1} \gp \elim{\sub}{{#2} \gp {#3}}}
-\newcommand{\itElim}[1]{{#1} \gp \elim{\itAtom}{}}
+\newcommand{\itElim}[1]{{#1} \gp \elimOne{\itAtom}}
 
 \newcommand{\ctxValid}[1]{{#1} \vdash}
 \newcommand{\empCtx}{\varepsilon }
 \newcommand{\ctxType}[2]{{#1} \vdash \Type {#2}}
 \newcommand{\hasType}[3]{{#1} \vdash {#2} \hab {#3}}
 \newcommand{\eqJ}[3]{{#1} \equiv {#2} \hab {#3}}
+\newcommand{\eqJlong}[3]{
+ \begin{multlined}
+   {#1} \equiv {#2} \hab \\ {#3}
+ \end{multlined} }
 
 \newcommand{\checkType}[2]{{#1} \ni {#2}}
 \newcommand{\synthType}[2]{{#1} \in {#2}}
@@ -114,9 +120,9 @@
   \\ \\
   \infer{\One \ni \Nil}{}
   \\ \\
-  \infer{\typeIntro{List}{T} \ni \Nil}{} \qquad\qquad
-  \infer{\typeIntro{List}{T} \ni \one{t}}{T \ni t}
-  \qquad\qquad \infer{\List{T} \ni \jux{\V{ts_{0}}}{\V{ts_{1}}}}{\typeIntro{List}{T} \ni ts_{0} & \typeIntro{List}{T} \ni  ts_{1}}
+  \infer{\List{T} \ni \Nil}{} \qquad\qquad
+  \infer{\List{T} \ni \one{t}}{T \ni t}
+  \qquad\qquad \infer{\List{T} \ni \jux{\V{ts_{0}}}{\V{ts_{1}}}}{\List{T} \ni ts_{0} & \List{T} \ni  ts_{1}}
   \\ \\
   \infer{T \ni (e)}{e \in S & S \equiv T}
 \end{gather*}
@@ -128,9 +134,9 @@
   \\ \\
   \infer{f\; s \in \subst{T}{s : S}}{f \in \typeIntro{\Pi}{S \bsl x . T} & S \ni s}
   \\ \\
-  \infer{e \elim{\fst}{} \in S}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
+  \infer{e \elimOne{\fst} \in S}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
   \qquad\qquad
-  \infer{e \elim{\snd}{} \in \subst{T}{e \elim{\fst}{} }}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
+  \infer{e \elimOne{\snd} \in \subst{T}{e \elimOne{\fst} }}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
   \\ \\
   \infer{e\; T \in T}{e \in \typeIntro{\Zero}{} & \Type T}
 \end{gather*}
@@ -244,14 +250,31 @@
       {\Thin{T}{\jux{\V{xs}_0}{\V{xs}_1}}{\jux{\V{ys}_0}{\V{ys}_1}}}}
     {\hasType{\Gamma}{\theta}{\Thin{T}{\V{xs}_0}{\V{ys}_0}} & \hasType{\Gamma}{\phi}{\Thin{T}{\V{xs}_1}{\V{ys}_1}}}
   \\ \\
-  \infer{\hasType{\Gamma}{\subElim{m}{\theta}{\phi}}{\MRCT{\V{rs}'}{\V{cs}'}}}
-  { \hasType{\Gamma}{m}{\MRCT{\V{rs}}{\V{cs}}} &
+  \infer{\hasType{\Gamma}{\subElim{m}{\theta}{\phi}}{\MRCT{\V{rs}}{\V{cs}}}}
+  { \hasType{\Gamma}{m}{\MRCT{\V{rs}'}{\V{cs}'}} &
     \hasType{\Gamma}{\theta}{\Thin{T}{\V{rs}}{\V{rs}'}} &
     \hasType{\Gamma}{\phi}{\Thin{T}{\V{cs}}{\V{cs}'}}
   }
   \\ \\
   \infer{\hasType{\Gamma}{\itElim{m}}{\substfor{\substfor{T}{r'}{r}}{c'}{c}}}{\hasType{\Gamma}{m}{\MRCT{\one{r'}}{\one{c'}}}}
 \end{gather*}
+
+\begin{gather*}
+  \eqJ
+    {m}
+    {\one{(\itElim{m})}}
+    {\MRCT{\one{r'}}{\one{c'}}}\\
+  \eqJlong
+    {m}
+    {\vjux{(\subElim{m}{\thJux{\thAll{\V{rs}_{0}}}{\thNone{\V{rs}_{1}}}}{\thAll{\V{cs}}})}{(\subElim{m}{\thJux{\thNone{\V{rs}_{0}}}{\thAll{\V{rs}_{1}}}}{\thAll{\V{cs}}}})}
+    {\MRCT{\jux{\V{rs}_{0}}{\V{rs}_{1}}}{\V{cs}}}\\
+  \eqJlong
+    {m}
+    {\hjux{(\subElim{m}{\thAll{\V{rs}}}{\thJux{\thAll{\V{cs}_{0}}}{\thNone{\V{cs}_{1}}}}}){(\subElim{m}{\thAll{\V{rs}}}{\thJux{\thNone{\V{cs}_{0}}}{\thAll{\V{cs}_{1}}}})}}
+    {\MRCT{\V{rs}}{\jux{\V{cs}_{0}}{\V{cs}_{1}}}}\\
+\end{gather*}
+
+
 
 %%TODO: fix the object/meta variables typography
 %\begin{gather*}
@@ -282,8 +305,13 @@
   % laws for none
   \eqJ{\thJux{\thNone{\V{xs}}}{\thNone{\V{ys}}}}{\thNone{\jux{\V{xs}}{\V{ys}}}}{\Thin{T}{\Nil}{\jux{\V{xs}}{\V{ys}}}}\\
 %  \eqJ{\thComp{\thNone{\V{xs}}}{\theta}}{\thNone{\V{ys}}}{\Thin{T}{\Nil}{\V{ys}}}\\
-  \\
-  \infer{\eqJ{\theta}{\thNone{\V{xs}}}{\Thin{T}{\Nil}{\V{xs}}}}{\hasType{\Gamma}{\theta}{\Thin{T}{\Nil}{\V{xs}}}}
+  %\\
+  %\infer{\eqJ{\theta}{\thNone{\V{xs}}}{\Thin{T}{\Nil}{\V{xs}}}}{\hasType{\Gamma}{\theta}{\Thin{T}{\Nil}{\V{xs}}}}
+  %\\ \\
+  \eqJ
+    {\thAll{\Nil}}
+    {\thNone{\Nil}}
+    {\Thin{T}{\Nil}{\Nil}}
   \\ \\
   \eqJ
     {\itElim{\one{t}}}
@@ -291,7 +319,34 @@
     {\substfor{\substfor{T}{r'}{r}}{c'}{c}}\\
   \end{gather*}
 
-TODO: computation rules for $\subElim{m}{\theta}{\phi}$.
+%TODO: computation rules for $\subElim{m}{\theta}{\phi}$.
+
+\begin{gather*}
+  \eqJlong
+    {\subElim{\hjux{m_{0}}{m_{1}}}{\theta}{\thJux{\phi_{0}}{\phi_{1}}}}
+    {\hjux{(\subElim{m_{0}}{\theta}{\phi_{0}})}{(\subElim{m_{1}}{\theta}{\phi_{1}})}}
+    {\MRCT{\V{rs}}{\jux{\V{cs_{0}}}{\V{cs_{1}}}}}\\
+  \eqJlong
+    {\subElim{\vjux{m_{0}}{m_{1}}}{\thJux{\theta_{0}}{\theta_{1}}}{\phi}}
+    {\vjux{(\subElim{m_{0}}{\theta_{0}}{\phi})}{(\subElim{m_{1}}{\theta_{1}}{\phi})}}
+    {\MRCT{\jux{\V{rs_{0}}}{\V{rs_{1}}}}{\V{cs}}}\\
+  \eqJ
+    {\subElim{m}{\thAll{\V{rs}}}{\thAll{\V{cs}}}}
+    {m}
+    {\MRCT{\V{rs}}{\V{cs}}}\\
+  \eqJ
+    {\subElim{m}{\theta}{\thNone{\V{cs}}}}
+    {\hnil}
+    {\MRCT{\V{rs}}{\Nil}}\\
+  \eqJ
+    {\subElim{m}{\thNone{\V{rs}}}{\phi}}
+    {\vnil}
+    {\MRCT{\Nil}{\V{cs}}}\\
+  \eqJ
+    {\subElim{\subElim{m}{\theta_{1}}{\phi_{1}}}{\theta_{0}}{\phi_{0}}}
+    {\subElim{m}{\thComp{\theta_{0}}{\theta_{1}}}{\thComp{\phi_{0}}{\phi_{1}}}}
+    {\MRCT{\V{rs}_{0}}{\V{cs}_{0}}}\\
+\end{gather*}
 
 % no preconditions that made the equations well typed.
 %\begin{gather*}
