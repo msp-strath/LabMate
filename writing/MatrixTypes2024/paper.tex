@@ -1,6 +1,7 @@
 \documentclass[12pt, a4paper]{article}
 \usepackage{xspace}
 \usepackage{amsmath}
+\usepackage{amsthm}
 \usepackage[dvipsnames]{xcolor}
 \usepackage{proof}
 \usepackage{ifthen}
@@ -93,6 +94,7 @@
 }
 
 \newcommand{\derad}[1]{|{#1}|}
+\newcommand{\rad}[2]{({#1} :: {#2})}
 
 \newcommand{\neu}[1]{\underline{#1}}
 
@@ -105,6 +107,7 @@
 
 \newcommand{\single}[1]{#1}
 
+\newtheorem{thm}{Theorem}
 
 \begin{document}
 \maketitle
@@ -187,6 +190,7 @@
     {\chopList{T}{\V{xs}_{0}}{\V{ys_{0}}}{\V{xs}_{1}} &
     \chopList{T}{\V{xs}_{1}}{\V{ys}_{1}}{\V{xs}_{2}} }
 \end{gather*}
+
 To get a complete algorithm from these rules, we must ensure that the input $\V{xs}$ in the judgement above is always in normal form, i.e., a right nested, null-terminated sequence of juxtapositions, where the left component of each is either a singleton or neutral.
 
 \begin{gather*}
@@ -212,7 +216,16 @@ To get a complete algorithm from these rules, we must ensure that the input $\V{
   \infer
     {\checkThin{T}{\V{xs}}{\thNone{\V{ys}}}{\Nil}{\V{ys}}{\V{zs}}}
     {\chopList{T}{\V{xs}}{\V{ys}}{\V{zs}}}
+  \\ \\
+  \infer
+    {\checkThin{T}{\V{xs}}{\neu{e}}{\V{us}}{\V{ys}}{\V{zs}}}
+    {\synthType{e}{\Thin{T}{\V{ys}}{\V{us}}} &
+     \chopList{T}{\V{xs}}{\V{ys}}{\V{zs}}}
 \end{gather*}
+
+\begin{thm}
+
+\end{thm}
 
 %        cs     C
 %     ----------------
@@ -246,9 +259,13 @@ To get a complete algorithm from these rules, we must ensure that the input $\V{
   \\
   \Gamma \vdash t_{0} \equiv t_{1} : T \quad \{ \Gamma \vdash t_{i} : T \}
   \\ \\
-  \infer{\bsl x. t : \typeIntro{\Pi}{S \bsl x. T}}{(\Type S) & x : S \vdash t : T}
+  \infer{\hasType{\Gamma}{\bsl x. t}{\typeIntro{\Pi}{S \bsl x. T}}}{\ctxType{\Gamma}{S} & \hasType{\Gamma \cs s : S}{t}{T}}
   \\ \\
-  \infer{s, t: \typeIntro{\Sigma}{S \bsl x. T}}{s : S & x :S \vdash \Type T & t : \subst{T}{s / x}}
+  \infer{\hasType{\Gamma}{s, t}{\typeIntro{\Sigma}{S \bsl x. T}}}{\hasType{\Gamma}{s}{S} & \ctxType{\Gamma \cs x : S}{T} & \hasType{\Gamma}{t}{\subst{T}{s / x}}}
+  \\ \\
+  \infer
+    {\hasType{\Gamma}{t}{S}}
+    {\hasType{\Gamma}{t}{T} & \ctxType{\Gamma}{T \equiv S}}
 \end{gather*}
 
 \begin{gather*}
@@ -263,8 +280,8 @@ To get a complete algorithm from these rules, we must ensure that the input $\V{
 \begin{gather*}
   \fbox{$\ctxType{\Gamma}{T} \quad \{{\ctxValid{\Gamma}}\}$}
   \\ \\
-  \infer{\ctxType{\Gamma}{T}}{\ctxValid{\Gamma}}
-  \\ \\
+  %\infer{\ctxType{\Gamma}{T}}{\ctxValid{\Gamma}}
+  %\\ \\
   \infer{\ctxType{\Gamma}{\typeIntro{\Pi}{S \gp\la{x} T}}}{\ctxType{\Gamma \cs x \hb S}{T}}
   \qquad\qquad
   \infer{\ctxType{\Gamma}{\typeIntro{\Sigma}{S \gp\la{x} T}}}{\ctxType{\Gamma \cs x \hb S}{T}}
@@ -283,6 +300,10 @@ To get a complete algorithm from these rules, we must ensure that the input $\V{
 
 \begin{gather*}
   \fbox{$\hasType{\Gamma}{t}{T} \quad \{ \ctxType{\Gamma}{T}  \}$}
+  \\ \\
+  \infer
+  {\hasType{\Gamma}{\rad{t}{T}}{T}}
+  {\hasType{\Gamma}{t}{T}}
   \\ \\
   \infer{\hasType{\Gamma}{\la{x} t}{\typeIntro{\Pi}{S \la{x}  T}}}{\hasType{\Gamma \cs x \hb S}{t}{T}}
   \qquad\qquad
