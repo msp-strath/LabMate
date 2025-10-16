@@ -6,6 +6,7 @@
 \usepackage{proof}
 \usepackage{ifthen}
 \usepackage{mathtools}
+\usepackage{wasysym}
 \title{Matrix Types}
 \author{Conor Mc Bride, Georgi Nakov, Fredrik Nordvall Forsberg}{}
 
@@ -14,6 +15,17 @@
 \newcommand{\Zero}{\mathbf{0}}
 \newcommand{\One}{\single{\D{1}}}
 \newcommand{\Nil}{\mathbf{[]}}
+
+\newcommand{\Prop}{\mathsf{Prop}}
+\newcommand{\Term}{\mathsf{Term}}
+\newcommand{\Syn}{\textsc{syn}}
+\newcommand{\Chk}{\textsc{chk}}
+\newcommand{\TermS}{\textsc{term}}
+
+\newcommand{\TyCon}{\textcolor{blue}{\textsc{tycon}}}
+\newcommand{\VaCon}{\textcolor{red}{\textsc{vacon}}}
+\newcommand{\Elim}{\textcolor{green}{\textsc{elim}}}
+
 
 \newcommand{\fst}{\mathsf{fst}}
 \newcommand{\snd}{\mathsf{snd}}
@@ -76,6 +88,9 @@
 
 \newcommand{\checkType}[2]{{#1} \ni {#2}}
 \newcommand{\synthType}[2]{{#1} \in {#2}}
+
+\newcommand{\ctxSays}[1]{\dashv {#1}}
+
 %\newcommand{\checkThin}[6]{\textsc{thin} \gp {#1} \gp | \gp {#2} \gp {#3}
 %  \gp {#4} \backslash {#5} +\!\!+ {#6}}
 \newcommand{\checkThin}[6]{
@@ -94,7 +109,7 @@
 }
 
 \newcommand{\derad}[1]{|{#1}|}
-\newcommand{\rad}[2]{({#1} :: {#2})}
+\newcommand{\rad}[2]{({#1} \!::\! {#2})}
 
 \newcommand{\neu}[1]{\underline{#1}}
 
@@ -104,13 +119,136 @@
 \newcommand{\hab}{\gp : \gp}
 \newcommand{\la}[1]{\bsl{#1}.\,}
 \newcommand{\V}[1]{\mathit{#1}}
+\newcommand{\dplus}{\mathop{+\!\!+}}
 
 \newcommand{\single}[1]{#1}
+\newcommand{\chkrel}[2]{{#1} \gp \triangleleft \gp {#2}}
+\newcommand{\synrel}[2]{{#1} \gp \LHD \gp {#2}}
+\newcommand{\defeq}{\sim}
+\newcommand{\steps}{\Downarrow}
+\newcommand{\liststeps}[3]{\textsc{list} \gp \gp {#1} \ni {#2} \steps {#3}}
+\newcommand{\chksteps}[3]{{#1} \ni {#2} \steps {#3}}
+\newcommand{\synsteps}[3]{{#1} \steps {#2} \in {#3}}
+
 
 \newtheorem{thm}{Theorem}
+\newtheorem{dfn}{Definition}
+
+\newcommand{\stackprem}[1]{
+  \begin{array}[b]{@{}c@{}}
+  #1
+  \end{array}
+}
 
 \begin{document}
 \maketitle
+
+\begin{dfn} % The syntax is given by
+
+  \[
+    \begin{array}{rll}
+    \phantom{|}& \\
+    \TermS ::= & \TyCon & \mbox{type constructor} \\
+    |& \VaCon  & \mbox{value constructor} \\
+    |& [ \TermS | \TermS ] & \mbox{pairing} \\
+    |& \la{x} \TermS & \mbox{abstraction} \\
+    |& \Elim & \mbox{eliminator} \\
+    |& \rad{\TermS}{\TermS} & \mbox{type annotation} \\
+    |& x & \mbox{variable} \\
+    |& \TermS \gp \TermS & \mbox{elimination}
+    \end{array}
+    \qquad
+    \begin{array}{rl}
+    \Chk ::=& \neu{\Syn} \\
+    |& \TyCon \\
+    |& \VaCon \\
+    |& [ \Chk | \Chk ] \\
+    |& \la{x} \Chk \\
+    |& \Elim \\
+    \Syn ::=& \rad{\Chk}{\Chk} \\
+    |& x \\
+    |& \Syn \gp \Chk
+    \end{array}
+  \]
+
+\end{dfn}
+
+\begin{dfn}
+  \[ \infer{\synrel{t \gp s}{\rad{t'}{T} \gp s'}}{\chkrel{t}{t'} & \chkrel{s}{s'}} \]
+\end{dfn}
+
+% include precomputation and postcomputation rules
+\begin{dfn}
+  \begin{gather*}
+    \infer{\checkType{T}{t}}{ T \steps T' & \checkType{T'}{t}}\\
+    \infer{\checkType{T}{\neu{e}}}{\synthType{e}{S} & \Type S \defeq T}\\
+    \infer{\synthType{e}{S'}}{\synthType{e}{S} & S \steps S'}\\
+  \end{gather*}
+\end{dfn}
+
+\begin{dfn} $\steps$ relation on types
+ \begin{gather*}
+   \infer{\List{T} \steps \List{T'}}{T \steps T'} \\ \\
+   \infer
+     {\Thin{T}{\V{xs}}{\V{ys}} \steps \Thin{T'}{\V{xs'}}{\V{ys'}}}
+     {T \steps T'
+       & \liststeps{T'}{\V{xs}}{\V{xs'}}
+       & \liststeps{T'}{\V{ys}}{\V{ys'}}
+     } \\ \\
+   \infer
+     {\MRCT{\V{rs}}{\V{cs}} \steps \Matrix{R'}{C'}{r}{c}{T'}{\V{rs'}}{\V{cs'}}}
+     { \stackprem{R \steps R' \\ C \steps C'}
+       & r \in R', c \in C' \vdash T \steps T'
+       & \stackprem{
+           \liststeps{R'}{\V{rs}}{\V{rs'}}\\
+           \liststeps{C'}{\V{cs}}{\V{cs'}}
+         }
+     }
+ \end{gather*}
+\end{dfn}
+
+\begin{dfn}
+  \begin{gather*}
+    \infer{\liststeps{T}{\Nil}{\Nil}}{} \\ \\
+    \infer{\liststeps{T}{\one{t}}{\jux{\one{t'}}{\Nil}}}{\chksteps{T}{t}{t'}}\\ \\
+    \infer{\chksteps{\List{T}}{\V{ts}}{\V{ts'}}}{\liststeps{T}{\V{ts}}{\V{ts'}}}\\ \\
+    \infer{\liststeps{T}{\neu{e}}{\jux{\neu{e'}}{\Nil}}}{\synsteps{e}{\neu{e'}}{\List{T}}}\\ \\
+    \infer[(t \neq \neu{e'})]{\liststeps{T}{\neu{e}}{t}}{\synsteps{e}{t}{\List{T}}}\\ \\
+    \infer
+    {\liststeps{T}{\jux{\V{ts}_{0}}{\V{ts}_{1}}}{\V{ts}'_{0} \dplus \V{ts}'_{1}}}
+    {\liststeps{T}{\V{ts}_{0}}{\V{ts}'_{0}}
+      &\liststeps{T}{\V{ts}_{1}}{\V{ts}'_{1}}}
+  \end{gather*}
+\end{dfn}
+
+\begin{dfn}
+  \begin{gather*}
+    \infer[(\ctxSays{\synthType{x}{S}})]{\synsteps{x}{\neu{x}}{S'}}{S \steps S'}\\ \\
+    \infer{\synsteps{\rad{t}{T}}{t'}{T'}}{T \steps T' & \chksteps{T'}{t}{t'}}\\ \\
+    \infer
+    {\synsteps{f \gp s}{u}{U}}
+    {\synsteps{f}{\la{x} t}{\typeIntro{\Pi}{S \bsl x . T}}
+      & \chksteps{S}{s}{s'}
+    & \synsteps{\substfor{\rad{t}{T}}{\rad{s'}{S}}{x}}{u}{U} }
+  \end{gather*}
+\end{dfn}
+
+\begin{dfn}
+  \begin{align*}
+    \Nil \dplus \V{ts} &= \V{ts}\\
+    \jux{\V{rs}}{\V{ss}} \dplus \V{ts} &= \jux{\V{rs}}{(\V{ss} \dplus \V{ts})}
+  \end{align*}
+\end{dfn}
+
+
+
+\begin{thm}
+  If $\hasType{\Gamma}{t}{T}$ with $t$ of syntactic category $\Chk$, then there exists a term $t'$ such that $\chkrel{t}{t'}$ and $\ctxValid{\Gamma}\checkType{t'}{T}$.
+
+  If $\hasType{\Gamma}{t}{T}$ with $t$ of syntactic category $\Syn$, then there exist $e$, $S$ such that $\synrel{t}{e}$, $\ctxValid{\Gamma}\synthType{e}{S}$ and $\ctxType{\Gamma}{S \equiv T}$.
+\end{thm}
+
+
 
 \begin{gather*}
   \fbox{\Type T}
@@ -226,6 +364,7 @@ To get a complete algorithm from these rules, we must ensure that the input $\V{
 \begin{thm}
 
 \end{thm}
+% Let $R : \Term \to \Type \to \Term \to \Prop$
 
 %        cs     C
 %     ----------------
