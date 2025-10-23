@@ -2,6 +2,7 @@
 \usepackage{xspace}
 \usepackage{amsmath}
 \usepackage{amsthm}
+\usepackage{amssymb}
 \usepackage[dvipsnames]{xcolor}
 \usepackage{proof}
 \usepackage{ifthen}
@@ -12,7 +13,7 @@
 
 \newcommand{\bsl}{\texttt{\symbol{92}}}
 \newcommand{\Type}{\textsc{type}\;}
-\newcommand{\Zero}{\mathbf{0}}
+\newcommand{\Zero}{\single{\D{0}}}
 \newcommand{\One}{\single{\D{1}}}
 \newcommand{\Nil}{\mathbf{[]}}
 
@@ -47,6 +48,7 @@
 \newcommand{\intro}[2]{\forms{#1}{#2}{red}}
 \newcommand{\elim}[2]{\forms{#1}{#2}{ForestGreen}}
 \newcommand{\elimOne}[1]{\gp \textcolor{ForestGreen}{#1}}
+\newcommand{\absurd}[1]{\elim{\mathsf{absurd}}{#1}}
 \newcommand{\Pair}[2]{[{#1}|{#2}]}
 \newcommand{\subst}[2]{{#1}\lfloor {#2} \rfloor}
 \newcommand{\substfor}[3]{\subst{#1}{ {#2} / {#3} }}
@@ -122,10 +124,16 @@
 \newcommand{\dplus}{\mathop{+\!\!+}}
 
 \newcommand{\single}[1]{#1}
-\newcommand{\chkrel}[2]{{#1} \gp \triangleleft \gp {#2}}
-\newcommand{\synrel}[2]{{#1} \gp \LHD \gp {#2}}
+\newcommand{\chkrel}[2]{{#1} \gp \vartriangleleft \gp {#2}}
+\newcommand{\synrel}[2]{{#1} \gp \blacktriangleleft \gp {#2}}
 \newcommand{\defeq}{\sim}
+\newcommand{\etaexp}{\Uparrow}
+\newcommand{\typexp}[2]{\textsc{type} \gp \gp {#1} \etaexp {#2}}
+\newcommand{\chkexp}[3]{{#1} \ni {#2} \etaexp {#3}}
+\newcommand{\synexp}[3]{{#1} \etaexp {#2} \in {#3}}
+
 \newcommand{\steps}{\Downarrow}
+\newcommand{\typesteps}[2]{\textsc{type} \gp \gp {#1} \steps {#2}}
 \newcommand{\liststeps}[3]{\textsc{list} \gp \gp {#1} \ni {#2} \steps {#3}}
 \newcommand{\chksteps}[3]{{#1} \ni {#2} \steps {#3}}
 \newcommand{\synsteps}[3]{{#1} \steps {#2} \in {#3}}
@@ -180,25 +188,26 @@
 % include precomputation and postcomputation rules
 \begin{dfn}
   \begin{gather*}
-    \infer{\checkType{T}{t}}{ T \steps T' & \checkType{T'}{t}}\\
-    \infer{\checkType{T}{\neu{e}}}{\synthType{e}{S} & \Type S \defeq T}\\
-    \infer{\synthType{e}{S'}}{\synthType{e}{S} & S \steps S'}\\
+    \infer{\checkType{T}{t}}{\typesteps{T}{T'} & \checkType{T'}{t}}\\
+    \infer{\checkType{T}{\neu{e}}}{\synthType{e}{S} & \typexp{S}{S'} & \typexp{T}{T'} & S' = T'}\\
+    \infer{\synthType{e}{S'}}{\synthType{e}{S} & \typesteps{S}{S'}}\\
   \end{gather*}
 \end{dfn}
 
 \begin{dfn} $\steps$ relation on types
- \begin{gather*}
-   \infer{\List{T} \steps \List{T'}}{T \steps T'} \\ \\
+ %TODO: add structural rules for the remaining types
+  \begin{gather*}
+   \infer{\typesteps{\List{T}}{\List{T'}}}{\typesteps{T}{T'}} \\ \\
    \infer
-     {\Thin{T}{\V{xs}}{\V{ys}} \steps \Thin{T'}{\V{xs'}}{\V{ys'}}}
-     {T \steps T'
+     {\typesteps{\Thin{T}{\V{xs}}{\V{ys}}}{\Thin{T'}{\V{xs'}}{\V{ys'}}}}
+     {\typesteps{T}{T'}
        & \liststeps{T'}{\V{xs}}{\V{xs'}}
        & \liststeps{T'}{\V{ys}}{\V{ys'}}
      } \\ \\
    \infer
-     {\MRCT{\V{rs}}{\V{cs}} \steps \Matrix{R'}{C'}{r}{c}{T'}{\V{rs'}}{\V{cs'}}}
-     { \stackprem{R \steps R' \\ C \steps C'}
-       & r \in R', c \in C' \vdash T \steps T'
+     {\typesteps{\MRCT{\V{rs}}{\V{cs}}}{\Matrix{R'}{C'}{r}{c}{T'}{\V{rs'}}{\V{cs'}}}}
+     { \stackprem{\typesteps{R}{R'} \\ \typesteps{C}{C'}}
+       & r \in R', c \in C' \vdash \typesteps{T}{T'}
        & \stackprem{
            \liststeps{R'}{\V{rs}}{\V{rs'}}\\
            \liststeps{C'}{\V{cs}}{\V{cs'}}
@@ -221,10 +230,11 @@
   \end{gather*}
 \end{dfn}
 
+%type-reconstructing big step
 \begin{dfn}
   \begin{gather*}
-    \infer[(\ctxSays{\synthType{x}{S}})]{\synsteps{x}{\neu{x}}{S'}}{S \steps S'}\\ \\
-    \infer{\synsteps{\rad{t}{T}}{t'}{T'}}{T \steps T' & \chksteps{T'}{t}{t'}}\\ \\
+    \infer[(\ctxSays{\synthType{x}{S}})]{\synsteps{x}{\neu{x}}{S'}}{\typesteps{S}{S'}}\\ \\
+    \infer{\synsteps{\rad{t}{T}}{t'}{T'}}{\typesteps{T}{T'} & \chksteps{T'}{t}{t'}}\\ \\
     \infer
     {\synsteps{f \gp s}{u}{U}}
     {\synsteps{f}{\la{x} t}{\typeIntro{\Pi}{S \bsl x . T}}
@@ -234,12 +244,40 @@
 \end{dfn}
 
 \begin{dfn}
+  \begin{gather*}
+   \infer{\typexp{\List{T}}{\List{T'}}}{\typexp{T}{T'}} \\ \\
+   \infer
+     {\typexp{\Thin{T}{\V{xs}}{\V{ys}}}{\Thin{T'}{\V{xs'}}{\V{ys'}}}}
+     {\typexp{T}{T'}
+       & \chkexp{\List{T'}}{\V{xs}}{\V{xs'}}
+       & \chkexp{\List{T'}}{\V{ys}}{\V{ys'}}
+     } \\ \\
+   \infer
+     {\typexp{\MRCT{\V{rs}}{\V{cs}}}{\Matrix{R'}{C'}{r}{c}{T'}{\V{rs'}}{\V{cs'}}}}
+     { \stackprem{\typexp{R}{R'} \\ \typexp{C}{C'}}
+       & r \in R', c \in C' \vdash \typexp{T}{T'}
+       & \stackprem{
+           \chkexp{\List{R'}}{\V{rs}}{\V{rs'}}\\
+           \chkexp{\List{C'}}{\V{cs}}{\V{cs'}}
+         }
+     }
+ \end{gather*}
+\end{dfn}
+
+\begin{dfn}
+  \begin{gather*}
+    \infer{\chkexp{T}{t}{t'}}{\typesteps{T}{T'} & \chkexp{T'}{t}{t'}}\\ \\
+    \infer{\chkexp{M@\Matrix{R}{C}{r}{c}{T}{\jux{\one{r'}}{\Nil}}{\jux{\one{c'}}{\Nil}}}{m}{\one{t}}}
+    {\chkexp{\substfor{\substfor{T}{r'}{r}}{c'}{c}}{\itElim{\rad{m}{M}}}{t}}
+  \end{gather*}
+\end{dfn}
+
+\begin{dfn}
   \begin{align*}
     \Nil \dplus \V{ts} &= \V{ts}\\
     \jux{\V{rs}}{\V{ss}} \dplus \V{ts} &= \jux{\V{rs}}{(\V{ss} \dplus \V{ts})}
   \end{align*}
 \end{dfn}
-
 
 
 \begin{thm}
@@ -257,7 +295,7 @@
   \qquad\qquad
   \infer{\Type \typeIntro{\Sigma}{S \bsl x . T}}{\Type S & x \in S \vdash \Type T}
   \\ \\
-  \infer{\Type \typeIntro{\Zero}{}}{}
+  \infer{\Type \Zero}{}
   \qquad\qquad
   \infer{\Type \One}{}
   \\ \\
@@ -291,6 +329,8 @@
 \end{gather*}
 
 \begin{gather*}
+  % TODO: strengthen the invariant to mention post-computation of S
+  % during the completeness proof (we are not changing the rules!)
   \fbox{$ e \in S \{\Type S\}$}
   \\ \\
   \infer{t : T \in T}{\Type T & T \ni t}
@@ -301,7 +341,7 @@
   \qquad\qquad
   \infer{e \elimOne{\snd} \in \subst{T}{e \elimOne{\fst} }}{e \in \typeIntro{\Sigma}{S \bsl x. T}}
   \\ \\
-  \infer{e\; T \in T}{e \in \typeIntro{\Zero}{} & \Type T}
+  \infer{\synthType{e \gp \absurd{T}}{T}}{e \in \Zero & \Type T}
 \end{gather*}
 
 
@@ -425,7 +465,7 @@ To get a complete algorithm from these rules, we must ensure that the input $\V{
   \qquad\qquad
   \infer{\ctxType{\Gamma}{\typeIntro{\Sigma}{S \gp\la{x} T}}}{\ctxType{\Gamma \cs x \hb S}{T}}
   \\ \\
-  \infer{\ctxType{\Gamma}{\typeIntro{\Zero}{}}}{\ctxValid{\Gamma}}
+  \infer{\ctxType{\Gamma}{\Zero}}{\ctxValid{\Gamma}}
   \qquad\qquad
   \infer{\ctxType{\Gamma}{\One}}{\ctxValid{\Gamma}}
   \\ \\
