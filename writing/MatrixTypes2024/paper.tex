@@ -139,6 +139,14 @@
 \newcommand{\synsteps}[3]{{#1} \steps {#2} \in {#3}}
 
 
+\newcommand{\rowjudg}[4]{\textsc{matrix} \gp R \gp C (\la{r}\la{c} {T}) \gp
+    \fbox{\ensuremath{#1}} \gp {#2} \gp | \gp {#3}  \etaexp {#4}}
+
+\newcommand{\coljudg}[4]{\textsc{matrix} \gp R \gp C (\la{r}\la{c} {T}) \gp
+  {#1} \gp \fbox{\ensuremath{#2}} \gp | \gp {#3}  \etaexp {#4}}
+
+\newcommand{\letbind}[2]{\textsc{let} \gp {#1} = {#2}}
+
 \newtheorem{thm}{Theorem}
 \newtheorem{dfn}{Definition}
 
@@ -267,8 +275,47 @@
 \begin{dfn}
   \begin{gather*}
     \infer{\chkexp{T}{t}{t'}}{\typesteps{T}{T'} & \chkexp{T'}{t}{t'}}\\ \\
-    \infer{\chkexp{M@\Matrix{R}{C}{r}{c}{T}{\jux{\one{r'}}{\Nil}}{\jux{\one{c'}}{\Nil}}}{m}{\one{t}}}
-    {\chkexp{\substfor{\substfor{T}{r'}{r}}{c'}{c}}{\itElim{\rad{m}{M}}}{t}}
+    \infer{\chkexp{T}{t}{t''}}{\chksteps{T}{t}{t'} & \chkexp{T}{t'}{t''}}\\ \\
+    \infer{\chkexp{\Matrix{R}{C}{r}{c}{T}{\V{rs}}{\V{cs}}}{m}{m'}}
+    {\rowjudg{\V{rs}}{\V{cs}}{m}{m'}}
+%    \infer{\chkexp{M@\Matrix{R}{C}{r}{c}{T}{\jux{\one{r'}}{\Nil}}{\jux{\one{c'}}{\Nil}}}{m}{\one{t}}}
+%    {\chkexp{\substfor{\substfor{T}{r'}{r}}{c'}{c}}{\itElim{\rad{m}{M}}}{t}}\\ \\
+  \end{gather*}
+\end{dfn}
+
+We assume that the header lists have been normalised to cons lists (i.e., right-nested nil-terminated jux-es of singleton elements or neutral lists). We normalise matrices to vertical cons lists of horizontal cons lists of singleton elements or neutral matrices.
+
+\begin{dfn}
+  \begin{gather*}
+    %TODO: precomputation rules for rows and columns
+    \infer{\rowjudg{\Nil}{\V{cs}}{m}{\vnil}}{}\\ \\
+    \infer{\rowjudg{\jux{\V{rs_{0}}}{\V{rs_{1}}}}{\V{cs}}{m}{\vjux{m_{0}}{m_{1}}}}
+    {\stackprem{\letbind{e}{\rad{m}{\Matrix{R}{C}{r}{c}{T}{\jux{\V{rs_{0}}}{\V{rs_{1}}}}{\V{cs}}}} \\
+     \coljudg{\V{rs}_{0}}{\V{cs}}{
+        \neu{\subElim{e}{\thJux{\thAll{\V{rs}_{0}}}{\thNone{\V{rs}_{1}}}}{\thAll{\V{cs}}}}}{m_{0}} \\
+     \rowjudg{\V{rs}_{1}}{\V{cs}}{
+        \neu{\subElim{e}{\thJux{\thNone{\V{rs}_{0}}}{\thAll{\V{rs}_{1}}}}{\thAll{\V{cs}}}}}{m_{1}}}
+  }\\ \\
+  \infer{\coljudg{\V{rs}}{\Nil}{m}{\hnil}}{}\\ \\
+  \infer{\coljudg{\neu{\V{rs}}}{\jux{\V{cs}_{0}}{\V{cs}_{1}}}{m}{\hjux{\neu{e_{0}}}{m_{1}}}}
+  {\stackprem{\letbind{e}{\rad{m}{\Matrix{R}{C}{r}{c}{T}{\neu{\V{rs}}}{\jux{\V{cs}_{0}}{\V{cs}_{1}}}}} \\
+   \synexp{\subElim{e}{\thAll{\neu{\V{rs}}}}{\thJux{\thAll{\V{cs}_{0}}}{\thNone{\V{cs}_{1}}}}}{e_{0}}{M_{0}} \\
+   \coljudg{\neu{\V{rs}}}{\V{cs}_{1}}{\neu{\subElim{e}{\thAll{\neu{\V{rs}}}}{\thJux{\thNone{\V{cs}_{0}}}{\thAll{\V{cs}_{1}}}}}}{m_{1}}
+  }
+  }\\ \\
+  \infer{\coljudg{\one{r'}}{\jux{\neu{\V{cs}_{0}}}{\V{cs}_{1}}}{m}{\hjux{\neu{e_{0}}}{m_{1}}}}
+  {\stackprem{\letbind{e}{\rad{m}{\Matrix{R}{C}{r}{c}{T}{\one{r'}}{\jux{\neu{\V{cs}_{0}}}{\V{cs}_{1}}}}} \\
+   \synexp{\subElim{e}{\thAll{\one{r'}}}{\thJux{\thAll{\neu{\V{cs}_{0}}}}{\thNone{\V{cs}_{1}}}}}{e_{0}}{M_{0}} \\
+  \coljudg{\one{r'}}{\V{cs}_{1}}{\neu{\subElim{e}{\thAll{\one{r'}}}{\thJux{\thNone{\neu{\V{cs}_{0}}}}{\thAll{\V{cs}_{1}}}}}}{m_{1}}
+    }
+  }\\ \\
+  \infer{\coljudg{\one{r'}}{\jux{\one{c'}}{\V{cs}_{1}}}{m}{\hjux{\one{t}}{m_{1}}}}
+  {\stackprem{\letbind{e}{\rad{m}{\Matrix{R}{C}{r}{c}{T}{\one{r'}}{\jux{\one{c'}}{\V{cs}_{1}}}}} \\
+   \chkexp{\substfor{\substfor{T}{r'}{r}}{c'}{c}}
+      {\neu{\itElim{\subElim{e}{\thAll{\one{r'}}}{\thJux{\thAll{\one{c'}}}{\thNone{\V{cs}_{1}}}}}}}{t} \\
+   \coljudg{\one{r'}}{\V{cs}_{1}}{\neu{\subElim{e}{\thAll{\one{r'}}}{\thJux{\thNone{\one{c'}}}{\thAll{\V{cs}_{1}}}}}}{m_{1}}
+    }
+  }
   \end{gather*}
 \end{dfn}
 
