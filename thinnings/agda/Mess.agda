@@ -326,3 +326,19 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))}
     thinEval `id = io
     thinEval (th `-< ph) = thinEval th -< thinEval ph
     thinEval (`# i) = only (i <? ch)
+
+    {-
+    PLAN:
+
+    We need to identify a notion of *prime* thinning such that
+    primes are only trivially decomposable with tensor.
+
+    Our normal form is then a tensor of primes.
+
+    Primeness is all about awkward compositions. Compositions
+    only fail to compute out because of free variables. They're
+    prime when there is failure of alignment.
+
+    We should also ensure that we eta away thinnings
+    with empty wee ends.
+    -}
