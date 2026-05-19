@@ -11,6 +11,29 @@ _-_ : forall {i j k}{A : Set i}{B : A -> Set j}{C : (a : A)(b : B a) -> Set k}
 
 record One : Set where constructor <>
 
+record _><_ (S : Set)(T : S -> Set) : Set where
+  constructor _,_
+  field
+    fst : S
+    snd : T fst
+open _><_ public
+_*_ : Set -> Set -> Set
+S * T = S >< \ _ -> T
+infixr 10 _,_ _*_
+
+module _ {S : Set}(T : S -> Set) where
+
+  <:_:> [:_:] : Set
+  <:_:> = S >< T
+  [:_:] = (s : S) -> T s
+
+  infix 5 <:_:> [:_:]
+
+  _*:_ : (S -> Set) -> (S -> Set)
+  _*:_ U s = T s * U s
+
+  infixr 10 _*:_
+
 data _~_ {X : Set}(x : X) : X -> Set where
   r~ : x ~ x
 infix 20 _~_
@@ -51,10 +74,33 @@ module _ {X : Set} where
   [_] : X -> List X
   [ x ] = x ,- []
 
-  _++_ : List X -> List X -> List X
-  [] ++ ys = ys
-  (x ,- xs) ++ ys = x ,- xs ++ ys
+  data [_++_]~_ : List X -> List X -> List X -> Set where
+   [] : forall {ys} -> [ [] ++ ys ]~ ys
+   _,-_ : forall {xs ys zs} x
+       -> [ xs ++ ys ]~ zs -> [ x ,- xs ++ ys ]~ x ,- zs
 
+  infix 20 [_++_]~_
+
+  append : (xs ys : List X) -> <: [ xs ++ ys ]~_ :>
+  append [] ys = _ , []
+  append (x ,- xs) ys = let _ , zs = append xs ys in _ , x ,- zs
+
+  append! : {xs ys : List X}(p q : <: [ xs ++ ys ]~_ :>) -> p ~ q
+  append! (_ , []) (_ , []) = r~
+  append! (_ , (x ,- p)) (_ , (.x ,- q))
+    with r~ <- append! (_ , p) (_ , q) = r~
+
+  _++_ : List X -> List X -> List X
+  xs ++ ys = fst (append xs ys)
+
+  asso++13 : forall {xs01 xs12 xs02 xs23 xs03}
+        -> [ xs01 ++ xs12 ]~ xs02
+        -> [ xs02 ++ xs23 ]~ xs03
+        -> <: [ xs01 ++_]~ xs03 *: [ xs12 ++ xs23 ]~_ :>
+  asso++13 [] q = _ , [] , q
+  asso++13 (x ,- p) (.x ,- q)
+    with _ , r , s <- asso++13 p q = _ , x ,- r , s
+        
   _++[] : (xs : List X) -> xs ++ [] ~ xs
   [] ++[] = r~
   (x ,- xs) ++[] = R~ (x ,-_) ~$~ (xs ++[])
@@ -80,6 +126,22 @@ module _ {X : Set} where
   io : forall {xs} -> xs <= xs
   io {[]} = []
   io {x ,- xs} = x ,- io
+
+  _-<_ : forall {xs ys zs} -> xs <= ys -> ys <= zs -> xs <= zs
+  th -< (x ^- ph) = x ^- (th -< ph)
+  (.x ^- th) -< (x ,- ph) = x ^- (th -< ph)
+  (.x ,- th) -< (x ,- ph) = x ,- (th -< ph)
+  [] -< [] = []
+
+  _+[_<_]+_ : forall {xs0 ys0 xs1 ys1 xs ys}
+       -> xs0 <= ys0
+       -> [ xs0 ++ xs1 ]~ xs
+       -> [ ys0 ++ ys1 ]~ ys
+       -> xs1 <= ys1
+       -> xs <= ys
+  (x ^- th) +[ p < .x ,- q ]+ ph = x ^- (th +[ p < q ]+ ph)
+  (x ,- th) +[ .x ,- p < .x ,- q ]+ ph = x ,- (th +[ p < q ]+ ph)
+  [] +[ [] < [] ]+ ph = ph
 
   module _ (P : X -> Set) where
   
@@ -114,6 +176,28 @@ module _ {S T : Set}(f : S -> List T) where
   klex : List S -> List T
   klex [] = []
   klex (s ,- ss) = f s ++ klex ss
+
+  klex-append : {ss0 ss1 ss : List S}{ts : List T}
+             -> [ ss0 ++ ss1 ]~ ss
+             -> [ klex ss0 ++ klex ss1 ]~ ts
+             -> klex ss ~ ts
+  klex-append [] [] = r~
+  klex-append (_,-_ {xs} {zs = zs} x p) q
+    with _ , r <- append (f x) (klex xs)
+    with _ , u <- append (f x) (klex zs)
+    with _ , s , t <- asso++13 r q
+    with r~ <- klex-append p t
+    with r~ <- append! (_ , u) (_ , s)
+       = r~
+
+  klex-append' : {ss0 ss1 ss : List S}
+             -> [ ss0 ++ ss1 ]~ ss
+             -> [ klex ss0 ++ klex ss1 ]~ klex ss
+  klex-append' {ss0} {ss1} p
+    with _ , q <- append (klex ss0) (klex ss1)
+    with r~ <- klex-append p q
+    = q
+
 
   klex-cat : (ss0 ss1 : List S) -> klex (ss0 ++ ss1) ~ klex ss0 ++ klex ss1
   klex-cat [] ss1 = r~
@@ -206,3 +290,39 @@ module _ {l v : Nat} where
     listEval (tab `[_]) (tab (`# - [_])) s ~[ qs _ _ >
     listEval (tab `[_]) (tab (`# - [_])) t < normViaEval t ]~
     listNorm t [QED]
+
+module _ {l v : Nat}(x : List (List (Chunk l v) * List (Chunk l v))) where
+
+  data `Thin : List (Chunk l v) -> List (Chunk l v) -> Set where
+    `drop : (c : Chunk l v) -> `Thin       []  (c ,- [])
+    `[]   : `Thin [] []
+    _`+[_<_]+_ : forall {cs0 ds0 cs1 ds1 cs ds}
+         -> `Thin cs0 ds0
+         -> [ cs0 ++ cs1 ]~ cs
+         -> [ ds0 ++ ds1 ]~ ds
+         -> `Thin cs1 ds1
+         -> `Thin cs ds
+    `id : forall {cs} -> `Thin cs cs
+    _`-<_ : forall {cs ds es} -> `Thin cs ds -> `Thin ds es -> `Thin cs es
+    `# : forall {cs ds} -> ((cs , ds) ,- []) <= x -> `Thin cs ds
+
+module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))}
+  {X : Set}(rh : All (kk X) l)(sg : All (kk (List X)) v)
+  where
+
+  lev : List (Chunk l v) -> List X
+  lev = klex (chunkEval rh sg)
+
+  module _ (ch : All (\ (cs , ds) -> lev cs <= lev ds) x)
+    where
+
+    thinEval : forall {cs ds} -> `Thin x cs ds -> lev cs <= lev ds
+    thinEval (`drop c) = no
+    thinEval `[] = []
+    thinEval (th `+[ p < q ]+ ph) =
+      thinEval th
+      +[ klex-append' _ p < klex-append' _ q ]+
+      thinEval ph
+    thinEval `id = io
+    thinEval (th `-< ph) = thinEval th -< thinEval ph
+    thinEval (`# i) = only (i <? ch)

@@ -2041,11 +2041,11 @@ runDirective rl (dir :<=: src, body) = do
       newProb $ InputFormatAction name body rl
       run
     ReadFrom filename variables -> do
-      vs <- for variables $ \ v -> findDeclaration (UserDecl{varTy = Nothing, currentName = v, seen = False, newNames = [], capturable = False, whereAmI = MatLab}) >>= \case
-        Just (name, ty) -> do
+      vs <- for variables $ \ v -> {-find-}ensureDeclaration (UserDecl{varTy = Nothing, currentName = v, seen = False, newNames = [], capturable = False, whereAmI = MatLab}) >>= \case
+{-Just-} (name, ty) -> do
           pushDefinition name (E $^ M (name, Zy) $^ S0 $^ U :^ Ze)
           pure $ Right (v, ty)
-        Nothing -> pure $ Left $ "Unknown variable " ++ v
+        {-Nothing -> pure $ Left $ "Unknown variable " ++ v-}
       push $ Diagnostic rl (ReadFromD filename vs)
       newProb $ Done nil
       run
