@@ -67,6 +67,12 @@ data List (X : Set) : Set where
 
 infixr 30 _,-_
 
+module _ {X Y : Set}(R : X -> Y -> Set) where
+
+  data ListR : List X -> List Y -> Set where
+    [] : ListR [] []
+    _,-_ : forall {x xs y ys} -> R x y -> ListR xs ys -> ListR (x ,- xs) (y ,- ys)
+
 module _ {X : Set} where
 
   infixr 30 _++_
@@ -326,6 +332,15 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))}
     thinEval `id = io
     thinEval (th `-< ph) = thinEval th -< thinEval ph
     thinEval (`# i) = only (i <? ch)
+
+
+module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
+
+  data `ThinPrime : List (Chunk l v) -> List (Chunk l v) -> Set where
+    `drop : (c : Chunk l v) -> `ThinPrime       []  (c ,- [])
+    `keep : (c : Chunk l v) -> `ThinPrime (c ,- []) (c ,- [])
+    
+
 
     {-
     PLAN:
