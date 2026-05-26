@@ -73,6 +73,10 @@ module _ {X Y : Set}(R : X -> Y -> Set) where
     [] : ListR [] []
     _,-_ : forall {x xs y ys} -> R x y -> ListR xs ys -> ListR (x ,- xs) (y ,- ys)
 
+  listR : ((x : X) -> <: R x :>) -> (xs : List X) -> <: ListR xs :>
+  listR f [] = _ , []
+  listR f (x ,- xs) = _ , (snd (f x) ,- snd (listR f xs))
+
 module _ {X : Set} where
 
   infixr 30 _++_
@@ -106,7 +110,7 @@ module _ {X : Set} where
   asso++13 [] q = _ , [] , q
   asso++13 (x ,- p) (.x ,- q)
     with _ , r , s <- asso++13 p q = _ , x ,- r , s
-        
+
   _++[] : (xs : List X) -> xs ++ [] ~ xs
   [] ++[] = r~
   (x ,- xs) ++[] = R~ (x ,-_) ~$~ (xs ++[])
@@ -114,6 +118,27 @@ module _ {X : Set} where
   assoc++ : (xs ys zs : List X) -> (xs ++ ys) ++ zs ~ xs ++ ys ++ zs
   assoc++ [] ys zs = r~
   assoc++ (x ,- xs) ys zs = R~ (x ,-_) ~$~ assoc++ xs ys zs
+
+  data _-Join_ : List (List X) -> List X -> Set where
+    []   : [] -Join []
+    _,-_ : forall {xs ys zs yss}
+         -> [ xs ++ ys ]~ zs
+         -> yss -Join ys
+         -> (xs ,- yss) -Join zs
+
+  join : (xss : List (List X)) -> <: xss -Join_ :>
+  join [] =  _ , []
+  join (xs ,- xss) = _ , (snd (append xs _) ,- snd (join xss))
+
+  all[] : {Y : Set}{ys : List Y} {xss : List (List X)}
+        -> ListR (kk ([] ~_)) ys xss -> xss -Join []
+  all[] [] = []
+  all[] (r~ ,- rs) = [] ,- (all[] rs)
+
+  allSing : {xs : List X} {xss : List (List X)}
+          -> ListR (\ x -> [ x ] ~_) xs xss -> xss -Join xs
+  allSing [] = []
+  allSing (r~ ,- rs) = (_ ,- []) ,- allSing rs
 
   infix 20 _<=_
   data _<=_ : List X -> List X -> Set where
@@ -150,13 +175,13 @@ module _ {X : Set} where
   [] +[ [] < [] ]+ ph = ph
 
   module _ (P : X -> Set) where
-  
+
     data All : List X -> Set where
       [] : All []
       _,-_ : forall {x xs} -> P x -> All xs -> All (x ,- xs)
 
   module _ {P : X -> Set} where
-  
+
     _<?_ : forall {xs ys} -> xs <= ys -> All P ys -> All P xs
     (x ^- th) <? (p ,- ps) = th <? ps
     (x ,- th) <? (p ,- ps) = p ,- (th <? ps)
@@ -176,6 +201,17 @@ module _ {X : Set} where
       {x}(i : x ,- [] <= xs) -> (tab f !! i) ~ f i
     tab!! f (x ^- i) = tab!! ((x ^-_) - f) i
     tab!! f (x ,- i) = R~ ((x ,-_) - f) ~$~ noes
+
+module _ {X : Set} where
+
+  join++ : {xs0 xs1 xs : List X} {xss0 xss1 : List (List X)}
+         -> xss0 -Join xs0 -> xss1 -Join xs1
+         -> [ xs0 ++ xs1 ]~ xs
+         -> <: [ xss0 ++ xss1 ]~_  *: _-Join xs :>
+  join++ [] j1 [] = _ , [] , j1
+  join++ (x ,- j0) j1 q = {!!}
+
+
 
 module _ {S T : Set}(f : S -> List T) where
 
@@ -204,10 +240,10 @@ module _ {S T : Set}(f : S -> List T) where
     with r~ <- klex-append p q
     = q
 
-
+-- kleisli extension are homomorphism
   klex-cat : (ss0 ss1 : List S) -> klex (ss0 ++ ss1) ~ klex ss0 ++ klex ss1
   klex-cat [] ss1 = r~
-  klex-cat (s ,- ss0) ss1 = 
+  klex-cat (s ,- ss0) ss1 =
     f s ++ klex (ss0 ++ ss1) ~[ R~ (f s ++_) ~$~ klex-cat ss0 ss1 >
     f s ++ (klex ss0 ++ klex ss1) < assoc++ (f s) (klex ss0) (klex ss1) ]~
     (f s ++ klex ss0) ++ klex ss1 [QED]
@@ -216,7 +252,7 @@ module _ {S T : Set}(f : S -> T) where
 
   list : List S -> List T
   list = klex (f - [_])
-  
+
 Nat = List One
 pattern ze = []
 pattern su n = <> ,- n
@@ -259,18 +295,18 @@ module _ {X : Set}{l v : Nat} where
     evalViaNorm : (t : `List l v) -> listEval t ~ klex chunkEval (listNorm t)
     evalViaNorm `[] = r~
     evalViaNorm `[ e ] = r~
-    evalViaNorm (s `++ t) = 
+    evalViaNorm (s `++ t) =
       listEval s ++ listEval t ~[ R~ _++_ ~$~ evalViaNorm s ~$~ evalViaNorm t >
       klex chunkEval (listNorm s) ++ klex chunkEval (listNorm t)
         < klex-cat chunkEval (listNorm s) (listNorm t) ]~
       klex chunkEval (listNorm s ++ listNorm t) [QED]
-    evalViaNorm (`# xs) = 
+    evalViaNorm (`# xs) =
       (sg !! xs) < (sg !! xs) ++[] ]~
       (sg !! xs) ++ ze [QED]
 
     normSound : (s t : `List l v) -> listNorm s ~ listNorm t
              -> listEval s ~ listEval t
-    normSound s t q = 
+    normSound s t q =
       listEval s ~[ evalViaNorm s >
       klex chunkEval (listNorm s) ~[ R~ (klex chunkEval) ~$~ q >
       klex chunkEval (listNorm t) < evalViaNorm t ]~
@@ -280,7 +316,7 @@ module _ {l v : Nat} where
 
   normViaEval : (t : `List l v) -> listNorm t ~ listEval (tab `[_]) (tab (`# - [_])) t
   normViaEval `[] = r~
-  normViaEval `[ e ] = 
+  normViaEval `[ e ] =
     `[ e ] ,- ze <  R~ (_,- []) ~$~ tab!! `[_] e ]~
     (tab `[_] !! e) ,- ze [QED]
   normViaEval (s `++ t) = R~ _++_ ~$~ normViaEval s ~$~ normViaEval t
@@ -291,7 +327,7 @@ module _ {l v : Nat} where
   normComplete : (s t : `List l v)
     -> ({X : Set}(rh : All (kk X) l)(sg : All (kk (List X)) v) -> listEval rh sg s ~ listEval rh sg t)
     -> listNorm s ~ listNorm t
-  normComplete s t qs = 
+  normComplete s t qs =
     listNorm s ~[ normViaEval s >
     listEval (tab `[_]) (tab (`# - [_])) s ~[ qs _ _ >
     listEval (tab `[_]) (tab (`# - [_])) t < normViaEval t ]~
@@ -339,8 +375,42 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
   data `ThinPrime : List (Chunk l v) -> List (Chunk l v) -> Set where
     `drop : (c : Chunk l v) -> `ThinPrime       []  (c ,- [])
     `keep : (c : Chunk l v) -> `ThinPrime (c ,- []) (c ,- [])
-    
 
+
+  record `ThinNorm (wee big : List (Chunk l v)) : Set where
+    constructor mkThinNorm
+    field
+      {wees bigs} : List (List (Chunk l v))
+      weeJoin : wees -Join wee
+      primes  : ListR `ThinPrime wees bigs
+      bigJoin : bigs -Join big
+
+  open `ThinNorm public
+
+  allDrop : {ds : List (Chunk l v)}
+          {wees : List (List (Chunk l v))}
+          (nils : ListR (kk ([] ~_)) ds wees)
+          {bigs : List (List (Chunk l v))}
+          (sings : ListR (λ x → [ x ] ~_) ds bigs) ->
+          ListR `ThinPrime wees bigs
+  allDrop [] [] = []
+  allDrop (r~ ,- nils) (r~ ,- sings) = (`drop _) ,- allDrop nils sings
+
+  thinNorm : {cs ds : List (Chunk l v)} -> `Thin x cs ds -> `ThinNorm cs ds
+  thinNorm {[]} {ds} _
+    with _ , nils  <- listR _ (kk (_ , r~)) ds
+    with _ , sings <- listR _ (\ _ -> _ , r~) ds = record
+     { weeJoin = all[] nils
+     ; primes = allDrop nils sings
+     ; bigJoin = allSing sings
+     }
+  thinNorm {c ,- cs} (th0 `+[ cq < dq ]+ th1)
+    with mkThinNorm weeJoin0 primes0 bigJoin0 <- thinNorm th0
+    with mkThinNorm weeJoin1 primes1 bigJoin1 <- thinNorm th1 =
+      mkThinNorm {!!} {!!} {!!}
+  thinNorm {c ,- cs} `id = {!!}
+  thinNorm {c ,- cs} (th0 `-< th1) = {!!}
+  thinNorm {c ,- cs} (`# x) = {!!}
 
     {-
     PLAN:
