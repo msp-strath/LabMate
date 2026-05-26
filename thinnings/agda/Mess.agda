@@ -73,7 +73,9 @@ module _ {X Y : Set}(R : X -> Y -> Set) where
     [] : ListR [] []
     _,-_ : forall {x xs y ys} -> R x y -> ListR xs ys -> ListR (x ,- xs) (y ,- ys)
 
-  listR : ((x : X) -> <: R x :>) -> (xs : List X) -> <: ListR xs :>
+module _ {X Y : Set}{R : X -> Y -> Set} where
+
+  listR : ((x : X) -> <: R x :>) -> (xs : List X) -> <: ListR R xs :>
   listR f [] = _ , []
   listR f (x ,- xs) = _ , (snd (f x) ,- snd (listR f xs))
 
@@ -209,9 +211,21 @@ module _ {X : Set} where
          -> [ xs0 ++ xs1 ]~ xs
          -> <: [ xss0 ++ xss1 ]~_  *: _-Join xs :>
   join++ [] j1 [] = _ , [] , j1
-  join++ (x ,- j0) j1 q = {!!}
+  join++ (x ,- j0) j1 q
+    with _ , v , w <- asso++13 x q
+    with _ , z , j <- join++ j0 j1 w
+    = _ , _ ,- z , v ,- j
 
+module _ {X Y : Set}{R : X -> Y -> Set} where
 
+  listR++ : {xs0 xs1 xs : List X}{ys0 ys1 ys : List Y}
+    -> [ xs0 ++ xs1 ]~ xs
+    -> ListR R xs0 ys0 -> ListR R xs1 ys1
+    -> [ ys0 ++ ys1 ]~ ys
+    -> ListR R xs ys
+  listR++ [] [] rs1 [] = rs1
+  listR++ (x ,- xq) (r ,- rs0) rs1 (y ,- yq)
+    = r ,- listR++ xq rs0 rs1 yq
 
 module _ {S T : Set}(f : S -> List T) where
 
@@ -391,24 +405,38 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
           {wees : List (List (Chunk l v))}
           (nils : ListR (kk ([] ~_)) ds wees)
           {bigs : List (List (Chunk l v))}
-          (sings : ListR (λ x → [ x ] ~_) ds bigs) ->
+          (sings : ListR (\ x -> [ x ] ~_) ds bigs) ->
           ListR `ThinPrime wees bigs
   allDrop [] [] = []
   allDrop (r~ ,- nils) (r~ ,- sings) = (`drop _) ,- allDrop nils sings
+  
+  allKeep : {cs : List (Chunk l v)}
+          {css : List (List (Chunk l v))}
+          (sings : ListR (\ x -> _~_ [ x ]) cs css)
+          (j : css -Join cs) ->
+          ListR `ThinPrime css css
+  allKeep [] [] = []
+  allKeep (r~ ,- sings) ((_ ,- []) ,- j) = `keep _ ,- allKeep sings j
 
   thinNorm : {cs ds : List (Chunk l v)} -> `Thin x cs ds -> `ThinNorm cs ds
   thinNorm {[]} {ds} _
-    with _ , nils  <- listR _ (kk (_ , r~)) ds
-    with _ , sings <- listR _ (\ _ -> _ , r~) ds = record
+    with _ , nils  <- listR (kk (_ , r~)) ds
+    with _ , sings <- listR (\ _ -> _ , r~) ds = record
      { weeJoin = all[] nils
      ; primes = allDrop nils sings
      ; bigJoin = allSing sings
      }
   thinNorm {c ,- cs} (th0 `+[ cq < dq ]+ th1)
     with mkThinNorm weeJoin0 primes0 bigJoin0 <- thinNorm th0
-    with mkThinNorm weeJoin1 primes1 bigJoin1 <- thinNorm th1 =
-      mkThinNorm {!!} {!!} {!!}
-  thinNorm {c ,- cs} `id = {!!}
+    with mkThinNorm weeJoin1 primes1 bigJoin1 <- thinNorm th1
+    with _ , cw , weeJoin <- join++ weeJoin0 weeJoin1 cq
+    with _ , dw , bigJoin <- join++ bigJoin0 bigJoin1 dq
+    =
+      mkThinNorm weeJoin (listR++ cw primes0 primes1 dw) bigJoin
+  thinNorm {c ,- cs} `id
+    with _ , sings <- listR (\ _ -> _ , r~) (c ,- cs)
+    with j <- allSing sings
+    = mkThinNorm j (allKeep sings j) j
   thinNorm {c ,- cs} (th0 `-< th1) = {!!}
   thinNorm {c ,- cs} (`# x) = {!!}
 
