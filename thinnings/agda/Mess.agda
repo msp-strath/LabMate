@@ -330,7 +330,7 @@ module _ {X : Set} where
       , ((ys , (xt ,- xl) , ((zh ,- zt) ,- zl) , na) ,- nas)
       = (([ y ] ,- _) ,- xsss) , (_ ,- zsss) , (_ ,- xness) , (_ ,- zness)
       , (([ y ] ,- ((y' ,- _) ,- x')) ,- xk) , (((y ,- y' ,- _) ,- z') ,- zk)
-      , ((y ,- ys) , ((y ,- []) ,- xt ,- xl) , ((y ,- (zh ,- zt)) ,- zl) , {!na!}) ,- nas
+      , ((y ,- ys) , ((y ,- []) ,- xt ,- xl) , ((y ,- (zh ,- zt)) ,- zl) , na) ,- nas
   
   factorize (y ,- ys) xss zss (_ ,- xnes) (_ ,- znes) ((.y ,- (x ,- x₁)) ,- xj) ((.y ,- []) ,- zj) = {!!}
   
