@@ -9,7 +9,11 @@ _-_ : forall {i j k}{A : Set i}{B : A -> Set j}{C : (a : A)(b : B a) -> Set k}
   (a : A) -> C a (f a)
 (f - g) a = g (f a)
 
+data Zero : Set where
+
 record One : Set where constructor <>
+
+data Two : Set where ff tt : Two
 
 record _><_ (S : Set)(T : S -> Set) : Set where
   constructor _,_
@@ -116,6 +120,10 @@ module _ {X : Set} where
   _++[] : (xs : List X) -> xs ++ [] ~ xs
   [] ++[] = r~
   (x ,- xs) ++[] = R~ (x ,-_) ~$~ (xs ++[])
+
+  cat[] : {xs : List X} -> [ xs ++ [] ]~ xs
+  cat[] {[]} = []
+  cat[] {x ,- xs} = x ,- cat[] {xs}
 
   assoc++ : (xs ys zs : List X) -> (xs ++ ys) ++ zs ~ xs ++ ys ++ zs
   assoc++ [] ys zs = r~
@@ -267,6 +275,77 @@ module _ {S T : Set}(f : S -> T) where
   list : List S -> List T
   list = klex (f - [_])
 
+module _ {X : Set} where
+
+  NE : List X -> Set
+  NE [] = Zero
+  NE (_ ,- _) = One
+
+
+Nellist : Set -> Set
+Nellist X = List X >< NE
+
+module _ {X : Set} where
+
+  NoAlign : {ys : List X}
+            {xss zss : List (List X)}
+         -> xss -Join ys
+         -> zss -Join ys
+         -> Set
+  NoAlign {[]} xj zj = One
+  NoAlign {y ,- ys} ([] ,- xj) ([] ,- zj) = Zero
+  NoAlign {y ,- ys} ((.y ,- x) ,- xj) ((.y ,- z) ,- zj) = NoAlign (x ,- xj) (z ,- zj)
+  NoAlign {y ,- ys} ([] ,- xj) yzzj@((.y ,- z) ,- zj) = NoAlign xj yzzj
+  NoAlign {y ,- ys} yxxj@((.y ,- x) ,- xj) ([] ,- zj) = NoAlign yxxj zj
+
+  factorize :
+       (ys : List X)
+       (xss zss : List (List X))
+    -> All NE xss -> All NE zss
+    -> xss -Join ys -> zss -Join ys
+    -> List (List (List X)) >< \ xsss
+    -> List (List (List X)) >< \ zsss
+    -> All NE xsss
+     * All NE zsss
+     * xsss -Join xss
+     * zsss -Join zss
+     * ListR (\ xss zss ->
+           List X >< \ ys ->
+           (xss -Join ys) >< \ xj ->
+           (zss -Join ys) >< \ zj ->
+           NoAlign xj zj)
+         xsss
+         zsss
+         
+  factorize (y ,- ys) (_ ,- xss) (_ ,- zss) (_ ,- xnes) (_ ,- znes) ((.y ,- []) ,- xj) ((.y ,- []) ,- zj)
+    with xsss , zsss , xness , zness , xk , zk , nas <- factorize ys xss zss xnes znes xj zj
+    = [ [ y ] ] ,- xsss  , [ [ y ] ] ,- zsss
+    , <> ,- xness , <> ,- zness
+    , (([ y ] ,- []) ,- xk) , (([ y ] ,- []) ,- zk)
+    , (([ y ] , ((y ,- []) ,- []) , ((y ,- []) ,- []) , <>) ,- nas)
+  
+  factorize (y ,- ys) xss zss (_ ,- xnes) (_ ,- znes) ((.y ,- []) ,- xj) ((.y ,- (x ,- z)) ,- zj) = {!!}
+  
+  factorize (y ,- ys) xss zss (_ ,- xnes) (_ ,- znes) ((.y ,- (x ,- x₁)) ,- xj) ((.y ,- []) ,- zj) = {!!}
+  
+  factorize (y ,- y' ,- ys) ((.y ,- .y' ,- xs) ,- xss) ((.y ,- .y' ,- zs) ,- zss)
+    (_ ,- xnes) (_ ,- znes) ((.y ,- (.y' ,- x)) ,- xj) ((.y ,- (.y' ,- z)) ,- zj)
+    with factorize (y' ,- ys) ((y' ,- xs) ,- xss) ((y' ,- zs) ,- zss)
+                (<> ,- xnes) (<> ,- znes) ((y' ,- x) ,- xj) ((y' ,- z) ,- zj)
+  ... | (_ ,- xsss) , (_ ,- zsss)
+      , (_ ,- xness) , (_ ,- zness)
+      , ((xh ,- x') ,- xk) , ((zh ,- z') ,- zk)
+      , ((ys , (xt ,- xl) , (zt ,- zl) , na) ,- nas)
+      = _ , _ , (_ ,- xness) , (_ ,- zness) , ((y ,- xh) ,- x') ,- xk , ((y ,- zh) ,- z') ,- zk
+      , ((y ,- ys) , ((y ,- xt) ,- xl) , ((y ,- zt) ,- zl) , {!na!}) ,- nas
+  
+  factorize ys xss zss xnes znes [] [] = [] , [] , [] , [] , [] , [] , []
+  
+  factorize ys xss zss xnes (() ,- znes) xj ([] ,- zj)
+  factorize ys xss zss (() ,- xnes) znes ([] ,- xj) zj
+
+
+
 Nat = List One
 pattern ze = []
 pattern su n = <> ,- n
@@ -389,6 +468,8 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
   data `ThinPrime : List (Chunk l v) -> List (Chunk l v) -> Set where
     `drop : (c : Chunk l v) -> `ThinPrime       []  (c ,- [])
     `keep : (c : Chunk l v) -> `ThinPrime (c ,- []) (c ,- [])
+    `# : forall {c cs ds} -> ((c ,- cs , ds) ,- []) <= x -> `ThinPrime (c ,- cs) ds
+
 
 
   record `ThinNorm (wee big : List (Chunk l v)) : Set where
@@ -417,7 +498,7 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
           ListR `ThinPrime css css
   allKeep [] [] = []
   allKeep (r~ ,- sings) ((_ ,- []) ,- j) = `keep _ ,- allKeep sings j
-
+{-
   thinNorm : {cs ds : List (Chunk l v)} -> `Thin x cs ds -> `ThinNorm cs ds
   thinNorm {[]} {ds} _
     with _ , nils  <- listR (kk (_ , r~)) ds
@@ -437,9 +518,16 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
     with _ , sings <- listR (\ _ -> _ , r~) (c ,- cs)
     with j <- allSing sings
     = mkThinNorm j (allKeep sings j) j
-  thinNorm {c ,- cs} (th0 `-< th1) = {!!}
-  thinNorm {c ,- cs} (`# x) = {!!}
-
+  thinNorm {c ,- cs} (`# x) = record
+     { weeJoin = cat[] ,- []
+     ; primes = `# x ,- []
+     ; bigJoin = cat[] ,- []
+     }
+  thinNorm {c ,- cs} (th0 `-< th1)
+    with mkThinNorm weeJoin0 primes0 bigJoin0 <- thinNorm th0
+    with mkThinNorm weeJoin1 primes1 bigJoin1 <- thinNorm th1
+    = {!!}
+-}
     {-
     PLAN:
 
