@@ -335,13 +335,15 @@ module _ {X : Set} where
       , (([ y ] ,- ((y' ,- _) ,- x')) ,- xk) , (((y ,- y' ,- _) ,- z') ,- zk)
       , ((y ,- ys) , ((y ,- []) ,- xt ,- xl) , ((y ,- (zh ,- zt)) ,- zl) , na) ,- nas
   
-  factorize (y ,- y' ,- ys) xss zss (_ ,- xnes) (_ ,- znes) ((.y ,- (y' ,- x)) ,- xj) ((.y ,- []) ,- ((.y' ,- za) ,- zj))
-    with factorize (y' ,- ys) ((y' ,- _) ,- _) ((y' ,- _) ,- _) (_ ,- xnes) (_ ,- tailA NE znes) ((y' ,- x) ,- xj) ((y' ,- za) ,- zj)
+  factorize (y ,- y' ,- ys) xss zss (_ ,- xnes) (_ ,- (x₁ ,- znes)) ((.y ,- (y' ,- x)) ,- xj) ((.y ,- []) ,- ((.y' ,- za) ,- zj))
+    with factorize (y' ,- ys) ((y' ,- _) ,- _) ((y' ,- _) ,- _) (_ ,- xnes) (_ ,- znes) ((y' ,- x) ,- xj) ((y' ,- za) ,- zj)
   ... | (_ ,- xsss) , (_ ,- zsss) , (_ ,- xness) , (_ ,- zness) , ((.(y' ,- _) ,- x') ,- xk) , ((.(y' ,- _) ,- z') ,- zk)
       , ((ys , ((y' ,- xt) ,- xl) , ((zh ,- zt) ,- zl) , na) ,- nas)
       = (_ ,- xsss) , (([ y ] ,- _) ,- zsss) , (_ ,- xness) , (_ ,- zness)
       , ((y ,- y' ,- _) ,- x') ,- xk , ([ y ] ,- ((y' ,- _) ,- z')) ,- zk
       , (((y ,- ys) , (((y ,- (y' ,- xt)) ,- xl) , (((y ,- []) ,- ((y' ,- zt) ,- zl)) , na))) ,- nas)
+      
+  factorize (y ,- y' ,- ys) xss zss (_ ,- xnes) (_ ,- []) ((.y ,- (y' ,- x)) ,- xj) ((.y ,- []) ,- ())
   factorize (y ,- y' ,- ys) xss zss (_ ,- xnes) (_ ,- () ,- znes) ((.y ,- (y' ,- x)) ,- xj) ((.y ,- []) ,- ([] ,- zj))
   
   factorize (y ,- y' ,- ys) ((.y ,- .y' ,- xs) ,- xss) ((.y ,- .y' ,- zs) ,- zss)
