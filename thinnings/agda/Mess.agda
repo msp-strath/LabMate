@@ -215,6 +215,10 @@ module _ {X : Set} where
     tab!! f (x ^- i) = tab!! ((x ^-_) - f) i
     tab!! f (x ,- i) = R~ ((x ,-_) - f) ~$~ noes
 
+    allCat : forall {xs ys zs} -> [ xs ++ ys ]~ zs -> All P xs -> All P ys -> All P zs
+    allCat [] [] yp = yp
+    allCat (x ,- v) (p ,- xp) yp = p ,- allCat v xp yp
+
 module _ {X : Set} where
 
   join++ : {xs0 xs1 xs : List X} {xss0 xss1 : List (List X)}
@@ -303,6 +307,69 @@ module _ {X : Set} where
 
   factorize :
        (ys : List X)
+       (xss zss : List (List X))  -- xss on top of zss
+    -> xss -Join ys -> zss -Join ys
+    -> All NE zss
+    -> List (List (List X)) >< \ xsss
+    -> List (List (List X)) >< \ zsss
+    -> All NE xsss
+     * xsss -Join xss
+     * zsss -Join zss
+     * ListR (\ xss zss ->
+           List X >< \ ys ->
+           (xss -Join ys) >< \ xj ->
+           (zss -Join ys) >< \ zj ->
+           NoAlign xj zj)
+         xsss
+         zsss
+
+  factorize ys xss zss ([] ,- xj) zj znes
+    with xsss , zsss , xness , xk , zk , na <- factorize _ _ _ xj zj znes
+    = [ [] ] ,- xsss , [] ,- zsss , <> ,- xness , ((_ ,- []) ,- xk) , ([] ,- zk)
+    , ((_ , ([] ,- []) , [] , <>) ,- na)
+  
+  factorize (y ,- ys) ((y ,- []) ,- xss) ((y ,- []) ,- zss)
+    ((y ,- []) ,- xj) ((.y ,- []) ,- zj) (<> ,- znes)
+    with xsss , zsss , xness , xk , zk , na <- factorize _ _ _ xj zj znes
+    = ([ [ y ] ] ,- xsss) , ([ [ y ] ] ,- zsss) , (<> ,- xness)
+    , (([ y ] ,- []) ,- xk) , ((([ y ] ,- []) ,- zk)
+    , ((_ , (y ,- []) ,- [] , ((y ,- []) ,- []) , <>) ,- na))
+
+
+  -- HMMMM draw some pictures
+  factorize (y ,- y' ,- ys) ((y ,- []) ,- xss) ((y ,- y' ,- zs) ,- zss)
+    ((y ,- []) ,- xj) ((.y ,- y' ,- z) ,- zj) (<> ,- znes)
+    with factorize _ _ _ xj ((y' ,- z) ,- zj) (<> ,- znes)
+  ... | xss' ,- xsss , zss' ,- zsss , (() ,- xness)
+      , xk , ([] ,- zk) , ((a , [] , [] , d) ,- nas)
+  ... | ([] ,- xss') ,- xsss , [] ,- zsss , (<> ,- xness)
+      , (([] ,- x') ,- xk) , ([] ,- zk) , (([] , ([] ,- b) , [] , <>) ,- nas)
+      = ? -- HIDING TO NOTHING?
+  ... | xss' ,- xsss , zss' ,- zsss , xness , xk , ((.(y' ,- zs) ,- z') ,- zk) , (na ,- nas) = {!!}
+  
+  factorize (y ,- y' ,- ys) ((y ,- xs) ,- xss) ((y ,- zs) ,- zss) ((y ,- y' ,- x) ,- xj) ((.y ,- z) ,- zj) (<> ,- znes) = {!!}
+
+  factorize ys xss zss [] ([] ,- zj) (() ,- znes)
+
+  factorize [] [] [] [] [] [] = [] , [] , [] , [] , [] , []
+
+
+{-
+  factorize (y ,- ys) xss zss xj zj znes = {!!}
+
+  factorize [] xss zss xj ([] ,- zj) (() ,- znes)
+  
+  factorize [] ([] ,- xss) [] ([] ,- xj) [] []
+    with xsss , zsss , xness , xk , zk , na <- factorize [] xss [] xj [] []
+    = [ [] ] ,- xsss , [] ,- zsss , <> ,- xness , ((_ ,- []) ,- xk) , ([] ,- zk)
+    , ((_ , ([] ,- []) , [] , <>) ,- na)
+
+  factorize [] [] [] [] [] [] = [] , [] , [] , [] , [] , []
+-}
+
+{-
+  factorize :
+       (ys : List X)
        (xss zss : List (List X))
     -> All NE xss -> All NE zss
     -> xss -Join ys -> zss -Join ys
@@ -362,7 +429,7 @@ module _ {X : Set} where
   factorize ys xss zss xnes (() ,- znes) xj ([] ,- zj)
   factorize ys xss zss (() ,- xnes) znes ([] ,- xj) zj
 
-
+-}
 
 Nat = List One
 pattern ze = []
@@ -457,7 +524,7 @@ module _ {l v : Nat}(x : List (List (Chunk l v) * List (Chunk l v))) where
          -> `Thin cs ds
     `id : forall {cs} -> `Thin cs cs
     _`-<_ : forall {cs ds es} -> `Thin cs ds -> `Thin ds es -> `Thin cs es
-    `# : forall {cs ds} -> ((cs , ds) ,- []) <= x -> `Thin cs ds
+    `# : forall {c cs d ds} -> (((c ,- cs) , (d ,- ds)) ,- []) <= x -> `Thin (c ,- cs) (d ,- ds)
 
 module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))}
   {X : Set}(rh : All (kk X) l)(sg : All (kk (List X)) v)
@@ -486,7 +553,7 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
   data `ThinPrime : List (Chunk l v) -> List (Chunk l v) -> Set where
     `drop : (c : Chunk l v) -> `ThinPrime       []  (c ,- [])
     `keep : (c : Chunk l v) -> `ThinPrime (c ,- []) (c ,- [])
-    `# : forall {c cs ds} -> ((c ,- cs , ds) ,- []) <= x -> `ThinPrime (c ,- cs) ds
+    `# : forall {c cs d ds} -> ((c ,- cs , d ,- ds) ,- []) <= x -> `ThinPrime (c ,- cs) (d ,- ds)
 
 
 
@@ -497,6 +564,7 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
       weeJoin : wees -Join wee
       primes  : ListR `ThinPrime wees bigs
       bigJoin : bigs -Join big
+      bigNE   : All NE bigs
 
   open `ThinNorm public
 
@@ -505,47 +573,63 @@ module _ {l v : Nat}{x : List (List (Chunk l v) * List (Chunk l v))} where
           (nils : ListR (kk ([] ~_)) ds wees)
           {bigs : List (List (Chunk l v))}
           (sings : ListR (\ x -> [ x ] ~_) ds bigs) ->
-          ListR `ThinPrime wees bigs
-  allDrop [] [] = []
-  allDrop (r~ ,- nils) (r~ ,- sings) = (`drop _) ,- allDrop nils sings
+          ListR `ThinPrime wees bigs * All NE bigs
+  allDrop [] [] = [] , []
+  allDrop (r~ ,- nils) (r~ ,- sings)
+    with ps , nes <-  allDrop nils sings
+    = (`drop _ ,- ps) , (<> ,- nes)
   
   allKeep : {cs : List (Chunk l v)}
           {css : List (List (Chunk l v))}
           (sings : ListR (\ x -> _~_ [ x ]) cs css)
           (j : css -Join cs) ->
-          ListR `ThinPrime css css
-  allKeep [] [] = []
-  allKeep (r~ ,- sings) ((_ ,- []) ,- j) = `keep _ ,- allKeep sings j
+          ListR `ThinPrime css css * All NE css
+  allKeep [] [] = [] , []
+  allKeep (r~ ,- sings) ((_ ,- []) ,- j)
+    with ps , nes <- allKeep sings j = (`keep _ ,- ps) , (<> ,- nes)
 {-
   thinNorm : {cs ds : List (Chunk l v)} -> `Thin x cs ds -> `ThinNorm cs ds
   thinNorm {[]} {ds} _
     with _ , nils  <- listR (kk (_ , r~)) ds
-    with _ , sings <- listR (\ _ -> _ , r~) ds = record
+    with _ , sings <- listR (\ _ -> _ , r~) ds
+    with ps , nes <- allDrop nils sings = record
      { weeJoin = all[] nils
-     ; primes = allDrop nils sings
+     ; primes = ps
      ; bigJoin = allSing sings
+     ; bigNE = nes
      }
   thinNorm {c ,- cs} (th0 `+[ cq < dq ]+ th1)
-    with mkThinNorm weeJoin0 primes0 bigJoin0 <- thinNorm th0
-    with mkThinNorm weeJoin1 primes1 bigJoin1 <- thinNorm th1
+    with mkThinNorm weeJoin0 primes0 bigJoin0 bigNE0 <- thinNorm th0
+    with mkThinNorm weeJoin1 primes1 bigJoin1 bigNE1 <- thinNorm th1
     with _ , cw , weeJoin <- join++ weeJoin0 weeJoin1 cq
     with _ , dw , bigJoin <- join++ bigJoin0 bigJoin1 dq
     =
-      mkThinNorm weeJoin (listR++ cw primes0 primes1 dw) bigJoin
+      mkThinNorm weeJoin (listR++ cw primes0 primes1 dw) bigJoin (allCat dw bigNE0 bigNE1)
   thinNorm {c ,- cs} `id
     with _ , sings <- listR (\ _ -> _ , r~) (c ,- cs)
     with j <- allSing sings
-    = mkThinNorm j (allKeep sings j) j
+    with ps , nes <- allKeep sings j
+    = mkThinNorm j ps j nes
   thinNorm {c ,- cs} (`# x) = record
      { weeJoin = cat[] ,- []
      ; primes = `# x ,- []
      ; bigJoin = cat[] ,- []
+     ; bigNE = <> ,- []
      }
   thinNorm {c ,- cs} (th0 `-< th1)
-    with mkThinNorm weeJoin0 primes0 bigJoin0 <- thinNorm th0
-    with mkThinNorm weeJoin1 primes1 bigJoin1 <- thinNorm th1
-    = {!!}
+    with mkThinNorm weeJoin0 primes0 bigJoin0 bigNE0 <- thinNorm th0
+    with mkThinNorm weeJoin1 primes1 bigJoin1 bigNE1 <- thinNorm th1
+    = {!factorize _ _ _ ? ? bigJoin0 weeJoin1!}
 -}
+{-
+/-----\/\/\/------\
+[.....][][][..][..]
+[..][.]    [......]
+\-----/\/\/\------/
+-}
+
+
+
     {-
     PLAN:
 
