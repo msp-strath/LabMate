@@ -292,18 +292,29 @@ module _ {X : Set} where
 Nellist : Set -> Set
 Nellist X = List X >< NE
 
+data AlignState : Set where left/left mid/mid mid/right : AlignState
+
 module _ {X : Set} where
 
   NoAlign : {ys : List X}
             {xss zss : List (List X)}
+         -> AlignState
          -> xss -Join ys
          -> zss -Join ys
          -> Set
-  NoAlign {[]} xj zj = One
-  NoAlign {y ,- ys} ([] ,- xj) ([] ,- zj) = Zero
-  NoAlign {y ,- ys} ((.y ,- x) ,- xj) ((.y ,- z) ,- zj) = NoAlign (x ,- xj) (z ,- zj)
-  NoAlign {y ,- ys} ([] ,- xj) yzzj@((.y ,- z) ,- zj) = NoAlign xj yzzj
-  NoAlign {y ,- ys} yxxj@((.y ,- x) ,- xj) ([] ,- zj) = NoAlign yxxj zj
+  -- HACK THIS HARD FOR LAZINESS
+  NoAlign st ((.y ,- x) ,- xj) ((y ,- z) ,- zj) =
+    NoAlign mid/mid (x ,- xj) (z ,- zj)
+  NoAlign mid/mid xj [] = Zero
+  NoAlign left/left [] [] = Zero
+  NoAlign left/left ([] ,- xj) [] = NoAlign mid/right xj []
+  NoAlign mid/right [] [] = One
+  NoAlign mid/right (x ,- xj) [] = Zero
+  NoAlign st xj ([] ,- zj) = NoAlign mid/right xj zj
+  NoAlign mid/mid ([] ,- xj) ((y ,- z) ,- zj) =
+    NoAlign mid/mid xj ((y ,- z) ,- zj)
+  NoAlign left/left ([] ,- xj) ((y ,- z) ,- zj) = Zero
+  NoAlign mid/right ([] ,- xj) ((y ,- z) ,- zj) = Zero
 
   factorize :
        (ys : List X)
@@ -319,10 +330,11 @@ module _ {X : Set} where
            List X >< \ ys ->
            (xss -Join ys) >< \ xj ->
            (zss -Join ys) >< \ zj ->
-           NoAlign xj zj)
+           NoAlign left/left xj zj)
          xsss
          zsss
-
+  factorize ys xss zss xj zj znes = {!!}
+{-
   factorize ys xss zss ([] ,- xj) zj znes
     with xsss , zsss , xness , xk , zk , na <- factorize _ _ _ xj zj znes
     = [ [] ] ,- xsss , [] ,- zsss , <> ,- xness , ((_ ,- []) ,- xk) , ([] ,- zk)
@@ -344,7 +356,7 @@ module _ {X : Set} where
       , xk , ([] ,- zk) , ((a , [] , [] , d) ,- nas)
   ... | ([] ,- xss') ,- xsss , [] ,- zsss , (<> ,- xness)
       , (([] ,- x') ,- xk) , ([] ,- zk) , (([] , ([] ,- b) , [] , <>) ,- nas)
-      = ? -- HIDING TO NOTHING?
+      = {!!} -- HIDING TO NOTHING?
   ... | xss' ,- xsss , zss' ,- zsss , xness , xk , ((.(y' ,- zs) ,- z') ,- zk) , (na ,- nas) = {!!}
   
   factorize (y ,- y' ,- ys) ((y ,- xs) ,- xss) ((y ,- zs) ,- zss) ((y ,- y' ,- x) ,- xj) ((.y ,- z) ,- zj) (<> ,- znes) = {!!}
@@ -352,7 +364,7 @@ module _ {X : Set} where
   factorize ys xss zss [] ([] ,- zj) (() ,- znes)
 
   factorize [] [] [] [] [] [] = [] , [] , [] , [] , [] , []
-
+-}
 
 {-
   factorize (y ,- ys) xss zss xj zj znes = {!!}
